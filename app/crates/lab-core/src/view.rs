@@ -52,7 +52,8 @@ pub struct GameView {
     pub scenario: Scenario,
     /// The game has its own scenario rather than the standard one.
     pub own_scenario: bool,
-    /// The file its scenario is kept in, relative to `lab.json`; `None` when it is written in `lab.json` or standard.
+    /// The file its scenario is kept in, relative to the work folder; `None` when it is written in `lab.json` or
+    /// standard.
     pub scenario_file: Option<String>,
     /// Words to find and group the game by.
     pub tags: Vec<String>,

@@ -30,7 +30,7 @@ ab: string | null,
  */
 clean: boolean | null, 
 /**
- * The scenario every game runs instead of its own: `standard` or a file relative to `lab.json`.
+ * The scenario every game runs instead of its own: `standard` or a file relative to the work folder.
  */
 scenario: string | null, 
 /**

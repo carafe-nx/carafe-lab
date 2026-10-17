@@ -95,7 +95,7 @@ pub enum Step {
     ExpectScreen {
         /// Name of the picture, unique in the scenario.
         name: String,
-        /// The reference picture, a path in the `references` folder next to `lab.json`, such as `openttd/menu.png`.
+        /// The reference picture, a path in `<work>/references`, such as `openttd/menu.png`.
         reference: String,
         /// The mean brightness difference, 0–255, the two pictures may have.
         #[serde(default = "default_tolerance")]
@@ -123,7 +123,7 @@ pub enum Step {
     /// not; neither branch fails the step.
     #[serde(rename_all = "camelCase")]
     IfScreen {
-        /// The reference picture, a path in the `references` folder next to `lab.json`.
+        /// The reference picture, a path in `<work>/references`.
         reference: String,
         /// The mean brightness difference, 0–255, the screen may have from the reference.
         #[serde(default = "default_tolerance")]

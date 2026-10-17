@@ -166,7 +166,7 @@ pub struct Game {
     pub settings: AutorunSettings,
     /// Its own scenario; `None` means [`Scenario::standard`].
     pub scenario: Option<Scenario>,
-    /// The file the scenario was read from, relative to `lab.json`; `None` when it is written in `lab.json` or the
+    /// The file the scenario was read from, relative to the work folder; `None` when it is written in `lab.json` or the
     /// game has none.
     pub scenario_file: Option<String>,
     /// Words to find and group the game by, such as `dx9` or `slow-start`.
@@ -175,6 +175,17 @@ pub struct Game {
     pub notes: Option<String>,
     /// The percentage the game may get slower by against the last Carafe version before it fails.
     pub threshold: u32,
+}
+
+/// Returns the folder the scenario files of the lab file `text` are named relative to: its work folder, taken
+/// relative to the lab file's folder `lab_dir` when it is not absolute, so a developer's scenarios stay out of the
+/// repository; `lab_dir` itself when the text names no work folder.
+#[must_use]
+pub fn scenario_base(text: &str, lab_dir: &Path) -> PathBuf {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| value.get("work")?.as_str().map(PathBuf::from))
+        .map_or_else(|| lab_dir.to_path_buf(), |work| lab_dir.join(work))
 }
 
 impl Config {
@@ -196,7 +207,7 @@ impl Config {
                 ));
             }
         };
-        let base = path.parent().unwrap_or_else(|| Path::new("."));
+        let base = scenario_base(&text, path.parent().unwrap_or_else(|| Path::new(".")));
         Self::parse_with(&text, |file| {
             fs::read_to_string(base.join(file)).map_err(|error| error.to_string())
         })
@@ -750,6 +761,20 @@ mod tests {
         Config::parse(&format!(
             r#"{{"work": "D:\\Bench", "games": [{games}], "sets": {{{sets}}}}}"#
         ))
+    }
+
+    #[test]
+    fn scenario_files_are_found_in_the_work_folder() {
+        let lab = Path::new("D:\\Lab");
+        assert_eq!(
+            scenario_base(r#"{"work": "E:\\Work"}"#, lab),
+            PathBuf::from("E:\\Work")
+        );
+        assert_eq!(
+            scenario_base(r#"{"work": "build/work"}"#, lab),
+            lab.join("build/work")
+        );
+        assert_eq!(scenario_base("{}", lab), lab.to_path_buf());
     }
 
     #[test]

@@ -56,7 +56,7 @@ Options:
   --diag <a,b,…>      run with these diagnostics: verbose (runtime traces with Wine's output), profiler, hud (DXVK's
                       full HUD), stacks (thread stacks of a hung game in backtraces.txt), eden-debug (Eden's log at
                       the debug level); a retry after a failure picks its own
-  --scenario <s>      every game runs this scenario: standard, or a file relative to lab.json
+  --scenario <s>      every game runs this scenario: standard, or a file in the work folder
   --like <run>        run the games of this past run again with the runtime and Eden image it ran with;
                       every run keeps them from now on
   --nsp <file>        run: a ready NSP made by Carafe instead of the games of lab.json, as it is, with the
@@ -194,7 +194,7 @@ pub struct Args {
     pub nsp: Vec<PathBuf>,
     /// `--rebuild`.
     pub rebuild: bool,
-    /// `--scenario`: `standard` or a scenario file relative to `lab.json`.
+    /// `--scenario`: `standard` or a scenario file relative to the work folder.
     pub scenario: Option<String>,
     /// `--video`.
     pub video: Video,

@@ -194,7 +194,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
     let scenario = args
         .scenario
         .as_deref()
-        .map(|choice| plan_scenario(choice, &config_path, timeout))
+        .map(|choice| plan_scenario(choice, &config.work, timeout))
         .transpose()?;
     let alternate = args
         .ab_runtime
@@ -209,10 +209,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
             (packer, file, label)
         });
     let lab = Lab {
-        references: config_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(REFERENCES_DIR),
+        references: config.work.join(REFERENCES_DIR),
         alternate,
         work: config.work.clone(),
         gpu,
@@ -1440,14 +1437,11 @@ fn print_step(step: &StepResult) {
     );
 }
 
-fn plan_scenario(choice: &str, config_path: &Path, timeout: u32) -> Result<Scenario, String> {
+fn plan_scenario(choice: &str, work: &Path, timeout: u32) -> Result<Scenario, String> {
     if choice == "standard" {
         return Ok(Scenario::standard(timeout));
     }
-    let file = config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(choice);
+    let file = work.join(choice);
     let text = fs::read_to_string(&file).map_err(|error| format!("{choice}: {error}"))?;
     let scenario = Scenario::parse(&text).map_err(|error| format!("{choice}: {error}"))?;
     scenario

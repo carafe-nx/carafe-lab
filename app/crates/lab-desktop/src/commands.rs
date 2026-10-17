@@ -237,7 +237,7 @@ pub struct RunRequest {
     pub ab: Option<String>,
     /// A new Eden for every launch instead of one for the whole run.
     pub clean: Option<bool>,
-    /// The scenario every game runs instead of its own: `standard` or a file relative to `lab.json`.
+    /// The scenario every game runs instead of its own: `standard` or a file relative to the work folder.
     pub scenario: Option<String>,
     /// The live video: `full`, `low` or `off`; `None` means full.
     pub video: Option<String>,
@@ -487,7 +487,7 @@ pub async fn start_run(
 ///
 /// # Returns
 ///
-/// The scenario file, relative to `lab.json`.
+/// The scenario file, relative to the work folder.
 ///
 /// # Errors
 ///
@@ -512,7 +512,7 @@ pub async fn save_scenario(
             .scenario_file
             .clone()
             .unwrap_or_else(|| config::scenario_file_for(&known.name));
-        let path = lab.repository().join(&file);
+        let path = lab.repository().join(&config.work).join(&file);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
@@ -521,7 +521,7 @@ pub async fn save_scenario(
         if known.scenario_file.is_none() {
             let config_path = lab.config_path();
             let lab_text = fs::read_to_string(&config_path).map_err(|error| error.to_string())?;
-            let base = lab.repository().to_path_buf();
+            let base = config::scenario_base(&lab_text, lab.repository());
             let updated = config::set_scenario_file(&lab_text, &known.name, &file, |name| {
                 fs::read_to_string(base.join(name)).map_err(|error| error.to_string())
             })
@@ -578,7 +578,7 @@ pub async fn save_game_notes(
     blocking(move || {
         let config_path = lab.config_path();
         let text = fs::read_to_string(&config_path).map_err(|error| error.to_string())?;
-        let base = lab.repository().to_path_buf();
+        let base = config::scenario_base(&text, lab.repository());
         let updated = config::set_game_notes(&text, &game, &tags, &notes, |name| {
             fs::read_to_string(base.join(name)).map_err(|error| error.to_string())
         })
@@ -648,8 +648,8 @@ pub async fn run_screenshots(
     .await
 }
 
-/// Copies the screenshot `shot` of the game in the folder `game` of the run `dir` into the `references` folder next to
-/// `lab.json`, as `<game>/<shot>.png`, for the scenarios' `expectScreen` steps.
+/// Copies the screenshot `shot` of the game in the folder `game` of the run `dir` into the work folder's `references`,
+/// as `<game>/<shot>.png`, for the scenarios' `expectScreen` steps.
 ///
 /// # Returns
 ///
@@ -672,10 +672,10 @@ pub async fn make_reference(
         }
         let source = run_dir(&lab, &dir)?.join(&game).join(format!("{shot}.png"));
         let folder = lab
-            .config_path()
-            .parent()
-            .map(|parent| parent.join("references").join(&game))
-            .ok_or_else(|| CommandError::from("lab.json has no folder"))?;
+            .repository()
+            .join(lab.config()?.work)
+            .join("references")
+            .join(&game);
         fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
         fs::copy(&source, folder.join(format!("{shot}.png"))).map_err(|error| error.to_string())?;
         Ok(format!("{game}/{shot}.png"))
@@ -712,7 +712,7 @@ pub async fn add_game(lab: State<'_, Arc<Lab>>, folder: String) -> Result<String
             .collect();
         let folder = PathBuf::from(folder);
         let name = config::game_name_for(&folder, &taken);
-        let base = lab.repository().to_path_buf();
+        let base = config::scenario_base(&text, lab.repository());
         let updated = config::add_game(&text, &name, &folder, |file| {
             fs::read_to_string(base.join(file)).map_err(|error| error.to_string())
         })

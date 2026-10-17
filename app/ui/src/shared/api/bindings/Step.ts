@@ -60,7 +60,7 @@ threshold?: number, } | { "step": "expectScreen",
  */
 name: string, 
 /**
- * The reference picture, a path in the `references` folder next to `lab.json`, such as `openttd/menu.png`.
+ * The reference picture, a path in `<work>/references`, such as `openttd/menu.png`.
  */
 reference: string, 
 /**
@@ -84,7 +84,7 @@ times: number,
  */
 steps: Array<Step>, } | { "step": "ifScreen", 
 /**
- * The reference picture, a path in the `references` folder next to `lab.json`.
+ * The reference picture, a path in `<work>/references`.
  */
 reference: string, 
 /**

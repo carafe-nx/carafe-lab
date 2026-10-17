@@ -44,7 +44,8 @@ scenario: Scenario,
  */
 ownScenario: boolean, 
 /**
- * The file its scenario is kept in, relative to `lab.json`; `None` when it is written in `lab.json` or standard.
+ * The file its scenario is kept in, relative to the work folder; `None` when it is written in `lab.json` or
+ * standard.
  */
 scenarioFile: string | null, 
 /**

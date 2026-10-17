@@ -85,8 +85,9 @@ build wizard would take it: the largest game `.exe`, its product name, default s
 }
 ```
 
-`scenario` is a file relative to `lab.json` or the steps themselves: `{ "steps": [ … ] }`. Scenario files, like
-`lab.json`, are your own: git ignores `scenarios/`. `sets` names lists of
+`scenario` is a file relative to the work folder or the steps themselves: `{ "steps": [ … ] }`. Scenario files are
+your own, like the runs, so they live in the work folder, outside the repository; the Scenarios screen saves them to
+`<work>/scenarios/`. `sets` names lists of
 games; `run <set>` runs a set's games even when they are disabled. `settings` is merged over the defaults in the shape
 of `carafe.json`'s `settings`. A game always gets the same
 Title ID from its folder name, so its data in the emulator is found again; its save data is removed before each run.
@@ -117,10 +118,9 @@ save data is still there, close it.
   `threshold` in `lab.json` (20 by default). Passes with a note when there is no other commit to compare with. The
   standard scenario has it after the first close.
 - `expectScreen` — `name`, `reference`, `tolerance`: takes the screenshot `name` and compares it with the reference
-  picture `reference`, a path in the `references` folder next to `lab.json`, by the mean brightness difference of
-  64×36 cells; more than `tolerance` (12 by default, of 255) fails. Without the reference picture yet it warns. A
-  screenshot in History becomes a reference with "Make it a reference"; git ignores `references/`, as game pictures
-  stay out of the repository.
+  picture `reference`, a path in `<work>/references/`, by the mean brightness difference of 64×36 cells; more than
+  `tolerance` (12 by default, of 255) fails. Without the reference picture yet it warns. A screenshot in History
+  becomes a reference with "Make it a reference"; game pictures stay in the work folder, outside the repository.
 - `randomPresses` — `seconds`, `seed`: presses random buttons for that long, each held 50–500 ms with 0.1–1 s
   between; fails when the game crashes or ends. The same seed presses the same buttons again.
 - `repeat` — `times`, `steps`: runs the steps that many times; screenshots taken inside get `-1`, `-2`… after
@@ -180,8 +180,8 @@ emulator.
 
 - `run --games A,B` runs these games in this order, whatever sets and `enabled` say; `--repeat <n>` runs each of them
   n times in a row. A game that fails only sometimes shows its rate in the window's library ("failed 2 of 10").
-- `--scenario standard` or `--scenario scenarios/<file>.json` runs every game of the plan with that scenario instead
-  of its own; the Plans screen has the same choice.
+- `--scenario standard` or `--scenario scenarios/<file>.json`, a file in the work folder, runs every game of the plan
+  with that scenario instead of its own; the Plans screen has the same choice.
 - Every run keeps what it ran with: the runtime archive as `<work>/runtimes/<hash>.bin`, once for each hash, and the
   Eden image under the tag `carafe-lab-eden-kept:<id>`. `run --like <run folder>`, or History's "Repeat exactly",
   runs that run's games again with them instead of the current ones; the games' settings come from `lab.json`.
