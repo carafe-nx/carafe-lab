@@ -1,6 +1,7 @@
 //! Milestones of one launch, read from the overlay and runtime logs.
 
 use serde::Serialize;
+use ts_rs::TS;
 
 const OVERLAY_PREFIX: &str = "[carafe-overlay] ";
 const CARAFE_PREFIX: &str = "[CARAFE] ";
@@ -78,8 +79,9 @@ pub enum Exit {
 }
 
 /// The furthest point a launch reached, in start-up order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum Stage {
     /// No log line from the overlay: the loader or the runtime did not start.
     NotStarted,

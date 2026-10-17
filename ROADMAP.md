@@ -17,7 +17,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` Button presses through the control channel instead of xdotool
 - [ ] `feature` Watchdog: a hang during a game (not only at close) restarts Eden; "clean start" switch
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
-- [ ] `feature` Loader: start-up stages on the Run screen, a fix for each failing stage
 - [ ] `feature` Library: tags, notes, link to a ROADMAP item
 - [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
 - [ ] `feature` Run screen: lit buttons on the Switch frame, milestones, FPS
@@ -101,6 +100,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Loader: each launch's start-up stages live on the Run screen, and what to look at when a launch stops at one
 - [x] `feature` Scenario editor in the window: every step with its settings, reorder, add, remove; saved to the game's file in `scenarios/`
 - [x] `feature` Two runs compared side by side: outcomes, times, what differs in their stamps, screenshots of the same steps
 - [x] `feature` Games that fail only sometimes get a rate in the library ("failed 2 of 10"), build-only runs left out

@@ -240,6 +240,8 @@ pub struct Runner<'a> {
     input: InputSettings,
     stop: Option<CancelToken>,
     pressed: Vec<SwitchButton>,
+    stage: Stage,
+    on_stage: Option<Box<dyn FnMut(Stage) + 'a>>,
 }
 
 impl<'a> Runner<'a> {
@@ -267,7 +269,16 @@ impl<'a> Runner<'a> {
             input: InputSettings::default(),
             pressed: Vec::new(),
             stop: None,
+            stage: Stage::NotStarted,
+            on_stage: None,
         }
+    }
+
+    /// Returns the runner telling `on_stage` every start-up stage a launch reaches while a step waits for it.
+    #[must_use]
+    pub fn with_stages(mut self, on_stage: impl FnMut(Stage) + 'a) -> Self {
+        self.on_stage = Some(Box::new(on_stage));
+        self
     }
 
     /// Sets the input settings the game was built with; [`Step::ExpectInput`] checks against them.
@@ -495,6 +506,7 @@ impl<'a> Runner<'a> {
             let _ = self.emulator.close(Duration::from_secs(10));
             self.running = false;
         }
+        self.stage = Stage::NotStarted;
         self.finish_launch();
         let number = self.launches.len() + 1;
         if number == 1
@@ -533,6 +545,12 @@ impl<'a> Runner<'a> {
                 return self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None);
             }
             let launch = self.current_launch();
+            if launch.stage() > self.stage {
+                self.stage = launch.stage();
+                if let Some(on_stage) = self.on_stage.as_mut() {
+                    on_stage(self.stage);
+                }
+            }
             let reached = match milestone {
                 Milestone::Wine => launch.stage() >= Stage::Wine,
                 Milestone::LoadingScreen => launch.stage() >= Stage::LoadingScreen,

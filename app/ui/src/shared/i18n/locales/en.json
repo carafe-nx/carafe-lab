@@ -182,7 +182,21 @@
     "dockerRunning": "running",
     "dockerFix": "Start Docker Desktop",
     "image": "Emulator image",
-    "imageFix": "docker compose --profile build build eden"
+    "imageFix": "docker compose --profile build build eden",
+    "launch": {
+      "notStarted": "not started",
+      "overlay": "Carafe started",
+      "wine": "Wine ready",
+      "loadingScreen": "loading screen",
+      "firstFrame": "first frame"
+    },
+    "stuck": {
+      "notStarted": "Carafe's loader did not start: check that the runtime is built and read Eden's log in the run folder",
+      "overlay": "Carafe started but Wine did not: read autorun_runtime.log in the launch folder",
+      "wine": "Wine is ready but the game showed no loading screen: it most likely crashed at start; read the runtime log",
+      "loadingScreen": "The game is stuck on the loading screen: a known rare start-up hang; run it with repeats to learn how often",
+      "firstFrame": "The first frame came but the step failed: read the step's details"
+    }
   },
   "log": {
     "waiting": "waiting for the emulator: {{holder}} holds it, {{ahead}} ahead",
@@ -193,6 +207,7 @@
     "built": "NSP {{titleId}} built in {{seconds}} s",
     "buildFailed": "build failed: {{error}}",
     "launch": "the game launches",
+    "reached": "stage: {{stage}}",
     "gameFinished": "{{name}}: {{outcome}}",
     "stopped": "stopped, {{left}} left out",
     "runFinished": "done: {{passed}} passed, {{warned}} with warnings, {{console}} on the console, {{failed}} failed"

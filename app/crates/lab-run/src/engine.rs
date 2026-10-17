@@ -1,6 +1,7 @@
 //! A whole run: builds every planned game with Carafe's packer, runs its scenario in the emulator, writes
 //! `report.json` and `report.html` after every game and tells the front end what happens as [`Event`]s.
 
+use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use carafe_core::cancel::CancelToken;
 use carafe_core::ports::{BuildProgress, PackTarget, Packer};
 use carafe_core::wizard::{self, BuildRequest};
 use lab_core::lang::Lang;
+use lab_core::milestones::Stage;
 use lab_core::redact::redact;
 use lab_core::scenario::Scenario;
 use serde::Serialize;
@@ -90,6 +92,11 @@ pub enum Event {
     LaunchLogs {
         /// The folder the emulator writes the game's logs to.
         dir: String,
+    },
+    /// The launch reached a new start-up stage while a step waited for it.
+    Reached {
+        /// The stage.
+        stage: Stage,
     },
     /// A step of the scenario ended.
     Step {
@@ -291,11 +298,13 @@ impl Engine<'_> {
             });
         }
         let nsp = nsp_dir.join(format!("{}.nsp", record.title_id));
+        let shared = RefCell::new(on_event);
         let runner = Runner::new(&mut *self.emulator, clock, record.title_id, nsp, &game_dir)
             .with_input(record.settings.input.clone())
-            .with_stop(self.stop.clone());
+            .with_stop(self.stop.clone())
+            .with_stages(|stage| (shared.borrow_mut())(&Event::Reached { stage }));
         let result = runner.run(&game.scenario, |step| {
-            on_event(&Event::Step { step: step.clone() });
+            (shared.borrow_mut())(&Event::Step { step: step.clone() });
         });
         entry.log_excerpt = excerpt(&game_dir, &result.launches);
         entry.scenario = Some(result);

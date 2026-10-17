@@ -623,6 +623,7 @@ fn print_event(event: &Event, total: usize) {
         }
         Event::BuildFailed { error } => println!("  build failed: {error}"),
         Event::Step { step } => print_step(step),
+        Event::Reached { stage } => println!("  reached: {}", lab_run::run::stage_name(*stage)),
         Event::Stopped { left } => println!("stopped from the live page; {left} games left out"),
         Event::RunFinished { report, .. } => println!("report: {report}"),
         Event::RunStarted { .. } | Event::LaunchLogs { .. } | Event::GameFinished { .. } => {}

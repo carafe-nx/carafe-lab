@@ -200,7 +200,21 @@
     "dockerRunning": "запущен",
     "dockerFix": "Запустите Docker Desktop",
     "image": "Образ эмулятора",
-    "imageFix": "docker compose --profile build build eden"
+    "imageFix": "docker compose --profile build build eden",
+    "launch": {
+      "notStarted": "не началась",
+      "overlay": "Carafe запустился",
+      "wine": "Wine готов",
+      "loadingScreen": "экран загрузки",
+      "firstFrame": "первый кадр"
+    },
+    "stuck": {
+      "notStarted": "Загрузчик Carafe не запустился: проверьте, что рантайм собран, и посмотрите журнал Eden в папке прогона",
+      "overlay": "Carafe запустился, но Wine не поднялся: смотрите autorun_runtime.log в папке запуска",
+      "wine": "Wine готов, но игра не показала экран загрузки: скорее всего, она упала на старте — смотрите журнал рантайма",
+      "loadingScreen": "Игра застряла на экране загрузки: известная редкая зависка при старте; повторите прогон с повторами, чтобы узнать частоту",
+      "firstFrame": "Первый кадр был, но шаг не прошёл: смотрите подробности шага"
+    }
   },
   "log": {
     "waiting": "ждёт эмулятор: держит {{holder}}, впереди {{ahead}}",
@@ -211,6 +225,7 @@
     "built": "NSP {{titleId}} собран за {{seconds}} с",
     "buildFailed": "сборка не удалась: {{error}}",
     "launch": "игра запускается",
+    "reached": "этап: {{stage}}",
     "gameFinished": "{{name}}: {{outcome}}",
     "stopped": "остановлен, не дошли {{left}}",
     "runFinished": "конец: {{passed}} прошли, {{warned}} с замечаниями, {{console}} на консоли, {{failed}} не прошли"

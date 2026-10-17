@@ -7,6 +7,7 @@ import { StepLine } from "@/features/lab/StepLine";
 import { folderName, useRunEvents } from "@/features/lab/useRunEvents";
 import type { Event } from "@/shared/api/bindings/Event";
 import type { Outcome } from "@/shared/api/bindings/Outcome";
+import type { Stage } from "@/shared/api/bindings/Stage";
 import type { QueueEntry } from "@/shared/api/bindings/QueueEntry";
 import type { StepResult } from "@/shared/api/bindings/StepResult";
 import { api, errorText } from "@/shared/api/commands";
@@ -28,6 +29,7 @@ type Derived = {
   games: GameState[];
   steps: StepResult[];
   stage: string | null;
+  launchStage: Stage | null;
   finished: boolean;
 };
 
@@ -35,6 +37,7 @@ function derive(events: Event[], planned: string[]): Derived {
   const games: GameState[] = planned.map((name) => ({ name, outcome: null, current: false }));
   let steps: StepResult[] = [];
   let stage: string | null = null;
+  let launchStage: Stage | null = null;
   let finished = false;
   for (const event of events) {
     switch (event.event) {
@@ -60,6 +63,10 @@ function derive(events: Event[], planned: string[]): Derived {
         break;
       case "step":
         steps = [...steps, event.step];
+        if (event.step.step.step === "launch") launchStage = "notStarted";
+        break;
+      case "reached":
+        launchStage = event.stage;
         break;
       case "gameFinished": {
         const done = games.find((game) => game.name === event.name);
@@ -77,7 +84,24 @@ function derive(events: Event[], planned: string[]): Derived {
         break;
     }
   }
-  return { games, steps, stage, finished };
+  return { games, steps, stage, launchStage, finished };
+}
+
+const STAGES: Stage[] = ["overlay", "wine", "loadingScreen", "firstFrame"];
+
+function StageBar({ stage }: { stage: Stage }) {
+  const { t } = useTranslation();
+  const reached = STAGES.indexOf(stage);
+  return (
+    <ol className={run.stages}>
+      {STAGES.map((name, index) => (
+        <li key={name} className={index <= reached ? run.stageDone : index === reached + 1 ? run.stageNext : undefined}>
+          <i />
+          <span>{t(`stages.launch.${name}`)}</span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 export function RunPage() {
@@ -179,6 +203,10 @@ export function RunPage() {
           {holder && !liveDir ? (
             <Notice tone="info">{t("run.preparing")}</Notice>
           ) : null}
+          {derived.launchStage && live ? <StageBar stage={derived.launchStage} /> : null}
+          {derived.launchStage && derived.steps.some((step) => step.step.step === "waitFor" && step.outcome === "fail") ? (
+            <Notice tone="warning">{t(`stages.stuck.${derived.launchStage}`)}</Notice>
+          ) : null}
           {derived.stage ? <span className={styles.muted}>{t("run.build", { stage: t(`buildStages.${derived.stage}`, { defaultValue: derived.stage }) })}</span> : null}
           <ol className={styles.steps}>
             {derived.steps.map((result, index) => (
@@ -256,6 +284,8 @@ function describe(event: Event, t: (key: string, options?: Record<string, unknow
       return t("log.buildFailed", { error: event.error });
     case "launchLogs":
       return t("log.launch");
+    case "reached":
+      return t("log.reached", { stage: t(`stages.launch.${event.stage}`) });
     case "step":
       return `${Math.round(event.step.at)} s · ${t(`steps.${event.step.step.step}`)} · ${t(`outcome.${event.step.outcome}`)} · ${event.step.detail}`;
     case "gameFinished":
