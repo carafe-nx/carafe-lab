@@ -23,6 +23,7 @@ pub fn run() {
             commands::stop_run,
             commands::add_game,
             commands::run_screenshots,
+            commands::game_problems,
             commands::save_scenario,
             commands::save_game_notes,
             commands::choose_keys,

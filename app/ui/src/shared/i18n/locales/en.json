@@ -296,6 +296,15 @@
     "fpsLower": "B has {{percent}}% fewer frames per second",
     "fpsNoise": "The FPS difference is within the spread of the repeats"
   },
+  "problems": {
+    "show": "Errors in the logs",
+    "hide": "Hide the errors",
+    "newSince_one": "{{count}} new since run {{run}}, highlighted",
+    "newSince_other": "{{count}} new since run {{run}}, highlighted",
+    "noEarlier": "no earlier run of this game to compare with",
+    "more_one": "and {{count}} more",
+    "more_other": "and {{count}} more"
+  },
   "resources": {
     "summary": "memory up to {{memory}} GB · processor {{cpu}}% of one core",
     "problems": "in the logs: {{errors}} errors, {{warnings}} warnings"

@@ -139,7 +139,7 @@ Each run gets `<work>/runs/<date>/`:
   Eden's log of that launch only, `resources.log` (the container's memory without the file cache and its processor
   time, once a second) and `problems.json`: the error and warning lines of Eden, the runtime, Wine, DXVK and Mesa,
   lines that differ only in numbers counted as one. `summary.json` keeps the peak memory, the processor use and the
-  counts for the History screen.
+  counts for the History screen, which lists a game's problems and highlights those its run before did not have.
 
 Together they are the run's dataset: every press in `events.jsonl` has its buttons, hold and time, every screenshot
 step its file, time and outcome, and every check the pictures it compared and its verdict.

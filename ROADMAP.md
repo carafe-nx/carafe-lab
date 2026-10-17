@@ -23,7 +23,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` On a hang: backtraces of all the game's threads through the gdb stub before the watchdog stops it
 - [ ] `feature` On a crash: registers, stack and module map, without Eden's full crash dump
 - [ ] `feature` One timeline of all log sources with one clock
-- [ ] `feature` Error lines that the previous version did not have are highlighted
 - [ ] `feature` Full logs compressed for failures and recent runs; a summary for older passing runs
 - [ ] `feature` Diagnostics as named flags instead of temporary patches
 - [ ] `feature` `report.json` with milestones, step times, frame times and the reason for a failure
@@ -89,6 +88,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Error lines that the game's run before did not have are highlighted in History
 - [x] `feature` Tools for Claude, one call each: the running game's logs and milestones (`logs`)
 - [x] `feature` Every launch: Eden, runtime, Wine errors, DXVK and Mesa warnings; CPU and memory every second
 - [x] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { CommandError } from "./bindings/CommandError";
 import type { Event } from "./bindings/Event";
 import type { FirmwareState } from "./bindings/FirmwareState";
+import type { GameProblems } from "./bindings/GameProblems";
 import type { KeysState } from "./bindings/KeysState";
 import type { LabStatus } from "./bindings/LabStatus";
 import type { LabView } from "./bindings/LabView";
@@ -13,6 +14,7 @@ import type { Screen } from "./bindings/Screen";
 
 export const api = {
   getStatus: () => invoke<LabStatus>("get_status"),
+  gameProblems: (dir: string, game: string) => invoke<GameProblems>("game_problems", { dir, game }),
   getLab: () => invoke<LabView>("get_lab"),
   listRuns: () => invoke<RunSummary[]>("list_runs"),
   runEvents: (dir: string, from: number) => invoke<Event[]>("run_events", { dir, from }),

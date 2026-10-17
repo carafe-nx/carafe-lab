@@ -130,6 +130,40 @@ pub fn count(problems: &[Problem]) -> ProblemCounts {
         })
 }
 
+/// Returns `lists` as one list: problems that say the same have their counts added, in the order they first came.
+#[must_use]
+pub fn merge(lists: impl IntoIterator<Item = Vec<Problem>>) -> Vec<Problem> {
+    let mut merged: Vec<(String, Problem)> = Vec::new();
+    for problem in lists.into_iter().flatten() {
+        let key = key(&problem);
+        match merged.iter_mut().find(|(known, _)| *known == key) {
+            Some((_, known)) => known.count += problem.count,
+            None => merged.push((key, problem)),
+        }
+    }
+    merged.into_iter().map(|(_, problem)| problem).collect()
+}
+
+/// Returns the problems of `now` that `before` does not have, from the same source with the same severity and the
+/// same text once numbers are left out.
+#[must_use]
+pub fn new_since(now: &[Problem], before: &[Problem]) -> Vec<Problem> {
+    let known: Vec<String> = before.iter().map(key).collect();
+    now.iter()
+        .filter(|problem| !known.contains(&key(problem)))
+        .cloned()
+        .collect()
+}
+
+fn key(problem: &Problem) -> String {
+    format!(
+        "{}|{:?}|{}",
+        problem.source,
+        problem.severity,
+        shape(&problem.text)
+    )
+}
+
 fn strip_stamp(line: &str) -> &str {
     match line.strip_prefix('[').and_then(|rest| rest.split_once(']')) {
         Some((stamp, rest)) if stamp.trim().chars().all(|c| c.is_ascii_digit() || c == '.') => {
@@ -213,6 +247,24 @@ mod tests {
                 warnings: 1
             }
         );
+    }
+
+    #[test]
+    fn new_problems_are_the_ones_the_run_before_lacked() {
+        let first = problems(
+            "runtime",
+            "0024:err:module:load 0x1000\n0024:warn:seh:raise 7\n",
+        );
+        let second = problems(
+            "runtime",
+            "0031:err:module:load 0x2000\n0031:err:d3d:create failed\n",
+        );
+        let fresh = new_since(&second, &first);
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].text, "0031:err:d3d:create failed");
+        let merged = merge([first.clone(), second]);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].count, 2);
     }
 
     #[test]

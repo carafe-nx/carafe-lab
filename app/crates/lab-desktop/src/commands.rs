@@ -18,7 +18,7 @@ use lab_core::local::{self, KeysSource, LocalSettings};
 use lab_core::perf::{self, PerfSample};
 use lab_core::scenario::Scenario;
 use lab_core::view::LabView;
-use lab_run::history::{self, EVENTS_FILE, RunSummary};
+use lab_run::history::{self, EVENTS_FILE, GameProblems, RunSummary};
 use lab_run::queue::{QueueState, unix_now};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -332,6 +332,33 @@ pub async fn save_game_notes(
         .map_err(|error| error.to_string())?;
         fs::write(&config_path, updated).map_err(|error| error.to_string())?;
         Ok(())
+    })
+    .await
+}
+
+/// Returns the problems in the logs of the game in the folder `game` of the run `dir`, and which of them the same
+/// game's run before did not have.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.json` is broken or either name is not a folder name of the run.
+#[tauri::command]
+pub async fn game_problems(
+    lab: State<'_, Arc<Lab>>,
+    dir: String,
+    game: String,
+) -> Result<GameProblems, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        if !plain_name(&game) {
+            return Err("not a game folder".into());
+        }
+        run_dir(&lab, &dir)?;
+        Ok(history::game_problems(
+            &lab.config()?.work.join("runs"),
+            &dir,
+            &game,
+        ))
     })
     .await
 }

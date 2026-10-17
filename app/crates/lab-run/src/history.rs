@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
-use crate::run::Outcome;
+use crate::run::{Outcome, PROBLEMS_FILE};
 use lab_core::perf::PerfSummary;
-use lab_core::problems::ProblemCounts;
+use lab_core::problems::{self, Problem, ProblemCounts};
 use lab_core::resources::ResourceSummary;
 
 /// The summary every run keeps next to its report and rewrites after every game.
@@ -334,6 +334,77 @@ pub fn read(runs: &Path, dir: &str) -> Option<RunSummary> {
     let mut summary: RunSummary = serde_json::from_str(&text).ok()?;
     summary.dir = dir.to_owned();
     Some(summary)
+}
+
+/// The problems in a game's logs in one run, and those the same game's run before did not have.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GameProblems {
+    /// Every problem of all the game's launches, counts added.
+    pub problems: Vec<Problem>,
+    /// The problems the run before did not have; every problem when there is no run before.
+    pub new: Vec<Problem>,
+    /// The folder of the run compared with; `None` when the game has no run before.
+    pub compared_with: Option<String>,
+}
+
+/// Returns the problems of the game in the folder `game_dir` of the run `dir`, compared with the newest older run of
+/// a game of the same name.
+#[must_use]
+pub fn game_problems(runs: &Path, dir: &str, game_dir: &str) -> GameProblems {
+    let problems = read_problems(&runs.join(dir).join(game_dir));
+    let name = read(runs, dir).and_then(|summary| {
+        summary
+            .games
+            .into_iter()
+            .find(|game| game.dir == game_dir)
+            .map(|game| game.name)
+    });
+    let before = name.and_then(|name| {
+        list(runs)
+            .into_iter()
+            .filter(|run| run.dir.as_str() < dir)
+            .find_map(|run| {
+                let game = run
+                    .games
+                    .iter()
+                    .find(|game| game.name == name && !game.dir.is_empty())?;
+                let path = runs.join(&run.dir).join(&game.dir);
+                path.is_dir()
+                    .then(|| (run.dir.clone(), read_problems(&path)))
+            })
+    });
+    match before {
+        Some((compared_with, earlier)) => GameProblems {
+            new: problems::new_since(&problems, &earlier),
+            problems,
+            compared_with: Some(compared_with),
+        },
+        None => GameProblems {
+            new: problems.clone(),
+            problems,
+            compared_with: None,
+        },
+    }
+}
+
+fn read_problems(game_dir: &Path) -> Vec<Problem> {
+    let Ok(entries) = fs::read_dir(game_dir) else {
+        return Vec::new();
+    };
+    let mut launches: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join(PROBLEMS_FILE))
+        .filter(|file| file.is_file())
+        .collect();
+    launches.sort();
+    problems::merge(launches.iter().map(|file| {
+        fs::read_to_string(file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Vec<Problem>>(&text).ok())
+            .unwrap_or_default()
+    }))
 }
 
 #[cfg(test)]

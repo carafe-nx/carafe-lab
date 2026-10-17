@@ -12,6 +12,7 @@ import { Icon } from "@/shared/ui/Icon";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
 import styles from "@/shared/ui/lab.module.css";
+import { ProblemsBlock } from "./ProblemsBlock";
 import { VerdictBlock } from "./VerdictBlock";
 
 export function HistoryPage() {
@@ -190,32 +191,35 @@ function RunCard({ run }: { run: RunSummary }) {
       <span className={styles.label}>{t("run.games")}</span>
       <div className={styles.list}>
         {run.games.map((game, index) => (
-          <div key={index} className={`${styles.row} ${styles.plainRow}`}>
-            <span className={styles.name}>
-              <b>{game.name}</b>
-              <span className={`${styles.muted} ${styles.oneLine}`} title={game.settings}>
-                {game.settings}
+          <div key={index} className={styles.gameBlock}>
+            <div className={`${styles.row} ${styles.plainRow}`}>
+              <span className={styles.name}>
+                <b>{game.name}</b>
+                <span className={`${styles.muted} ${styles.oneLine}`} title={game.settings}>
+                  {game.settings}
+                </span>
+                {game.perf ? (
+                  <span className={styles.muted}>
+                    {t("fps.summary", { median: Math.round(game.perf.medianFps), low: Math.round(game.perf.lowFps) })}
+                  </span>
+                ) : null}
+                {game.resources ? (
+                  <span className={styles.muted}>
+                    {t("resources.summary", {
+                      memory: (game.resources.peakMemoryMb / 1024).toFixed(1),
+                      cpu: Math.round(game.resources.cpuPercent),
+                    })}
+                  </span>
+                ) : null}
+                {game.problems ? (
+                  <span className={styles.muted}>
+                    {t("resources.problems", { errors: game.problems.errors, warnings: game.problems.warnings })}
+                  </span>
+                ) : null}
               </span>
-              {game.perf ? (
-                <span className={styles.muted}>
-                  {t("fps.summary", { median: Math.round(game.perf.medianFps), low: Math.round(game.perf.lowFps) })}
-                </span>
-              ) : null}
-              {game.resources ? (
-                <span className={styles.muted}>
-                  {t("resources.summary", {
-                    memory: (game.resources.peakMemoryMb / 1024).toFixed(1),
-                    cpu: Math.round(game.resources.cpuPercent),
-                  })}
-                </span>
-              ) : null}
-              {game.problems ? (
-                <span className={styles.muted}>
-                  {t("resources.problems", { errors: game.problems.errors, warnings: game.problems.warnings })}
-                </span>
-              ) : null}
-            </span>
-            <Chip tone={outcomeTone(game.outcome)}>{t(`outcome.${game.outcome}`)}</Chip>
+              <Chip tone={outcomeTone(game.outcome)}>{t(`outcome.${game.outcome}`)}</Chip>
+            </div>
+            {game.problems && game.dir ? <ProblemsBlock dir={run.dir} game={game.dir} /> : null}
           </div>
         ))}
       </div>
