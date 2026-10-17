@@ -94,12 +94,23 @@ function RunRow({ run, selected, onPick }: { run: RunSummary; selected: boolean;
 
 function RunCard({ run }: { run: RunSummary }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { status } = useLab();
   const [error, setError] = useState<string | null>(null);
   const work = status.data?.work ?? "";
   const open = (...rest: string[]) => {
     setError(null);
     api.openPath(runPath(work, run.dir, ...rest)).catch((reason: unknown) => setError(errorText(reason)));
+  };
+  const repeatRun = () => {
+    setError(null);
+    api
+      .startRun(null, null, run.planned, 1)
+      .then(() => {
+        status.refresh();
+        navigate("/run");
+      })
+      .catch((reason: unknown) => setError(errorText(reason)));
   };
   return (
     <aside className={styles.card}>
@@ -117,6 +128,14 @@ function RunCard({ run }: { run: RunSummary }) {
         <dd>{t("units.minutes", { count: Math.max(1, Math.round(run.seconds / 60)) })}</dd>
         <dt>{t("history.planned")}</dt>
         <dd>{t("history.done", { done: run.games.length, planned: run.planned.length })}</dd>
+        <dt>{t("history.carafe")}</dt>
+        <dd className={styles.mono}>{run.stamp.carafeCommit ?? "—"}</dd>
+        <dt>{t("history.runtimeHash")}</dt>
+        <dd className={styles.mono}>{run.stamp.runtimeHash ?? "—"}</dd>
+        <dt>{t("history.lab")}</dt>
+        <dd className={styles.mono}>{run.stamp.labCommit ?? "—"}</dd>
+        <dt>{t("history.edenImage")}</dt>
+        <dd className={styles.mono}>{run.stamp.edenImage ?? "—"}</dd>
       </dl>
       <span className={styles.label}>{t("run.games")}</span>
       <div className={styles.list}>
@@ -141,6 +160,10 @@ function RunCard({ run }: { run: RunSummary }) {
         <Button onClick={() => open()}>
           <Icon name="folder" size={14} />
           {t("history.openFolder")}
+        </Button>
+        <Button variant="ghost" disabled={run.planned.length === 0} onClick={repeatRun}>
+          <Icon name="restart" size={14} />
+          {t("history.repeat")}
         </Button>
       </div>
     </aside>

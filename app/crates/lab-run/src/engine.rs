@@ -17,7 +17,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::history::{EVENTS_FILE, RunSummary, SUMMARY_FILE};
-use crate::report::{self, BuildOutcome, GameReport, RunReport};
+use crate::report::{self, BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::{Clock, Emulator, LaunchRecord, Outcome, Runner, StepResult};
 
 /// A game the run is going to build and check.
@@ -142,6 +142,8 @@ pub struct Engine<'a> {
     pub runtime_version: &'a str,
     /// The emulator in a few words, for the report.
     pub emulator_label: String,
+    /// What the run is made with.
+    pub stamp: RunStamp,
     /// Only build the NSPs.
     pub build_only: bool,
     /// Stops the run between games and the current scenario between steps.
@@ -171,6 +173,7 @@ impl Engine<'_> {
             started: started.to_owned(),
             runtime_version: self.runtime_version.to_owned(),
             emulator: self.emulator_label.clone(),
+            stamp: self.stamp.clone(),
             seconds: 0.0,
             games: Vec::new(),
         };

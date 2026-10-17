@@ -6,7 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::report::{BuildOutcome, GameReport, RunReport};
+use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::Outcome;
 
 /// The summary every run keeps next to its report and rewrites after every game.
@@ -31,6 +31,9 @@ pub struct RunSummary {
     pub emulator: String,
     /// Runtime version the NSPs were built with.
     pub runtime_version: String,
+    /// What the run was made with; empty in summaries from before it was kept.
+    #[serde(default)]
+    pub stamp: RunStamp,
     /// The run went through to its end or was stopped; `false` while it goes, or when its process died.
     pub finished: bool,
     /// Names of the games planned, in run order.
@@ -67,6 +70,7 @@ impl RunSummary {
             seconds: report.seconds,
             emulator: report.emulator.clone(),
             runtime_version: report.runtime_version.clone(),
+            stamp: report.stamp.clone(),
             finished,
             planned: planned.to_vec(),
             games: report
@@ -150,6 +154,7 @@ mod tests {
             seconds: 1.0,
             emulator: "Eden".to_owned(),
             runtime_version: "dev".to_owned(),
+            stamp: RunStamp::default(),
             finished: true,
             planned: Vec::new(),
             games: outcomes

@@ -30,7 +30,7 @@ use lab_eden::Eden;
 use lab_run::engine::{Engine, Event, Planned};
 use lab_run::history;
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
-use lab_run::report;
+use lab_run::report::{self, RunStamp};
 use lab_run::run::{Clock, Outcome, StepResult};
 use serde::Serialize;
 
@@ -64,6 +64,8 @@ struct Lab {
     lang: Lang,
     timeout: u32,
     keys: PathBuf,
+    carafe: PathBuf,
+    image: String,
     desktop: PathBuf,
     packer: HacBrewPacker,
     eden: Eden,
@@ -130,6 +132,11 @@ fn start(args: Args) -> Result<ExitCode, String> {
         timeout: args.timeout.unwrap_or(config.timeout),
         args,
         keys,
+        carafe: carafe_checkout(&config),
+        image: config
+            .eden_image
+            .clone()
+            .unwrap_or_else(|| lab_eden::IMAGE.to_owned()),
         desktop,
         packer,
         eden,
@@ -292,6 +299,50 @@ fn git_commit(checkout: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+fn git_commit_with_changes(checkout: &Path) -> Option<String> {
+    let commit = git_commit(checkout)?;
+    let changed = std::process::Command::new("git")
+        .arg("-C")
+        .arg(checkout)
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .output()
+        .ok()
+        .is_some_and(|output| !output.stdout.is_empty());
+    Some(if changed {
+        format!("{commit}+changes")
+    } else {
+        commit
+    })
+}
+
+fn file_hash(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0; 1 << 20];
+    loop {
+        let read = file.read(&mut buffer).ok()?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    Some(digest[..12].to_owned())
+}
+
+fn image_id(image: &str) -> Option<String> {
+    let output = std::process::Command::new("docker")
+        .args(["image", "ls", "--quiet", image])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let id = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!id.is_empty()).then_some(id)
+}
+
 impl Lab {
     fn run_games(mut self, config: &Config, set: Option<&str>) -> Result<ExitCode, String> {
         let chosen = if self.args.games.is_empty() {
@@ -434,6 +485,16 @@ impl Lab {
                 stop.cancel();
             });
         }
+        let stamp = RunStamp {
+            carafe_commit: git_commit_with_changes(&self.carafe),
+            runtime_hash: file_hash(&self.desktop.join("resources").join("carafe-runtime.bin")),
+            lab_commit: git_commit_with_changes(&repository()),
+            eden_image: if self.args.build_only {
+                None
+            } else {
+                image_id(&self.image)
+            },
+        };
         let mut engine = Engine {
             emulator: &mut self.eden,
             packer: &self.packer,
@@ -446,6 +507,7 @@ impl Lab {
             lang,
             runtime_version: RUNTIME_VERSION,
             emulator_label,
+            stamp,
             build_only: self.args.build_only,
             stop,
         };

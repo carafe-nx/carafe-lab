@@ -145,7 +145,12 @@
     "took": "Took",
     "planned": "Games",
     "done": "{{done}} of {{planned}}",
-    "openFolder": "Run folder"
+    "openFolder": "Run folder",
+    "carafe": "Carafe commit",
+    "runtimeHash": "Runtime (hash)",
+    "lab": "Lab commit",
+    "edenImage": "Eden image",
+    "repeat": "Run these games again"
   },
   "stages": {
     "lab": "lab.json",

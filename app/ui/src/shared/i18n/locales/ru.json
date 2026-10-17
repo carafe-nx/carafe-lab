@@ -163,7 +163,12 @@
     "took": "Длился",
     "planned": "Игр",
     "done": "{{done}} из {{planned}}",
-    "openFolder": "Папка прогона"
+    "openFolder": "Папка прогона",
+    "carafe": "Коммит Carafe",
+    "runtimeHash": "Рантайм (хеш)",
+    "lab": "Коммит Lab",
+    "edenImage": "Образ Eden",
+    "repeat": "Повторить эти игры"
   },
   "stages": {
     "lab": "Файл lab.json",

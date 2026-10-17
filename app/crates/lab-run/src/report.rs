@@ -3,7 +3,23 @@
 use std::fmt::Write as _;
 
 use lab_core::lang::Lang;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+/// What a run was made with, so two runs can be compared and a run repeated with the same parts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RunStamp {
+    /// The Carafe checkout's commit; `+changes` follows it when the checkout has uncommitted changes.
+    pub carafe_commit: Option<String>,
+    /// The first 12 hex digits of the SHA-256 of the runtime archive the NSPs were packed with.
+    pub runtime_hash: Option<String>,
+    /// The lab's own commit, which holds Eden's patches.
+    pub lab_commit: Option<String>,
+    /// The short ID of the emulator's Docker image.
+    pub eden_image: Option<String>,
+}
 
 use crate::run::{Outcome, ScenarioResult, StepResult, stage_name};
 use lab_core::input_check;
@@ -82,6 +98,8 @@ pub struct RunReport {
     pub runtime_version: String,
     /// The emulator and its version.
     pub emulator: String,
+    /// What the run was made with.
+    pub stamp: RunStamp,
     /// Seconds the whole run took.
     pub seconds: f64,
     /// The games in run order.
@@ -647,6 +665,7 @@ mod tests {
             started: "2026-10-12 10:00".to_owned(),
             runtime_version: "0.3.0".to_owned(),
             emulator: "Eden v0.2.1".to_owned(),
+            stamp: RunStamp::default(),
             seconds: 125.0,
             games,
         }

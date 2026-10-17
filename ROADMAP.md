@@ -41,7 +41,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 3. Versions and history
 
-- [ ] `feature` Every run stamped with the Carafe commit, runtime hash, Eden patch set and game settings; "repeat exactly"
+- [ ] `feature` "Repeat exactly": a past run again with its own runtime and Eden image, not the current ones
 - [ ] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
 - [ ] `feature` Compatibility by version: which games pass in each version and where something broke
 - [ ] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats
@@ -103,6 +103,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Every run stamped with the Carafe commit, runtime hash, lab commit and Eden image; settings per game; "run these games again"
 - [x] `feature` Plans: games ticked by hand × repeats, with launch count and time from past runs; `--games` and `--repeat` on the command line
 - [x] `feature` Library: a game is added by dropping its folder or with a button; each game shows its last result
 - [x] `feature` Live picture of the game in the Switch frame of the Run screen, view only or with keys sent to the game
