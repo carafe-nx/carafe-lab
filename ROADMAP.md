@@ -13,7 +13,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ### 1. The window and a run of many games
 
-- [ ] `feature` Live video of the game in the window: the noVNC client library embedded as a canvas, not a separate page
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 
 ### 2. Logs
@@ -71,6 +70,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
 
 ## Done
+
+- [x] `feature` Live video of the game in the window: the noVNC client library embedded as a canvas, not a separate page
 
 - [x] `feature` The lab builds NSPs and a "check on the console" list; console verdicts go into the same history
 

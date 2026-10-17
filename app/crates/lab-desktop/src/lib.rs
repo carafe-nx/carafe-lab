@@ -4,8 +4,11 @@ mod commands;
 mod detached;
 mod error;
 mod lab;
+mod novnc;
 
 use std::sync::Arc;
+
+use tauri::Manager;
 
 use crate::lab::Lab;
 
@@ -14,6 +17,11 @@ pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Lab::new()))
+        .register_asynchronous_uri_scheme_protocol(novnc::SCHEME, |context, request, responder| {
+            let lab = Arc::clone(context.app_handle().state::<Arc<Lab>>().inner());
+            let path = request.uri().path().to_owned();
+            std::thread::spawn(move || responder.respond(novnc::respond(&lab, &path)));
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::get_lab,

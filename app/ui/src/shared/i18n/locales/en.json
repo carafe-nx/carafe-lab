@@ -183,6 +183,8 @@
     "noEvents": "No events yet",
     "takeControl": "Press keys myself",
     "reload": "Reload the picture",
+    "liveConnecting": "Connecting to the emulator screen…",
+    "liveFailed": "The live picture does not load: {{error}}",
     "giveBack": "Only watch",
     "controlHint": "Click the screen: keys go to the game (C is A, X is B, the arrows are the D-pad) while the scenario goes on",
     "watchHint": "The emulator live, view only",

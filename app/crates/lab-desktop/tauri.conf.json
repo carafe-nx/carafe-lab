@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src http://127.0.0.1:6080"
+      "csp": "default-src 'self'; script-src 'self' http://novnc.localhost novnc:; connect-src ipc: http://ipc.localhost ws://127.0.0.1:6080; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "bundle": {

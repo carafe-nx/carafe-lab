@@ -5,6 +5,7 @@ import { useLab } from "@/features/lab/LabProvider";
 import { outcomeTone, runPath } from "@/features/lab/outcome";
 import { FpsChart } from "@/features/lab/FpsChart";
 import { JoyCon } from "@/features/lab/JoyCon";
+import { LiveScreen } from "@/features/lab/LiveScreen";
 import { StepLine } from "@/features/lab/StepLine";
 import { folderName, useRunEvents } from "@/features/lab/useRunEvents";
 import type { Event } from "@/shared/api/bindings/Event";
@@ -24,7 +25,6 @@ import { Spinner } from "@/shared/ui/Spinner";
 import styles from "@/shared/ui/lab.module.css";
 import run from "./RunPage.module.css";
 
-const LIVE_SCREEN = "http://127.0.0.1:6080/carafe.html";
 const LIT_MS = 1500;
 
 type GameState = { name: string; outcome: Outcome | null; current: boolean };
@@ -193,11 +193,7 @@ export function RunPage() {
             <JoyCon side="left" lit={lit} />
             <div className={run.screen}>
               {showLive ? (
-                <iframe
-                  key={`${liveDir}-${launches}-${control}-${reloads}`}
-                  title={t("run.screen")}
-                  src={control ? LIVE_SCREEN : `${LIVE_SCREEN}?view_only`}
-                />
+                <LiveScreen key={`${liveDir}-${launches}-${reloads}`} control={control} title={t("run.screen")} />
               ) : screen.data ? (
                 <img src={screen.data.url} alt={t("run.screen")} />
               ) : (

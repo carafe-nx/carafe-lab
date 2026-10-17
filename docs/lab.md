@@ -196,6 +196,11 @@ emulator.
 - `--video low` sends the live picture at about five frames a second, `--video off` sends none (`CARAFE_VIDEO` in
   the container), so the video takes little or nothing from the game while it is measured; A/B runs from the window
   use `low`.
+- The Run screen draws the live picture itself, on a canvas in the Switch frame, with the noVNC client connected to
+  the container's websockify on port 6080. The window serves the client under its own `novnc` scheme from a copy of
+  `/usr/share/novnc/core` and `vendor` taken out of the Eden image the first time into `<work>/novnc`, so no package
+  is downloaded and the client is the same version as the server. "Press keys myself" switches the same connection
+  out of view-only.
 - `run --games G --repeat <n> --ab '<settings>'` is an A/B run: G as it is (`G · A`) and with the settings merged over
   its own (`G · B`, in the shape of `carafe.json`'s `settings`), alternating. Each variant is its own NSP with its own
   Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame
