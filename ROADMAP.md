@@ -12,9 +12,8 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
+- [ ] `bug` The standard scenario's "input reached the game" passes on OpenTTD's scrolling title screen with no input at all
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
-- [ ] `feature` Button presses through the control channel instead of xdotool
-- [ ] `feature` Watchdog: a hang during a game (not only at close) restarts Eden; "clean start" switch
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 - [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
 - [ ] `feature` Exact uncompressed screenshots for checks from Eden through the control channel
@@ -96,6 +95,8 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Watchdog: an Eden silent for 45 s during a game is replaced; "clean start" runs a new Eden per launch
+- [x] `feature` Button presses through the control channel instead of xdotool
 - [x] `feature` The one Eden set up like the console: 4 cores, 4 GB, docked; firmware optional, chosen in the window
 - [x] `feature` Library: tags, notes and the open ROADMAP items that name the game; search by name, tag or note
 - [x] `bug` One Eden runs game after game: stopped games give their memory back, a new Eden starts when memory runs short

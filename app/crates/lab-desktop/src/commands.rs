@@ -19,7 +19,7 @@ use lab_core::scenario::Scenario;
 use lab_core::view::LabView;
 use lab_run::history::{self, EVENTS_FILE, RunSummary};
 use lab_run::queue::{QueueState, unix_now};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 use ts_rs::TS;
@@ -177,9 +177,26 @@ pub async fn run_events(
     .await
 }
 
-/// Starts `carafe-lab run` in its own process, so closing the window does not stop it: the set `set`, or the games
-/// named in `games`, each `repeat` times; `only` narrows it to one game; `ab` makes it an A/B run of the one game
-/// with these settings for variant B.
+/// What the window asks `carafe-lab run` to do.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RunRequest {
+    /// The set to run; `None` with no `games` runs every enabled game.
+    pub set: Option<String>,
+    /// Only the game with this name.
+    pub only: Option<String>,
+    /// These games of `lab.json`, in this order, instead of a set.
+    pub games: Option<Vec<String>>,
+    /// How many times every game runs in a row.
+    pub repeat: Option<u32>,
+    /// A/B: the settings of variant B, as JSON.
+    pub ab: Option<String>,
+    /// A new Eden for every launch instead of one for the whole run.
+    pub clean: Option<bool>,
+}
+
+/// Starts `carafe-lab run` in its own process, so closing the window does not stop it, as `request` asks.
 ///
 /// # Errors
 ///
@@ -188,13 +205,17 @@ pub async fn run_events(
 pub async fn start_run(
     app: AppHandle,
     lab: State<'_, Arc<Lab>>,
-    set: Option<String>,
-    only: Option<String>,
-    games: Option<Vec<String>>,
-    repeat: Option<u32>,
-    ab: Option<String>,
+    request: RunRequest,
 ) -> Result<(), CommandError> {
     let lab = Arc::clone(&lab);
+    let RunRequest {
+        set,
+        only,
+        games,
+        repeat,
+        ab,
+        clean,
+    } = request;
     blocking(move || {
         let work = lab.config()?.work;
         let logs = work.join("queue").join(RUN_LOGS);
@@ -216,6 +237,9 @@ pub async fn start_run(
             let compact: serde_json::Value =
                 serde_json::from_str(&ab).map_err(|error| format!("B: {error}"))?;
             args.extend(["--ab".to_owned(), compact.to_string()]);
+        }
+        if clean == Some(true) {
+            args.push("--clean".to_owned());
         }
         args.extend(["--json", "--who", "window"].map(str::to_owned));
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;

@@ -39,6 +39,7 @@ Options:
   --ab <json>         A/B: run the one game as it is (A) and with these settings merged over its own (B),
                       alternating, --repeat times each; the run ends with a verdict
   --build-only        build the NSPs and stop
+  --clean             a new Eden for every launch instead of one for the whole run
   --no-open           do not open the live page in the browser
   --json              print the run as JSON lines, one event each, without the live page;
                       status, games and runs print one JSON document
@@ -123,6 +124,8 @@ pub struct Args {
     pub hold_ms: u32,
     /// `--build-only`.
     pub build_only: bool,
+    /// `--clean`.
+    pub clean: bool,
     /// `--json`.
     pub json: bool,
     /// `--who`.
@@ -187,6 +190,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         minutes: 30,
         hold_ms: 150,
         build_only: false,
+        clean: false,
         json: false,
         who: None,
         no_open: false,
@@ -256,6 +260,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             "--seed" => parsed.seed = Some(number(arg, value("a number")?, "a number")?),
             "--probes-dir" => parsed.probes_dir = Some(PathBuf::from(value("a folder")?)),
             "--build-only" => parsed.build_only = true,
+            "--clean" => parsed.clean = true,
             "--no-open" => parsed.no_open = true,
             "--json" => parsed.json = true,
             other if other.starts_with("--") => return Err(ArgsError::Option(other.to_owned())),
@@ -318,6 +323,8 @@ mod tests {
         assert_eq!(parsed.lang, None);
         assert_eq!(parsed.timeout, None);
         assert!(!parsed.build_only);
+        assert!(!parsed.clean);
+        assert!(parse(&args("run --clean")).unwrap().clean);
     }
 
     #[test]

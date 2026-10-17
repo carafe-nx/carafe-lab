@@ -104,6 +104,8 @@
   "plans": {
     "hint": "A set is a list of games from lab.json. A run goes in its own process: close the window and it goes on.",
     "enabled": "All enabled games",
+    "clean": "Clean start",
+    "cleanHint": "A new Eden for every game: slower, but games cannot affect each other",
     "games_one": "{{count}} game",
     "games_other": "{{count}} games",
     "start": "Run the set",

@@ -1,7 +1,8 @@
 //! The Eden emulator in a Docker container: the [`Emulator`] the lab runs games in.
 //!
-//! The container runs Eden's Qt front end full screen on Xvfb. Input goes in as key presses through `xdotool`
-//! with Eden's default keyboard layout, pictures come out through ImageMagick's `import`, and Eden's data folder
+//! The container runs Eden's Qt front end full screen on Xvfb. Input goes in as key presses of Eden's default
+//! keyboard layout, through the control channel when one Eden serves the run and through `xdotool` otherwise;
+//! pictures come out through ImageMagick's `import`, and Eden's data folder
 //! is a folder on the host, so logs and the SD card are read directly. `nand`, which holds the save data, lives in
 //! a Docker volume instead: Eden checks the save's files thousands of times while a game starts, and through the
 //! host folder each check takes milliseconds. It is copied there before every launch and back when the lab
@@ -9,7 +10,8 @@
 //!
 //! With [`Eden::with_one_eden`] one container and one Eden serve the whole run: each game is booted and stopped
 //! through Eden's control channel (`patches/eden/0046`), a one-line `command` file and a numbered `replies` file in
-//! a shared `control/` folder. An Eden that crashed or stopped answering is replaced at the next launch.
+//! a shared `control/` folder. An Eden that crashed, stopped answering or wrote no status line for 45 s is replaced
+//! at the next launch.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -42,6 +44,8 @@ const SESSION_FILE: &str = "session.log";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_GRACE: Duration = Duration::from_secs(15);
+const PRESS_GRACE: Duration = Duration::from_secs(5);
+const HANG_AFTER_MS: u64 = 45_000;
 const PERF_MARGIN_MS: u64 = 2000;
 const GAME_MEMORY: u64 = 4608 * 1024 * 1024;
 const PULLED_NAND: [&str; 2] = ["user", "system/save"];
@@ -214,6 +218,28 @@ impl Eden {
     #[must_use]
     pub fn press_log(&self) -> PressLog {
         self.presses.clone()
+    }
+
+    /// Joins the one Eden another process started, so presses go through its control channel.
+    ///
+    /// # Returns
+    ///
+    /// `true` when an Eden with a control channel is running; `false` leaves this emulator as it was.
+    pub fn join_running(&mut self) -> bool {
+        let replies = self.replies(0);
+        let Some(last) = replies.last() else {
+            return false;
+        };
+        if !self.container_running() {
+            return false;
+        }
+        self.session = Some(Session {
+            nsp_dir: PathBuf::new(),
+            seen: last.number,
+            booted_at: last.number,
+            log_from: 0,
+        });
+        true
     }
 
     /// Returns Eden's version from the image, such as `v0.2.1`.
@@ -450,6 +476,30 @@ pub fn room_left(readings: &str, needed: u64) -> bool {
     max.saturating_sub(current) >= needed
 }
 
+/// Returns how long Eden has written no status line, when that is at least `limit_ms`.
+///
+/// # Arguments
+///
+/// * `samples` — the status lines Eden wrote, oldest first.
+/// * `booted` — when the game was booted, in Unix milliseconds; lines before it do not count.
+/// * `now` — the time now, in Unix milliseconds.
+/// * `limit_ms` — the silence that makes Eden hung.
+///
+/// # Returns
+///
+/// The silence in milliseconds, or `None` while Eden answers or the game was booted less than `limit_ms` ago.
+#[must_use]
+pub fn silent_for(samples: &[PerfSample], booted: u64, now: u64, limit_ms: u64) -> Option<u64> {
+    let last = samples
+        .iter()
+        .map(|sample| sample.at)
+        .filter(|&at| at >= booted)
+        .max()
+        .unwrap_or(booted);
+    let silence = now.saturating_sub(last);
+    (silence >= limit_ms).then_some(silence)
+}
+
 /// Returns why the emulator process ended, from the container's exit code.
 #[must_use]
 pub fn describe_end(code: i32, out_of_memory: bool) -> String {
@@ -570,6 +620,14 @@ impl Eden {
             log_from: 0,
         });
         Ok(())
+    }
+
+    fn hung(&self) -> Option<String> {
+        self.session.as_ref()?;
+        let from = self.perf_from?;
+        let samples = perf::parse_stats(&read_text(&self.control_dir().join("stats")));
+        silent_for(&samples, from, unix_millis(), HANG_AFTER_MS)
+            .map(|ms| format!("Eden stopped responding: no status for {} s", ms / 1000))
     }
 
     fn memory_readings(&self) -> String {
@@ -733,7 +791,15 @@ impl Emulator for Eden {
 
     fn running(&mut self) -> bool {
         if self.container_running() {
-            return !self.shut_down() && !self.stopped_since_boot();
+            if self.shut_down() || self.stopped_since_boot() {
+                return false;
+            }
+            if let Some(reason) = self.hung() {
+                self.ended = Some(reason);
+                self.end_session();
+                return false;
+            }
+            return true;
         }
         self.session = None;
         if self.ended.is_none() {
@@ -751,6 +817,20 @@ impl Emulator for Eden {
         self.presses.record(&names, hold);
         let keys: Vec<&str> = buttons.iter().map(|&button| eden_key(button)).collect();
         let keys = keys.join(" ");
+        if let Some(seen) = self.session.as_ref().map(|session| session.seen) {
+            let hold_ms = hold.as_millis().max(1);
+            self.send(&format!("press {hold_ms} {keys}"))?;
+            let replies = self.wait_for_reply(seen, hold + PRESS_GRACE, |text| {
+                text == "released" || text.starts_with("error")
+            })?;
+            return match replies.iter().find(|reply| reply.text.starts_with("error")) {
+                Some(reply) => Err(EmulatorError::Control(format!(
+                    "Eden did not press {keys}: {}",
+                    reply.text
+                ))),
+                None => Ok(()),
+            };
+        }
         let script = format!(
             "xdotool mousemove 640 360 keydown {keys} && sleep {:.3} && xdotool keyup {keys}",
             hold.as_secs_f64()
@@ -1019,10 +1099,10 @@ pub fn eden_key(button: SwitchButton) -> &'static str {
     }
 }
 
-/// Returns Eden's `qt-config.ini` for the lab: the console's four cores and 4 GB, docked, full screen, no update check, no stop confirmation, no
-/// controller applet, audio through SDL's dummy driver, the processor mode `cpu`, and the renderer `gpu` can
-/// drive — OpenGL on Mesa's Direct3D 12 driver through WSL2, Vulkan on Mesa's software driver. `extra` replaces or
-/// adds settings; each key is `Section/key`, and a key without a section is ignored.
+/// Returns Eden's `qt-config.ini` for the lab: the console's four cores and 4 GB, docked, full screen, no update
+/// check, no stop confirmation, no controller applet, audio through SDL's dummy driver, the processor mode `cpu`, and
+/// the renderer `gpu` can drive — OpenGL on Mesa's Direct3D 12 driver through WSL2, Vulkan on Mesa's software driver.
+/// `extra` replaces or adds settings; each key is `Section/key`, and a key without a section is ignored.
 #[must_use]
 pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> String {
     let backend = match gpu {
@@ -1232,6 +1312,25 @@ mod tests {
         assert!(config.contains("[Core]\nuse_multi_core\\default=false\nuse_multi_core=true\n"));
         assert!(config.contains("\nmemory_layout_mode=0\n"));
         assert!(config.contains("[System]\nuse_docked_mode\\default=false\nuse_docked_mode=1\n"));
+    }
+
+    #[test]
+    fn eden_is_hung_after_a_long_silence_since_its_last_status() {
+        let sample = |at| PerfSample {
+            at,
+            fps: 30.0,
+            speed: 1.0,
+            frametime: 33.0,
+            shaders: 0,
+        };
+        let samples = [sample(500), sample(10_000), sample(20_000)];
+        assert_eq!(silent_for(&samples, 1_000, 30_000, 45_000), None);
+        assert_eq!(silent_for(&samples, 1_000, 70_000, 45_000), Some(50_000));
+        assert_eq!(silent_for(&[], 1_000, 40_000, 45_000), None);
+        assert_eq!(
+            silent_for(&[sample(500)], 1_000, 50_000, 45_000),
+            Some(49_000)
+        );
     }
 
     #[test]

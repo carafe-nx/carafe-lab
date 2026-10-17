@@ -1,0 +1,65 @@
+Carafe Lab: the control channel presses keys inside Eden: `press <ms> <key>...` holds the keys, named as Qt names
+them (`C`, `Up`, `Return`), for the given milliseconds and lets them go. The presses reach Eden's keyboard input
+the way a key of the window does, without the X server or the window's focus. Eden answers `pressed <keys>`, then
+`released`; `error idle` when no software runs.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/yuzu/main_window.cpp b/src/yuzu/main_window.cpp
+index ea6f443..b50bcdb 100644
+--- a/src/yuzu/main_window.cpp
++++ b/src/yuzu/main_window.cpp
+@@ -75,6 +75,7 @@
+ #include <QPalette>
+ #include <QProgressDialog>
+ #include <QScreen>
++#include <QKeySequence>
+ #include <QShortcut>
+ #include <QStatusBar>
+ #include <QtConcurrentRun>
+@@ -147,6 +148,7 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
+ // Input //
+ #include "hid_core/frontend/emulated_controller.h"
+ #include "hid_core/hid_core.h"
++#include "input_common/drivers/keyboard.h"
+ #include "input_common/drivers/virtual_amiibo.h"
+ 
+ // Video Core //
+@@ -1971,6 +1973,38 @@ void MainWindow::OnControlTick() {
+         }
+         render_window->CaptureScreenshot(argument);
+         ControlReply(QStringLiteral("capturing %1").arg(argument));
++    } else if (verb == QStringLiteral("press")) {
++        const QStringList words = argument.split(QLatin1Char(' '), Qt::SkipEmptyParts);
++        bool hold_read = false;
++        const int hold = words.isEmpty() ? 0 : words.first().toInt(&hold_read);
++        if (!emulation_running) {
++            ControlReply(QStringLiteral("error idle"));
++            return;
++        }
++        if (!hold_read || hold <= 0 || words.size() < 2) {
++            ControlReply(QStringLiteral("error press %1").arg(argument));
++            return;
++        }
++        QList<int> keys;
++        for (const QString& name : words.mid(1)) {
++            const QKeySequence sequence =
++                QKeySequence::fromString(name.size() == 1 ? name.toUpper() : name);
++            if (sequence.isEmpty()) {
++                ControlReply(QStringLiteral("error key %1").arg(name));
++                return;
++            }
++            keys.append(static_cast<int>(sequence[0].key()));
++        }
++        for (const int key : keys) {
++            input_subsystem->GetKeyboard()->PressKey(key);
++        }
++        ControlReply(QStringLiteral("pressed %1").arg(words.mid(1).join(QLatin1Char(' '))));
++        QTimer::singleShot(hold, this, [this, keys] {
++            for (const int key : keys) {
++                input_subsystem->GetKeyboard()->ReleaseKey(key);
++            }
++            ControlReply(QStringLiteral("released"));
++        });
+     } else {
+         ControlReply(QStringLiteral("error unknown %1").arg(verb));
+     }

@@ -6,6 +6,7 @@ import type { KeysState } from "./bindings/KeysState";
 import type { LabStatus } from "./bindings/LabStatus";
 import type { LabView } from "./bindings/LabView";
 import type { PerfSample } from "./bindings/PerfSample";
+import type { RunRequest } from "./bindings/RunRequest";
 import type { RunSummary } from "./bindings/RunSummary";
 import type { Scenario } from "./bindings/Scenario";
 import type { Screen } from "./bindings/Screen";
@@ -15,8 +16,17 @@ export const api = {
   getLab: () => invoke<LabView>("get_lab"),
   listRuns: () => invoke<RunSummary[]>("list_runs"),
   runEvents: (dir: string, from: number) => invoke<Event[]>("run_events", { dir, from }),
-  startRun: (set: string | null, only: string | null, games: string[] | null = null, repeat = 1, ab: string | null = null) =>
-    invoke<void>("start_run", { set, only, games, repeat, ab }),
+  startRun: (
+    set: string | null,
+    only: string | null,
+    games: string[] | null = null,
+    repeat = 1,
+    ab: string | null = null,
+    clean = false,
+  ) => {
+    const request: RunRequest = { set, only, games, repeat, ab, clean };
+    return invoke<void>("start_run", { request });
+  },
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),
   runScreenshots: (dir: string, game: string) => invoke<string[]>("run_screenshots", { dir, game }),
   addGame: (folder: string) => invoke<string>("add_game", { folder }),

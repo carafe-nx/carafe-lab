@@ -124,7 +124,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         config.emulator_cpu,
     )
     .with_settings(config.eden_settings.clone())
-    .with_one_eden(config.one_eden)
+    .with_one_eden(config.one_eden && !args.clean)
     .with_firmware(local_settings(&config_path)?.firmware);
     if let Some(image) = &config.eden_image {
         eden = eden.with_image(image.clone());
@@ -514,6 +514,7 @@ impl Lab {
                     .map_err(|_| format!("{name} is not a Switch button"))
             })
             .collect::<Result<_, _>>()?;
+        self.eden.join_running();
         self.eden
             .press(
                 &buttons,

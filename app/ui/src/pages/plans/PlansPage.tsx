@@ -11,6 +11,7 @@ import { Chip } from "@/shared/ui/Chip";
 import { Icon } from "@/shared/ui/Icon";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
+import { Toggle } from "@/shared/ui/Toggle";
 import styles from "@/shared/ui/lab.module.css";
 import { AbPlan } from "./AbPlan";
 import plans from "./PlansPage.module.css";
@@ -38,13 +39,14 @@ export function PlansPage() {
   const navigate = useNavigate();
   const { lab, status, runs } = useLab();
   const [error, setError] = useState<string | null>(null);
+  const [clean, setClean] = useState(false);
   const games = lab.data?.games ?? [];
   const sets = Object.entries(lab.data?.sets ?? {});
   const enabled = games.filter((game) => game.enabled).map((game) => game.name);
   const start = (set: string | null, chosen: string[] | null = null, repeat = 1, ab: string | null = null) => {
     setError(null);
     api
-      .startRun(set, null, chosen, repeat, ab)
+      .startRun(set, null, chosen, repeat, ab, clean)
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -56,6 +58,7 @@ export function PlansPage() {
       {lab.error ? <Notice tone="error">{lab.error}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <p className={styles.muted}>{t("plans.hint")}</p>
+      <Toggle id="plan-clean" label={t("plans.clean")} hint={t("plans.cleanHint")} checked={clean} onChange={setClean} />
       <OwnPlan games={games} runs={runs.data ?? []} onStart={(chosen, repeat) => start(null, chosen, repeat)} />
       <AbPlan games={games} onStart={(game, overrides, repeat) => start(null, [game], repeat, overrides)} />
       <div className={plans.grid}>
