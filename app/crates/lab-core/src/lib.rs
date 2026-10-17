@@ -12,5 +12,6 @@ pub mod matrix;
 pub mod milestones;
 pub mod picture;
 pub mod probes;
+pub mod redact;
 pub mod scenario;
 pub mod time;

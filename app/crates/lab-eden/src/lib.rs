@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use carafe_core::TitleId;
 use carafe_core::settings::SwitchButton;
 use lab_core::emulator::{EdenCpu, Gpu};
+pub use lab_core::redact::redact;
 use sha2::{Digest, Sha256};
 
 use lab_run::run::{Closed, Emulator, EmulatorError, GameLogs, SaveFile};
@@ -480,6 +481,10 @@ impl Emulator for Eden {
         Ok(closed)
     }
 
+    fn live_logs(&self, title: TitleId) -> Option<PathBuf> {
+        Some(self.logs_dir(title))
+    }
+
     fn logs(&self, title: TitleId) -> GameLogs {
         self.logs_of_dir(&self.logs_dir(title))
     }
@@ -682,48 +687,6 @@ pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> St
     out
 }
 
-/// Returns `text` with every spelling of the path `secret` — with `\` or `/`, any letter case — and of its folder
-/// replaced by `prod.keys` and `…`, so neither the keys file nor where it lives reaches a log or a report.
-#[must_use]
-pub fn redact(text: &str, secret: &Path) -> String {
-    let file = secret.to_string_lossy().into_owned();
-    let folder = secret
-        .parent()
-        .map(|parent| parent.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut out = text.to_owned();
-    for (needle, replacement) in [(file, "prod.keys"), (folder, "…")] {
-        if needle.len() < 3 {
-            continue;
-        }
-        for spelling in [
-            needle.clone(),
-            needle.replace('\\', "/"),
-            needle.replace('/', "\\"),
-        ] {
-            out = replace_ignoring_case(&out, &spelling, replacement);
-        }
-    }
-    out
-}
-
-fn replace_ignoring_case(text: &str, needle: &str, replacement: &str) -> String {
-    let lower_text = text.to_lowercase();
-    let lower_needle = needle.to_lowercase();
-    if lower_text.len() != text.len() || lower_needle.is_empty() {
-        return text.replace(needle, replacement);
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut at = 0;
-    while let Some(found) = lower_text[at..].find(&lower_needle) {
-        out.push_str(&text[at..at + found]);
-        out.push_str(replacement);
-        at += found + lower_needle.len();
-    }
-    out.push_str(&text[at..]);
-    out
-}
-
 fn move_tree(source: &Path, dest: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(source)? {
@@ -817,26 +780,6 @@ fn docker_owned(args: &[String]) -> Result<Output, EmulatorError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_keys_path_never_shows() {
-        let secret = Path::new("D:\\Backup\\prod.keys");
-        let text = "docker: invalid mount D:\\Backup\\prod.keys:/work and d:/backup/PROD.KEYS, folder D:\\Backup";
-        let clean = redact(text, secret);
-        assert!(!clean.to_lowercase().contains("backup"), "{clean}");
-        assert_eq!(
-            clean,
-            "docker: invalid mount prod.keys:/work and prod.keys, folder …"
-        );
-    }
-
-    #[test]
-    fn redact_leaves_other_text_alone() {
-        assert_eq!(
-            redact("nothing here", Path::new("D:\\Keys\\prod.keys")),
-            "nothing here"
-        );
-    }
 
     #[test]
     fn every_button_has_its_own_key() {

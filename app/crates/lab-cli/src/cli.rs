@@ -26,6 +26,7 @@ Options:
   --only <name>       only the game or probe with this name
   --build-only        build the NSPs and stop
   --no-open           do not open the live page in the browser
+  --json              print the run as JSON lines, one event each, without the live page
   --random <n>        probes: add n random combinations to the pairwise set
   --seed <n>          probes: seed of the random combinations; default: the date
   --probes-dir <dir>  probes: folder with i686/ and x86_64/ builds; default: tools/probes/build
@@ -66,6 +67,8 @@ pub struct Args {
     pub only: Option<String>,
     /// `--build-only`.
     pub build_only: bool,
+    /// `--json`.
+    pub json: bool,
     /// `--no-open`.
     pub no_open: bool,
     /// `--random`.
@@ -113,6 +116,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         timeout: None,
         only: None,
         build_only: false,
+        json: false,
         no_open: false,
         random: 0,
         seed: None,
@@ -153,6 +157,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             "--probes-dir" => parsed.probes_dir = Some(PathBuf::from(value("a folder")?)),
             "--build-only" => parsed.build_only = true,
             "--no-open" => parsed.no_open = true,
+            "--json" => parsed.json = true,
             other if other.starts_with("--") => return Err(ArgsError::Option(other.to_owned())),
             other => match &mut parsed.command {
                 Command::Run { set } if set.is_none() => *set = Some(other.to_owned()),

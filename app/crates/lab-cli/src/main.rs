@@ -10,13 +10,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cli::{Args, Command};
 use crate::live::Live;
-use carafe_core::BuildRecord;
 use carafe_core::cancel::CancelToken;
 use carafe_core::metadata::Metadata;
-use carafe_core::ports::{BuildProgress, FolderInspector, PackTarget, Packer};
+use carafe_core::ports::FolderInspector;
 use carafe_core::record::GameSource;
 use carafe_core::settings::{AutorunSettings, InputMode};
-use carafe_core::wizard::{self, BuildRequest};
+use carafe_core::wizard::BuildRequest;
 use carafe_folder::DiskFolderInspector;
 use carafe_pack::HacBrewPacker;
 use lab_core::config::{self, Config, Game};
@@ -24,11 +23,11 @@ use lab_core::emulator::{EdenCpu, Gpu};
 use lab_core::lang::Lang;
 use lab_core::matrix;
 use lab_core::probes::{self, ProbeRun};
-use lab_core::scenario::Scenario;
 use lab_core::time::Utc;
-use lab_eden::{Eden, redact};
-use lab_run::report::{self, BuildOutcome, GameReport, RunReport};
-use lab_run::run::{Clock, LaunchRecord, Outcome, Runner, StepResult};
+use lab_eden::Eden;
+use lab_run::engine::{Engine, Event, Planned};
+use lab_run::report;
+use lab_run::run::{Clock, Outcome, StepResult};
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
 const DESKTOP: &str = "app/crates/carafe-desktop";
@@ -63,15 +62,6 @@ struct Lab {
     desktop: PathBuf,
     packer: HacBrewPacker,
     eden: Eden,
-}
-
-struct Planned {
-    name: String,
-    folder: PathBuf,
-    request: Result<BuildRequest, String>,
-    entropy: u64,
-    label: String,
-    scenario: Scenario,
 }
 
 fn main() -> ExitCode {
@@ -130,7 +120,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         timeout: args.timeout.unwrap_or(config.timeout),
         args,
         keys,
-        desktop: desktop.clone(),
+        desktop,
         packer,
         eden,
     };
@@ -196,12 +186,14 @@ impl Lab {
         }
         let mut runs = probes::input_runs(self.timeout);
         runs.extend(probes::graphics_runs(&combinations, self.timeout));
-        println!(
-            "probes: {} runs, {} of them pairwise over {} combinations",
-            runs.len(),
-            matrix::pairwise().len(),
-            matrix::full_count()
-        );
+        if !self.args.json {
+            println!(
+                "probes: {} runs, {} of them pairwise over {} combinations",
+                runs.len(),
+                matrix::pairwise().len(),
+                matrix::full_count()
+            );
+        }
         let folders = self.work.join("probes");
         let mut planned = Vec::new();
         for run in runs.iter().filter(|run| self.wanted(&run.name)) {
@@ -222,11 +214,7 @@ impl Lab {
     fn execute(&mut self, planned: Vec<Planned>) -> Result<ExitCode, String> {
         let started_at = now();
         let clock = RealClock(Instant::now());
-        let run_dir = self.work.join("runs").join(started_at.folder());
-        let nsp_dir = self.work.join("nsp");
-        fs::create_dir_all(&run_dir).map_err(|error| format!("{}: {error}", run_dir.display()))?;
-        fs::create_dir_all(&nsp_dir).map_err(|error| format!("{}: {error}", nsp_dir.display()))?;
-        let emulator = if self.args.build_only {
+        let emulator_label = if self.args.build_only {
             "—".to_owned()
         } else {
             let version = self.eden.version().map_err(|error| error.to_string())?;
@@ -236,47 +224,65 @@ impl Lab {
                 self.cpu.name()
             )
         };
-        let live = Live::start(
-            self.lang,
-            &started_at.minutes(),
-            planned.len(),
-            !self.args.build_only,
-        )?;
-        live.set_run_dir(&run_dir);
-        live.watch_presses(self.eden.press_log());
-        println!("live page: {}", live.url());
-        if !self.args.no_open {
-            open_in_browser(&live.url());
-        }
-        let mut report = RunReport {
-            started: started_at.minutes(),
-            runtime_version: RUNTIME_VERSION.to_owned(),
-            emulator,
-            seconds: 0.0,
-            games: Vec::new(),
-        };
+        let json = self.args.json;
+        let lang = self.lang;
         let total = planned.len();
-        for (index, game) in planned.into_iter().enumerate() {
-            if live.stop_token().is_cancelled() {
-                println!(
-                    "stopped from the live page; {} games left out",
-                    total - index
-                );
-                break;
+        let live = if json {
+            None
+        } else {
+            let live = Live::start(lang, &started_at.minutes(), total, !self.args.build_only)?;
+            live.watch_presses(self.eden.press_log());
+            println!("live page: {}", live.url());
+            if !self.args.no_open {
+                open_in_browser(&live.url());
             }
-            println!("[{}/{total}] {}", index + 1, game.name);
-            live.begin_game(index + 1, &game.name);
-            let entry = self.one_game(&game, &run_dir, &nsp_dir, &clock, &live);
-            live.end_game(entry.outcome());
-            report.games.push(entry);
-            report.seconds = clock.now().as_secs_f64();
-            write_report(&run_dir, &report, self.lang)?;
+            Some(live)
+        };
+        let stop = live
+            .as_ref()
+            .map_or_else(CancelToken::new, Live::stop_token);
+        let mut engine = Engine {
+            emulator: &mut self.eden,
+            packer: &self.packer,
+            keys: &self.keys,
+            build_inputs: vec![
+                self.desktop.join("resources").join("carafe-runtime.bin"),
+                self.desktop.join("binaries").join(hacbrewpack_name()),
+            ],
+            work: &self.work,
+            lang,
+            runtime_version: RUNTIME_VERSION,
+            emulator_label,
+            build_only: self.args.build_only,
+            stop,
+        };
+        let mut on_event = |event: &Event| {
+            if json {
+                if let Ok(line) = serde_json::to_string(event) {
+                    println!("{line}");
+                }
+            } else {
+                print_event(event, total);
+            }
+            if let Some(live) = &live {
+                show_on_page(live, event, lang);
+            }
+        };
+        let report = engine.run(
+            planned,
+            &started_at.folder(),
+            &started_at.minutes(),
+            &clock,
+            &mut on_event,
+        )?;
+        if let Some(live) = live {
+            live.finish();
+            println!(
+                "the live page stays up; close it with its button or the tab, or press Ctrl+C"
+            );
+            let closed = live.wait_for_close(PAGE_IDLE, PAGE_LONGEST);
+            println!("live page closed: {closed:?}");
         }
-        live.finish();
-        println!("report: {}", run_dir.join("report.html").display());
-        println!("the live page stays up; close it with its button or the tab, or press Ctrl+C");
-        let closed = live.wait_for_close(PAGE_IDLE, PAGE_LONGEST);
-        println!("live page closed: {closed:?}");
         let [_, _, _, failed] = report.counts();
         Ok(if failed == 0 {
             ExitCode::SUCCESS
@@ -284,101 +290,38 @@ impl Lab {
             ExitCode::from(3)
         })
     }
+}
 
-    fn one_game(
-        &mut self,
-        game: &Planned,
-        run_dir: &Path,
-        nsp_dir: &Path,
-        clock: &RealClock,
-        live: &Live,
-    ) -> GameReport {
-        let dir_name = safe_name(&game.name);
-        let game_dir = run_dir.join(&dir_name);
-        let _ = fs::create_dir_all(&game_dir);
-        let title = game.request.as_ref().map_or_else(
-            |_| game.name.clone(),
-            |request| request.metadata.title.clone(),
-        );
-        let mut entry = GameReport {
-            name: game.name.clone(),
-            title,
-            title_id: String::new(),
-            dir: dir_name,
-            settings: game.label.clone(),
-            build: BuildOutcome::Failed {
-                error: String::new(),
-            },
-            scenario: None,
-            log_excerpt: Vec::new(),
-        };
-        let (record, seconds, size_bytes) = match self.build(game, nsp_dir) {
-            Ok(built) => built,
-            Err(error) => {
-                println!("  build failed: {error}");
-                entry.build = BuildOutcome::Failed { error };
-                return entry;
-            }
-        };
-        println!("  built {} in {seconds:.0} s", record.title_id);
-        entry.title_id = record.title_id.to_string();
-        entry.build = BuildOutcome::Built {
+fn print_event(event: &Event, total: usize) {
+    match event {
+        Event::GameStarted { index, name } => println!("[{index}/{total}] {name}"),
+        Event::BuildStage { stage } => println!("  {stage}"),
+        Event::Built {
+            title_id,
             seconds,
-            size_bytes,
-        };
-        if self.args.build_only {
-            return entry;
-        }
-        live.begin_run(&self.eden.logs_dir(record.title_id));
-        let nsp = nsp_dir.join(format!("{}.nsp", record.title_id));
-        let lang = self.lang;
-        let runner = Runner::new(&mut self.eden, clock, record.title_id, nsp, &game_dir)
-            .with_input(record.settings.input.clone())
-            .with_stop(live.stop_token());
-        let result = runner.run(&game.scenario, |step| {
-            print_step(step);
-            live.step(step, lang);
-        });
-        entry.log_excerpt = excerpt(&game_dir, &result.launches);
-        entry.scenario = Some(result);
-        entry
-    }
-
-    fn build(&self, game: &Planned, nsp_dir: &Path) -> Result<(BuildRecord, f64, u64), String> {
-        let request = game.request.clone()?;
-        let record = wizard::plan(request, None, game.entropy, RUNTIME_VERSION)
-            .map_err(|error| error.to_string())?;
-        let key = build_key(&self.desktop, &record, &game.folder);
-        let key_path = nsp_dir.join(format!("{}.build-key", record.title_id));
-        let nsp_path = nsp_dir.join(format!("{}.nsp", record.title_id));
-        if let (Some(key), Ok(kept), Ok(nsp)) =
-            (&key, fs::read_to_string(&key_path), fs::metadata(&nsp_path))
-            && kept.trim() == key
-        {
-            println!("  reused the NSP built from the same game, settings and runtime");
-            return Ok((record, 0.0, nsp.len()));
-        }
-        let _ = fs::remove_file(&key_path);
-        let target = PackTarget {
-            keys_path: self.keys.to_string_lossy().into_owned(),
-            library_dir: nsp_dir.to_string_lossy().into_owned(),
-        };
-        let started = Instant::now();
-        let mut last_stage = None;
-        let mut progress = |update: BuildProgress| {
-            if last_stage != Some(update.stage) {
-                last_stage = Some(update.stage);
-                println!("  {:?}", update.stage);
+            reused,
+        } => {
+            if *reused {
+                println!("  reused the NSP built from the same game, settings and runtime");
             }
-        };
-        let stored = self
-            .packer
-            .pack(&record, None, &target, &CancelToken::new(), &mut progress)
-            .map_err(|error| redact(&format!("{error} ({})", game.folder.display()), &self.keys))?;
-        if let Some(key) = key {
-            let _ = fs::write(&key_path, key);
+            println!("  built {title_id} in {seconds:.0} s");
         }
-        Ok((record, started.elapsed().as_secs_f64(), stored.size_bytes))
+        Event::BuildFailed { error } => println!("  build failed: {error}"),
+        Event::Step { step } => print_step(step),
+        Event::Stopped { left } => println!("stopped from the live page; {left} games left out"),
+        Event::RunFinished { report, .. } => println!("report: {report}"),
+        Event::RunStarted { .. } | Event::LaunchLogs { .. } | Event::GameFinished { .. } => {}
+    }
+}
+
+fn show_on_page(live: &Live, event: &Event, lang: Lang) {
+    match event {
+        Event::RunStarted { dir, .. } => live.set_run_dir(Path::new(dir)),
+        Event::GameStarted { index, name } => live.begin_game(*index, name),
+        Event::LaunchLogs { dir } => live.begin_run(Path::new(dir)),
+        Event::Step { step } => live.step(step, lang),
+        Event::GameFinished { outcome, .. } => live.end_game(*outcome),
+        _ => {}
     }
 }
 
@@ -391,51 +334,6 @@ fn carafe_checkout(config: &Config) -> PathBuf {
         Some(path) => repository.join(path),
         None => repository.join("external").join("carafe"),
     }
-}
-
-/// Returns a digest of everything an NSP is built from: the build record, the runtime archive, hacBrewPack and
-/// the size and time of every file in the game folder.
-///
-/// Returns `None` when any of them cannot be read, so the NSP is built again.
-fn build_key(desktop: &Path, record: &BuildRecord, folder: &Path) -> Option<String> {
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
-    hasher.update(serde_json::to_vec(record).ok()?);
-    for input in [
-        desktop.join("resources").join("carafe-runtime.bin"),
-        desktop.join("binaries").join(hacbrewpack_name()),
-    ] {
-        hasher.update(file_stamp(&input)?.as_bytes());
-    }
-    let mut pending = vec![folder.to_path_buf()];
-    let mut files = Vec::new();
-    while let Some(dir) = pending.pop() {
-        for entry in fs::read_dir(&dir).ok()? {
-            let path = entry.ok()?.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else {
-                files.push(format!(
-                    "{}|{}",
-                    path.strip_prefix(folder).ok()?.display(),
-                    file_stamp(&path)?
-                ));
-            }
-        }
-    }
-    files.sort();
-    for file in files {
-        hasher.update(file.as_bytes());
-    }
-    Some(format!("{:x}", hasher.finalize()))
-}
-
-/// Returns the size and modification time of `path` as text, or `None` when it cannot be read.
-fn file_stamp(path: &Path) -> Option<String> {
-    let metadata = fs::metadata(path).ok()?;
-    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(format!("{}:{}", metadata.len(), modified.as_nanos()))
 }
 
 fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> Planned {
@@ -467,7 +365,7 @@ fn prepare_probe(builds: &Path, folder: &Path, run: &ProbeRun) -> Result<(), Str
     let source = builds.join(probes::build_dir(run.arch)).join(&file);
     if !source.is_file() {
         return Err(format!(
-            "{} is missing: run docker compose run --rm probes",
+            "{} is missing: run docker compose --profile build run --rm probes",
             source.display()
         ));
     }
@@ -491,25 +389,6 @@ fn print_step(step: &StepResult) {
         report::step_title(step, Lang::En),
         step.detail
     );
-}
-
-fn excerpt(game_dir: &Path, launches: &[LaunchRecord]) -> Vec<String> {
-    let mut lines = Vec::new();
-    for launch in launches {
-        let dir = game_dir.join(&launch.logs);
-        let overlay = fs::read_to_string(dir.join("carafe-overlay.log")).unwrap_or_default();
-        let runtime =
-            fs::read_to_string(dir.join("logs").join("autorun_runtime.log")).unwrap_or_default();
-        lines.push(format!("— launch {} —", launch.number));
-        lines.extend(report::log_excerpt(&overlay, &runtime));
-    }
-    lines
-}
-
-fn write_report(run_dir: &Path, report: &RunReport, lang: Lang) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(report).map_err(|error| error.to_string())?;
-    fs::write(run_dir.join("report.json"), json).map_err(|error| error.to_string())?;
-    fs::write(run_dir.join("report.html"), report.html(lang)).map_err(|error| error.to_string())
 }
 
 fn keys_from_carafe() -> Result<PathBuf, String> {
@@ -559,18 +438,6 @@ fn now() -> Utc {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
     Utc::from_unix(seconds)
-}
-
-fn safe_name(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 fn settings_label(settings: &AutorunSettings) -> String {

@@ -107,6 +107,11 @@ pub trait Emulator {
     /// Returns the logs of the current launch of `title`; empty texts for missing files.
     fn logs(&self, title: TitleId) -> GameLogs;
 
+    /// Returns the folder the game's logs appear in while it runs, when the emulator writes them to the host.
+    fn live_logs(&self, _title: TitleId) -> Option<PathBuf> {
+        None
+    }
+
     /// Moves the logs of `title` from the emulator's SD card into `dest`, so the next launch starts without them.
     ///
     /// # Errors
