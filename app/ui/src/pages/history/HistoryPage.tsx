@@ -211,6 +211,15 @@ function RunCard({ run }: { run: RunSummary }) {
                     })}
                   </span>
                 ) : null}
+                {game.frames ? (
+                  <span className={styles.muted}>
+                    {t("frames.summary", {
+                      mean: game.frames.meanMs.toFixed(1),
+                      p99: Math.round(game.frames.p99Ms),
+                      stutters: game.frames.stutters,
+                    })}
+                  </span>
+                ) : null}
                 {game.problems ? (
                   <span className={styles.muted}>
                     {t("resources.problems", { errors: game.problems.errors, warnings: game.problems.warnings })}

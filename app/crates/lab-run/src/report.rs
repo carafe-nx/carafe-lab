@@ -655,6 +655,7 @@ mod tests {
                     perf: None,
                     resources: None,
                     problems: None,
+                    frames: None,
                 }],
                 save: Vec::new(),
                 emulator_gaps: Vec::new(),

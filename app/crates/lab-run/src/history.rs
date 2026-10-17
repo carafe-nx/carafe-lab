@@ -8,6 +8,7 @@ use ts_rs::TS;
 
 use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::{Outcome, PROBLEMS_FILE};
+use lab_core::frames::FrameSummary;
 use lab_core::perf::PerfSummary;
 use lab_core::problems::{self, Problem, ProblemCounts};
 use lab_core::resources::ResourceSummary;
@@ -79,6 +80,9 @@ pub struct GameSummary {
     /// Error and warning lines in the logs of all its launches; `None` when no logs were read.
     #[serde(default)]
     pub problems: Option<ProblemCounts>,
+    /// The frame times of its first launch in short; `None` when the emulator recorded none.
+    #[serde(default)]
+    pub frames: Option<FrameSummary>,
 }
 
 /// What each variant of an A/B run gave and whether they differ.
@@ -256,6 +260,11 @@ impl RunSummary {
                             warnings: sum.warnings + counts.warnings,
                         })
                 }),
+                frames: game
+                    .scenario
+                    .as_ref()
+                    .and_then(|scenario| scenario.launches.first())
+                    .and_then(|launch| launch.frames),
             })
             .collect();
         Self {
@@ -441,6 +450,7 @@ mod tests {
             perf: None,
             resources: None,
             problems: None,
+            frames: None,
         }
     }
 

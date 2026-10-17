@@ -7,6 +7,7 @@
 pub mod config;
 pub mod emulator;
 pub mod firmware;
+pub mod frames;
 pub mod input_check;
 pub mod lang;
 pub mod local;

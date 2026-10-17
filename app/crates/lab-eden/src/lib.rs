@@ -27,6 +27,7 @@ use carafe_core::TitleId;
 use carafe_core::settings::SwitchButton;
 use lab_core::emulator::{EdenCpu, Gpu, Video};
 use lab_core::firmware;
+use lab_core::frames;
 use lab_core::perf::{self, PerfSample};
 pub use lab_core::redact::redact;
 use lab_core::resources::{self, ResourceSample};
@@ -701,6 +702,19 @@ impl Eden {
         )))
     }
 
+    fn frame_times_file(&self, title: TitleId) -> Option<PathBuf> {
+        let suffix = format!("_{}.csv", title.to_string().to_ascii_uppercase());
+        let since = UNIX_EPOCH + Duration::from_millis(self.perf_from?);
+        fs::read_dir(self.user_dir.join("log"))
+            .ok()?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(&suffix))
+            .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+            .filter(|(modified, _)| *modified >= since)
+            .max_by_key(|(modified, _)| *modified)
+            .map(|(_, path)| path)
+    }
+
     fn hung(&self) -> Option<String> {
         self.session.as_ref()?;
         let from = self.perf_from?;
@@ -1012,6 +1026,13 @@ impl Emulator for Eden {
             fs::create_dir_all(dest).map_err(io)?;
             fs::write(dest.join("eden_log.txt"), self.emulator_log()).map_err(io)?;
         }
+        if let Some(recorded) = self.frame_times_file(title) {
+            fs::create_dir_all(dest).map_err(io)?;
+            if fs::rename(&recorded, dest.join(frames::FILE)).is_err() {
+                fs::copy(&recorded, dest.join(frames::FILE)).map_err(io)?;
+                let _ = fs::remove_file(&recorded);
+            }
+        }
         let readings = self.launch_resources();
         if !readings.is_empty() {
             fs::create_dir_all(dest).map_err(io)?;
@@ -1221,13 +1242,14 @@ pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> St
         EdenCpu::Dynarmic => "0",
         EdenCpu::Nce => "1",
     };
-    let sections: [(&str, &[(&str, &str)]); 6] = [
+    let sections: [(&str, &[(&str, &str)]); 7] = [
         ("Cpu", &[("cpu_backend", cpu_backend)]),
         (
             "Core",
             &[("use_multi_core", "true"), ("memory_layout_mode", "0")],
         ),
         ("System", &[("use_docked_mode", "1")]),
+        ("Debugging", &[("record_frame_times", "true")]),
         (
             "UI",
             &[

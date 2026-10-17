@@ -18,7 +18,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 2. Logs
 
-- [ ] `feature` Frame times of every frame, not only FPS; a screenshot every few seconds
+- [ ] `feature` A screenshot every few seconds of a launch
 - [ ] `feature` After a failure the game runs again with detailed logs chosen by the symptom
 - [ ] `feature` On a hang: backtraces of all the game's threads through the gdb stub before the watchdog stops it
 - [ ] `feature` On a crash: registers, stack and module map, without Eden's full crash dump
@@ -88,6 +88,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Frame times of every frame, not only FPS: mean, worst hundredth and stutters per launch
 - [x] `feature` Error lines that the game's run before did not have are highlighted in History
 - [x] `feature` Tools for Claude, one call each: the running game's logs and milestones (`logs`)
 - [x] `feature` Every launch: Eden, runtime, Wine errors, DXVK and Mesa warnings; CPU and memory every second

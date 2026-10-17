@@ -305,6 +305,9 @@
     "more_one": "and {{count}} more",
     "more_other": "and {{count}} more"
   },
+  "frames": {
+    "summary": "a frame takes {{mean}} ms on average, 99% under {{p99}} ms, stutters over 50 ms: {{stutters}}"
+  },
   "resources": {
     "summary": "memory up to {{memory}} GB · processor {{cpu}}% of one core",
     "problems": "in the logs: {{errors}} errors, {{warnings}} warnings"

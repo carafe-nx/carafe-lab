@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use ts_rs::TS;
 
+use lab_core::frames::{self, FrameSummary};
 use lab_core::input_check::{self, PressCheck};
 use lab_core::milestones::{Exit, Launch, Stage};
 use lab_core::perf::{self, PerfSample, PerfSummary};
@@ -220,6 +221,9 @@ pub struct LaunchRecord {
     /// Error and warning lines in the launch's logs, listed in its `problems.json`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problems: Option<ProblemCounts>,
+    /// The times of the launch's frames in short, from its `frametimes.csv`; `None` when the emulator recorded none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frames: Option<FrameSummary>,
 }
 
 /// Everything a scenario found for one game.
@@ -552,6 +556,7 @@ impl<'a> Runner<'a> {
             perf: None,
             resources: None,
             problems: None,
+            frames: None,
         });
         self.launch_open = true;
         self.pressed.clear();
@@ -808,6 +813,9 @@ impl<'a> Runner<'a> {
         let dest = self.dir.join(&record.logs);
         let _ = self.emulator.take_logs(self.title, &dest);
         record.problems = write_problems(&dest);
+        record.frames = std::fs::read_to_string(dest.join(frames::FILE))
+            .ok()
+            .and_then(|text| frames::summarize(&frames::parse(&text)));
     }
 
     fn result(

@@ -329,6 +329,9 @@
     "more_many": "и ещё {{count}}",
     "more_other": "и ещё {{count}}"
   },
+  "frames": {
+    "summary": "кадр в среднем {{mean}} мс, 99% быстрее {{p99}} мс, рывков дольше 50 мс: {{stutters}}"
+  },
   "resources": {
     "summary": "память до {{memory}} ГБ · процессор {{cpu}}% одного ядра",
     "problems": "в логах ошибок: {{errors}}, предупреждений: {{warnings}}"
