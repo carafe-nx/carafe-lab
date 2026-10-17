@@ -1,0 +1,29 @@
+Carafe bench: BAR.SYNC with register RZ as the barrier. NAK encodes "bar.sync 0" with register A = RZ
+(sm50.rs), which reads as zero, the same barrier as the immediate 0 Eden accepts. Eden threw
+"Non-immediate input A" and DXVK's HUD frame-time compute shader was not built.
+GPL-3.0-or-later, as the file it changes.
+diff --git a/src/shader_recompiler/frontend/maxwell/translate/impl/barrier_operations.cpp b/src/shader_recompiler/frontend/maxwell/translate/impl/barrier_operations.cpp
+--- a/src/shader_recompiler/frontend/maxwell/translate/impl/barrier_operations.cpp
++++ b/src/shader_recompiler/frontend/maxwell/translate/impl/barrier_operations.cpp
+@@ -75,16 +75,17 @@ void TranslatorVisitor::BAR(u64 insn) {
+     if (mode != Mode::Sync) {
+         throw NotImplementedException("BAR mode {}", mode);
+     }
+-    if (bar.is_a_imm == 0) {
++    const bool a_is_rz{bar.is_a_imm == 0 && bar.imm_a == static_cast<u64>(IR::Reg::RZ)};
++    if (bar.is_a_imm == 0 && !a_is_rz) {
+         throw NotImplementedException("Non-immediate input A");
+     }
+-    if (bar.imm_a != 0) {
++    if (bar.is_a_imm != 0 && bar.imm_a != 0) {
+         throw NotImplementedException("Non-zero input A");
+     }
+-    if (bar.is_b_imm == 0) {
++    if (bar.is_b_imm == 0 && !a_is_rz) {
+         throw NotImplementedException("Non-immediate input B");
+     }
+-    if (bar.imm_b != 0) {
++    if (bar.is_b_imm != 0 && bar.imm_b != 0) {
+         throw NotImplementedException("Non-zero input B");
+     }
+     if (bar.pred != IR::Pred::PT && bar.neg_pred != 0) {

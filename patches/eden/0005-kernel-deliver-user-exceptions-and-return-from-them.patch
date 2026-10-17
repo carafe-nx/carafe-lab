@@ -1,0 +1,196 @@
+Carafe bench: user-mode exceptions go to the process's handler and svcReturnFromException returns from it,
+as in Mesosphère: the frame goes to the process local region at 0x148, x0 holds the type, x1 the frame,
+pc the process entry point. The runtime enters FEX through a brk that only its handler resolves.
+The handler gets the exception before Eden's debugger, so the gdb stub can watch a process that runs FEX.
+When no handler takes it, Eden behaves as before.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/arm/dynarmic/arm_dynarmic_64.cpp
++++ b/src/core/arm/dynarmic/arm_dynarmic_64.cpp
+@@ -135,12 +135,10 @@
+         ReturnException(pc, PrefetchAbort);
+         return;
+     default:
+-        if (m_debugger_enabled) {
+-            ReturnException(pc, InstructionBreakpoint);
+-        } else {
+-            m_parent.LogBacktrace(m_process);
+-            LOG_CRITICAL(Core_ARM, "ExceptionRaised(exception = {}, pc = {:08X}, code = {:08X})", static_cast<std::size_t>(exception), pc, m_memory.Read32(pc));
++        if (!m_debugger_enabled) {
++            LOG_DEBUG(Core_ARM, "ExceptionRaised(exception = {}, pc = {:08X}, code = {:08X})", static_cast<std::size_t>(exception), pc, m_memory.Read32(pc));
+         }
++        ReturnException(pc, InstructionBreakpoint);
+     }
+ }
+ 
+--- a/src/core/hle/kernel/physical_core.cpp
++++ b/src/core/hle/kernel/physical_core.cpp
+@@ -4,6 +4,7 @@
+ // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
++#include "common/alignment.h"
+ #include "common/scope_exit.h"
+ #include "common/settings.h"
+ #include "core/core.h"
+@@ -16,6 +17,59 @@
+ 
+ namespace Kernel {
+ 
++namespace {
++
++bool EnterUserExceptionHandler(KernelCore& kernel, KProcess& process, Core::ArmInterface& interface,
++                               bool prefetch_abort) {
++    if (!process.Is64Bit()) {
++        return false;
++    }
++
++    Svc::ThreadContext context{};
++    interface.GetContext(context);
++
++    u32 esr = 1U << 25;
++    u64 far = 0;
++    if (prefetch_abort) {
++        esr |= 0x20U << 26;
++        far = context.pc;
++    } else if (const u32 insn = process.GetMemory().Read32(context.pc); (insn & 0xFFE0001F) == 0xD4200000) {
++        esr |= (0x3CU << 26) | ((insn >> 5) & 0xFFFF);
++    }
++
++    if (!process.EnterUserException()) {
++        return false;
++    }
++
++    Svc::ExceptionInfo64 info{};
++    for (size_t i = 0; i < info.r.size(); i++) {
++        info.r[i] = context.r[i];
++    }
++    info.lr = context.lr;
++    info.sp = context.sp;
++    info.pc = context.pc;
++    info.pstate = context.pstate & Svc::ExceptionInfoPstateMask;
++    info.esr = esr;
++    info.far = far;
++
++    const u64 info_address =
++        GetInteger(process.GetProcessLocalRegionAddress()) + Svc::ProcessLocalRegionExceptionInfoOffset;
++    process.GetMemory().WriteBlock(info_address, &info, sizeof(info));
++
++    context.pc = GetInteger(process.GetEntryPoint());
++    context.r[0] = Svc::ExceptionTypeInstructionAbort;
++    context.r[1] = info_address;
++    context.sp = Common::AlignDown(info_address, 0x10);
++    context.pstate = 0;
++
++    auto* thread = GetCurrentThreadPointer(kernel);
++    thread->GetContext() = context;
++    kernel.CurrentPhysicalCore().LoadContext(thread);
++    return true;
++}
++
++}
++
+ PhysicalCore::PhysicalCore(KernelCore& kernel, std::size_t core_index)
+     : m_kernel{kernel}, m_core_index{core_index} {
+     m_is_single_core = !kernel.IsMulticore();
+@@ -130,10 +184,20 @@ void PhysicalCore::RunThread(Kernel::KThread* thread) {
+                 // state.
+                 interface->GetContext(thread->GetContext());
+             }
++            if (EnterUserExceptionHandler(m_kernel, *process, *interface, prefetch_abort)) {
++                return;
++            }
+             if (system.DebuggerEnabled()) {
+                 system.GetDebugger().NotifyThreadStopped(thread);
+             } else {
+                 interface->LogBacktrace(process);
++                if (breakpoint) {
++                    Svc::ThreadContext context{};
++                    interface->GetContext(context);
++                    context.pc += 4;
++                    interface->SetContext(context);
++                    continue;
++                }
+             }
+             thread->RequestSuspend(SuspendType::Debug);
+             return;
+--- a/src/core/hle/kernel/svc.cpp
++++ b/src/core/hle/kernel/svc.cpp
+@@ -1532,6 +1532,7 @@
+ static void SvcWrap_ReturnFromException64(Core::System& system, std::span<uint64_t, 8> args) {
+     Result result = Convert<Result>(GetArg64(args, 0));
+     ReturnFromException64(system, result);
++    system.Kernel().CurrentPhysicalCore().SaveSvcArguments(GetCurrentProcess(system.Kernel()), args);
+ }
+ 
+ static void SvcWrap_GetInfo64(Core::System& system, std::span<uint64_t, 8> args) {
+--- a/src/core/hle/kernel/svc/svc_exception.cpp
++++ b/src/core/hle/kernel/svc/svc_exception.cpp
+@@ -117,7 +117,40 @@
+ }
+ 
+ void ReturnFromException(Core::System& system, Result result) {
+-    UNIMPLEMENTED();
++    auto& kernel = system.Kernel();
++    auto& process = GetCurrentProcess(kernel);
++    if (!process.Is64Bit()) {
++        UNIMPLEMENTED();
++        return;
++    }
++
++    const u64 info_address =
++        GetInteger(process.GetProcessLocalRegionAddress()) + ProcessLocalRegionExceptionInfoOffset;
++    ExceptionInfo64 info{};
++    process.GetMemory().ReadBlock(info_address, &info, sizeof(info));
++
++    if (!process.LeaveUserException()) {
++        return;
++    }
++
++    auto* thread = GetCurrentThreadPointer(kernel);
++    auto& core = kernel.CurrentPhysicalCore();
++    core.SaveContext(thread);
++    auto& context = thread->GetContext();
++    for (size_t i = 0; i < info.r.size(); i++) {
++        context.r[i] = info.r[i];
++    }
++    context.lr = info.lr;
++    context.sp = info.sp;
++    context.pc = info.pc;
++    context.pstate = (info.pstate & ExceptionInfoPstateMask) | (context.pstate & ~ExceptionInfoPstateMask);
++    core.LoadContext(thread);
++
++    if (R_FAILED(result)) {
++        LOG_CRITICAL(Kernel_SVC, "Unhandled user exception at pc={:#x}, result={:#x}", info.pc, result.raw);
++        core.LogBacktrace();
++        thread->RequestSuspend(SuspendType::Debug);
++    }
+ }
+ 
+ void Break64(Core::System& system, BreakReason break_reason, uint64_t arg, uint64_t size) {
+--- a/src/core/hle/kernel/svc_types.h
++++ b/src/core/hle/kernel/svc_types.h
+@@ -122,6 +122,23 @@
+ 
+ constexpr inline size_t ThreadLocalRegionSize = 0x200;
+ 
++constexpr inline size_t ProcessLocalRegionExceptionInfoOffset = 0x148;
++constexpr inline u64 ExceptionTypeInstructionAbort = 0x100;
++constexpr inline u32 ExceptionInfoPstateMask = 0xF0000000;
++
++struct ExceptionInfo64 {
++    std::array<u64, 9> r;
++    u64 lr;
++    u64 sp;
++    u64 pc;
++    u32 pstate;
++    u32 afsr0;
++    u32 afsr1;
++    u32 esr;
++    u64 far;
++};
++static_assert(sizeof(ExceptionInfo64) == 0x78);
++
+ struct PageInfo {
+     u32 flags;
+ };

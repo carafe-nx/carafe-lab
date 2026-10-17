@@ -1,0 +1,57 @@
+Carafe bench: surface stores with a channel mask and surface load and store cache hints. NVK uploads
+images with 1 and 2 byte texels through the compute shader vk-meta-copy-buffer-to-image-compute, which NAK
+compiles to sust.p.r; Eden threw "Non-full mask", the pipeline was not built and the texture stayed empty,
+including DXVK's HUD font (R8) and D3D9 L8 and R5G6B5 textures. A masked store now takes the enabled
+channels from consecutive registers and writes zero to the others, as the hardware ignores them for the
+format. Cache hints only change caching on the hardware, so SULD and SUST no longer reject them; NAK emits
+other hints in descriptor-buffer shaders ("Cache 2").
+GPL-3.0-or-later, as the file it changes.
+diff --git a/src/shader_recompiler/frontend/maxwell/translate/impl/surface_load_store.cpp b/src/shader_recompiler/frontend/maxwell/translate/impl/surface_load_store.cpp
+--- a/src/shader_recompiler/frontend/maxwell/translate/impl/surface_load_store.cpp
++++ b/src/shader_recompiler/frontend/maxwell/translate/impl/surface_load_store.cpp
+@@ -188,9 +188,6 @@ void TranslatorVisitor::SULD(u64 insn) {
+     if (suld.clamp != Clamp::IGN) {
+         throw NotImplementedException("Clamp {}", suld.clamp.Value());
+     }
+-    if (suld.cache != LoadCache::CA && suld.cache != LoadCache::CG) {
+-        throw NotImplementedException("Cache {}", suld.cache.Value());
+-    }
+     const bool is_typed{suld.d != 0};
+     if (is_typed && suld.ba != 0) {
+         throw NotImplementedException("BA");
+@@ -248,9 +245,6 @@ void TranslatorVisitor::SUST(u64 insn) {
+     if (sust.clamp != Clamp::IGN) {
+         throw NotImplementedException("Clamp {}", sust.clamp.Value());
+     }
+-    if (sust.cache != StoreCache::WB && sust.cache != StoreCache::CG) {
+-        throw NotImplementedException("Cache {}", sust.cache.Value());
+-    }
+     const bool is_typed{sust.d != 0};
+     if (is_typed && sust.ba != 0) {
+         throw NotImplementedException("BA");
+@@ -269,10 +263,22 @@ void TranslatorVisitor::SUST(u64 insn) {
+         color = MakeColor(ir, sust.data_reg, SizeInRegs(sust.size));
+     } else {
+         const unsigned mask{SwizzleMask(sust.swizzle)};
+-        if (mask != 0xf) {
+-            throw NotImplementedException("Non-full mask");
++        if (mask == 0xf) {
++            color = MakeColor(ir, sust.data_reg, 4);
++        } else {
++            std::array<IR::U32, 4> components;
++            IR::Reg reg{sust.data_reg};
++            for (unsigned component = 0; component < 4; ++component) {
++                if (((mask >> component) & 1) != 0) {
++                    components[component] = X(reg);
++                    ++reg;
++                } else {
++                    components[component] = ir.Imm32(0);
++                }
++            }
++            color = ir.CompositeConstruct(components[0], components[1], components[2],
++                                          components[3]);
+         }
+-        color = MakeColor(ir, sust.data_reg, 4);
+     }
+     ir.ImageWrite(handle, coords, color, info);
+ }

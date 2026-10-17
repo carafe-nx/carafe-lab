@@ -1,0 +1,27 @@
+Carafe bench: unmapping a fixed buffer also removes it from the allocation it was mapped into, so a later
+FreeSpace of that allocation succeeds as on the hardware. Mesa unmaps each buffer before it frees its space;
+Eden then answered BadValue, the space was never freed and the process ran out of memory.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp
++++ b/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp
+@@ -5,7 +5,9 @@
+ // SPDX-FileCopyrightText: 2021 Skyline Team and Contributors
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ 
++#include <algorithm>
+ #include <cstring>
++#include <iterator>
+ #include <utility>
+ 
+ #include "common/alignment.h"
+@@ -395,6 +397,9 @@
+             auto& allocator{mapping.big_page ? *vm.big_page_allocator : *vm.small_page_allocator};
+             u32 page_size_bits{mapping.big_page ? vm.big_page_size_bits : VM::PAGE_SIZE_BITS};
+             allocator.Free(u32(mapping.offset >> page_size_bits), u32(mapping.size >> page_size_bits));
++        } else if (auto alloc = allocation_map.upper_bound(params.offset); alloc != allocation_map.begin()) {
++            auto& mappings = std::prev(alloc)->second.mappings;
++            mappings.erase(std::remove(mappings.begin(), mappings.end(), params.offset), mappings.end());
+         }
+ 
+         // Sparse mappings shouldn't be fully unmapped, just returned to their sparse state

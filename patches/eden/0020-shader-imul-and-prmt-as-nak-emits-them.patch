@@ -1,0 +1,297 @@
+Carafe bench: the shader recompiler translates IMUL, IMUL32I and PRMT. NAK, the compiler of NVK,
+emits them for Maxwell (integer multiplies and byte extracts), NVN never does, and Eden threw
+"Instruction IMUL (imm)/PRMT (imm) is not implemented", built no pipeline and skipped every draw
+that used it. DXVK's Direct3D 9 fixed-function shaders contain both, so a D3D9 game drew nothing.
+IMUL.HI is built from 16-bit partial products so every backend runs it without 64-bit integers.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/shader_recompiler/CMakeLists.txt b/src/shader_recompiler/CMakeLists.txt
+index d02ee26..9cdcc1d 100644
+--- a/src/shader_recompiler/CMakeLists.txt
++++ b/src/shader_recompiler/CMakeLists.txt
+@@ -127,6 +127,7 @@ add_library(shader_recompiler STATIC
+     frontend/maxwell/translate/impl/bitfield_extract.cpp
+     frontend/maxwell/translate/impl/bitfield_insert.cpp
+     frontend/maxwell/translate/impl/branch_indirect.cpp
++    frontend/maxwell/translate/impl/byte_permute.cpp
+     frontend/maxwell/translate/impl/common_encoding.h
+     frontend/maxwell/translate/impl/common_funcs.cpp
+     frontend/maxwell/translate/impl/common_funcs.h
+@@ -167,6 +168,7 @@ add_library(shader_recompiler STATIC
+     frontend/maxwell/translate/impl/integer_floating_point_conversion.cpp
+     frontend/maxwell/translate/impl/integer_funnel_shift.cpp
+     frontend/maxwell/translate/impl/integer_minimum_maximum.cpp
++    frontend/maxwell/translate/impl/integer_multiply.cpp
+     frontend/maxwell/translate/impl/integer_popcount.cpp
+     frontend/maxwell/translate/impl/integer_scaled_add.cpp
+     frontend/maxwell/translate/impl/integer_set_predicate.cpp
+diff --git a/src/shader_recompiler/frontend/maxwell/translate/impl/byte_permute.cpp b/src/shader_recompiler/frontend/maxwell/translate/impl/byte_permute.cpp
+new file mode 100644
+index 0000000..deeaecb
+--- /dev/null
++++ b/src/shader_recompiler/frontend/maxwell/translate/impl/byte_permute.cpp
+@@ -0,0 +1,113 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include <algorithm>
++#include <optional>
++
++#include "common/bit_field.h"
++#include "common/common_types.h"
++#include "shader_recompiler/frontend/maxwell/translate/impl/impl.h"
++
++namespace Shader::Maxwell {
++namespace {
++enum class Mode : u64 {
++    Index = 0,
++    Forward4Extract = 1,
++    Backward4Extract = 2,
++    Replicate8 = 3,
++    EdgeClampLeft = 4,
++    EdgeClampRight = 5,
++    Replicate16 = 6,
++};
++
++u32 TableIndex(Mode mode, u32 n, u32 byte) {
++    switch (mode) {
++    case Mode::Forward4Extract:
++        return (n + byte) & 7;
++    case Mode::Backward4Extract:
++        return (n - byte) & 7;
++    case Mode::Replicate8:
++        return n;
++    case Mode::EdgeClampLeft:
++        return std::max(byte, n);
++    case Mode::EdgeClampRight:
++        return std::min(byte, n);
++    case Mode::Replicate16:
++        return (byte & 1) + 2 * (n & 1);
++    default:
++        throw NotImplementedException("PRMT mode {}", static_cast<u64>(mode));
++    }
++}
++
++IR::U32 PickByte(TranslatorVisitor& v, const IR::U32& a, const IR::U32& b, const IR::U32& index,
++                 const IR::U1& replicate_sign) {
++    const IR::U1 from_b{v.ir.INotEqual(v.ir.BitwiseAnd(index, v.ir.Imm32(4)), v.ir.Imm32(0))};
++    const IR::U32 word{v.ir.Select(from_b, b, a)};
++    const IR::U32 offset{v.ir.ShiftLeftLogical(v.ir.BitwiseAnd(index, v.ir.Imm32(3)), v.ir.Imm32(3))};
++    const IR::U32 value{v.ir.BitFieldExtract(word, offset, v.ir.Imm32(8), false)};
++    const IR::U32 sign{v.ir.BitFieldExtract(word, v.ir.IAdd(offset, v.ir.Imm32(7)), v.ir.Imm32(1), true)};
++    return IR::U32{v.ir.Select(replicate_sign, v.ir.BitwiseAnd(sign, v.ir.Imm32(0xff)), value)};
++}
++
++void PRMT(TranslatorVisitor& v, u64 insn, const IR::U32& selector, const IR::U32& src_b) {
++    union {
++        u64 raw;
++        BitField<0, 8, IR::Reg> dest_reg;
++        BitField<8, 8, IR::Reg> src_reg_a;
++        BitField<48, 3, Mode> mode;
++    } const prmt{insn};
++
++    const IR::U32 src_a{v.X(prmt.src_reg_a)};
++    const Mode mode{prmt.mode};
++    const std::optional<u32> imm{selector.IsImmediate() ? std::optional{selector.U32()}
++                                                        : std::nullopt};
++    IR::U32 result{v.ir.Imm32(0)};
++    for (u32 byte = 0; byte < 4; ++byte) {
++        IR::U32 index;
++        IR::U1 replicate_sign{v.ir.Imm1(false)};
++        if (mode == Mode::Index) {
++            if (imm) {
++                const u32 nibble{(*imm >> (byte * 4)) & 0xf};
++                index = v.ir.Imm32(nibble & 7);
++                replicate_sign = v.ir.Imm1((nibble & 8) != 0);
++            } else {
++                const IR::U32 nibble{
++                    v.ir.BitFieldExtract(selector, v.ir.Imm32(byte * 4), v.ir.Imm32(4), false)};
++                index = v.ir.BitwiseAnd(nibble, v.ir.Imm32(7));
++                replicate_sign =
++                    v.ir.INotEqual(v.ir.BitwiseAnd(nibble, v.ir.Imm32(8)), v.ir.Imm32(0));
++            }
++        } else if (imm) {
++            index = v.ir.Imm32(TableIndex(mode, *imm & 3, byte));
++        } else {
++            const IR::U32 n{v.ir.BitwiseAnd(selector, v.ir.Imm32(3))};
++            index = v.ir.Imm32(TableIndex(mode, 3, byte));
++            for (u32 i = 0; i < 3; ++i) {
++                index = IR::U32{v.ir.Select(v.ir.IEqual(n, v.ir.Imm32(i)),
++                                            v.ir.Imm32(TableIndex(mode, i, byte)), index)};
++            }
++        }
++        const IR::U32 picked{PickByte(v, src_a, src_b, index, replicate_sign)};
++        result = v.ir.BitFieldInsert(result, picked, v.ir.Imm32(byte * 8), v.ir.Imm32(8));
++    }
++    v.X(prmt.dest_reg, result);
++}
++}
++
++void TranslatorVisitor::PRMT_reg(u64 insn) {
++    PRMT(*this, insn, GetReg20(insn), GetReg39(insn));
++}
++
++void TranslatorVisitor::PRMT_rc(u64 insn) {
++    PRMT(*this, insn, GetReg39(insn), GetCbuf(insn));
++}
++
++void TranslatorVisitor::PRMT_cr(u64 insn) {
++    PRMT(*this, insn, GetCbuf(insn), GetReg39(insn));
++}
++
++void TranslatorVisitor::PRMT_imm(u64 insn) {
++    PRMT(*this, insn, GetImm20(insn), GetReg39(insn));
++}
++
++}
+diff --git a/src/shader_recompiler/frontend/maxwell/translate/impl/integer_multiply.cpp b/src/shader_recompiler/frontend/maxwell/translate/impl/integer_multiply.cpp
+new file mode 100644
+index 0000000..6057339
+--- /dev/null
++++ b/src/shader_recompiler/frontend/maxwell/translate/impl/integer_multiply.cpp
+@@ -0,0 +1,95 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++#include "common/bit_field.h"
++#include "common/common_types.h"
++#include "shader_recompiler/frontend/maxwell/translate/impl/impl.h"
++
++namespace Shader::Maxwell {
++namespace {
++IR::U32 MultiplyHigh(TranslatorVisitor& v, const IR::U32& a, const IR::U32& b, bool is_a_signed,
++                     bool is_b_signed) {
++    const IR::U32 mask{v.ir.Imm32(0xffff)};
++    const IR::U32 sixteen{v.ir.Imm32(16)};
++    const IR::U32 a_lo{v.ir.BitwiseAnd(a, mask)};
++    const IR::U32 a_hi{v.ir.ShiftRightLogical(a, sixteen)};
++    const IR::U32 b_lo{v.ir.BitwiseAnd(b, mask)};
++    const IR::U32 b_hi{v.ir.ShiftRightLogical(b, sixteen)};
++    const IR::U32 lo_lo{v.ir.IMul(a_lo, b_lo)};
++    const IR::U32 hi_lo{v.ir.IMul(a_hi, b_lo)};
++    const IR::U32 lo_hi{v.ir.IMul(a_lo, b_hi)};
++    const IR::U32 hi_hi{v.ir.IMul(a_hi, b_hi)};
++    const IR::U32 middle{v.ir.IAdd(v.ir.IAdd(v.ir.ShiftRightLogical(lo_lo, sixteen),
++                                             v.ir.BitwiseAnd(hi_lo, mask)),
++                                   v.ir.BitwiseAnd(lo_hi, mask))};
++    IR::U32 high{v.ir.IAdd(v.ir.IAdd(hi_hi, v.ir.ShiftRightLogical(hi_lo, sixteen)),
++                           v.ir.IAdd(v.ir.ShiftRightLogical(lo_hi, sixteen),
++                                     v.ir.ShiftRightLogical(middle, sixteen)))};
++    if (is_a_signed) {
++        const IR::U1 is_negative{v.ir.ILessThan(a, v.ir.Imm32(0), true)};
++        high = v.ir.ISub(high, IR::U32{v.ir.Select(is_negative, b, v.ir.Imm32(0))});
++    }
++    if (is_b_signed) {
++        const IR::U1 is_negative{v.ir.ILessThan(b, v.ir.Imm32(0), true)};
++        high = v.ir.ISub(high, IR::U32{v.ir.Select(is_negative, a, v.ir.Imm32(0))});
++    }
++    return high;
++}
++
++void IMUL(TranslatorVisitor& v, u64 insn, const IR::U32& src_b, bool high, bool is_a_signed,
++          bool is_b_signed, bool cc) {
++    union {
++        u64 raw;
++        BitField<0, 8, IR::Reg> dest_reg;
++        BitField<8, 8, IR::Reg> src_reg_a;
++    } const imul{insn};
++
++    if (cc) {
++        throw NotImplementedException("IMUL.CC");
++    }
++    const IR::U32 src_a{v.X(imul.src_reg_a)};
++    const IR::U32 result{high ? MultiplyHigh(v, src_a, src_b, is_a_signed, is_b_signed)
++                              : v.ir.IMul(src_a, src_b)};
++    v.X(imul.dest_reg, result);
++}
++
++void IMUL(TranslatorVisitor& v, u64 insn, const IR::U32& src_b) {
++    union {
++        u64 raw;
++        BitField<39, 1, u64> high;
++        BitField<40, 1, u64> is_a_signed;
++        BitField<41, 1, u64> is_b_signed;
++        BitField<47, 1, u64> cc;
++    } const imul{insn};
++
++    IMUL(v, insn, src_b, imul.high != 0, imul.is_a_signed != 0, imul.is_b_signed != 0,
++         imul.cc != 0);
++}
++}
++
++void TranslatorVisitor::IMUL_reg(u64 insn) {
++    IMUL(*this, insn, GetReg20(insn));
++}
++
++void TranslatorVisitor::IMUL_cbuf(u64 insn) {
++    IMUL(*this, insn, GetCbuf(insn));
++}
++
++void TranslatorVisitor::IMUL_imm(u64 insn) {
++    IMUL(*this, insn, GetImm20(insn));
++}
++
++void TranslatorVisitor::IMUL32I(u64 insn) {
++    union {
++        u64 raw;
++        BitField<52, 1, u64> cc;
++        BitField<53, 1, u64> high;
++        BitField<54, 1, u64> is_a_signed;
++        BitField<55, 1, u64> is_b_signed;
++    } const imul{insn};
++
++    IMUL(*this, insn, GetImm32(insn), imul.high != 0, imul.is_a_signed != 0,
++         imul.is_b_signed != 0, imul.cc != 0);
++}
++
++}
+diff --git a/src/shader_recompiler/frontend/maxwell/translate/impl/not_implemented.cpp b/src/shader_recompiler/frontend/maxwell/translate/impl/not_implemented.cpp
+index 369af8e..53cb2ac 100644
+--- a/src/shader_recompiler/frontend/maxwell/translate/impl/not_implemented.cpp
++++ b/src/shader_recompiler/frontend/maxwell/translate/impl/not_implemented.cpp
+@@ -131,22 +131,6 @@ void TranslatorVisitor::IMADSP_imm(u64) {
+     ThrowNotImplemented(Opcode::IMADSP_imm);
+ }
+ 
+-void TranslatorVisitor::IMUL_reg(u64) {
+-    ThrowNotImplemented(Opcode::IMUL_reg);
+-}
+-
+-void TranslatorVisitor::IMUL_cbuf(u64) {
+-    ThrowNotImplemented(Opcode::IMUL_cbuf);
+-}
+-
+-void TranslatorVisitor::IMUL_imm(u64) {
+-    ThrowNotImplemented(Opcode::IMUL_imm);
+-}
+-
+-void TranslatorVisitor::IMUL32I(u64) {
+-    ThrowNotImplemented(Opcode::IMUL32I);
+-}
+-
+ void TranslatorVisitor::JCAL(u64) {
+     ThrowNotImplemented(Opcode::JCAL);
+ }
+@@ -195,22 +179,6 @@ void TranslatorVisitor::PRET(u64) {
+     ThrowNotImplemented(Opcode::PRET);
+ }
+ 
+-void TranslatorVisitor::PRMT_reg(u64) {
+-    ThrowNotImplemented(Opcode::PRMT_reg);
+-}
+-
+-void TranslatorVisitor::PRMT_rc(u64) {
+-    ThrowNotImplemented(Opcode::PRMT_rc);
+-}
+-
+-void TranslatorVisitor::PRMT_cr(u64) {
+-    ThrowNotImplemented(Opcode::PRMT_cr);
+-}
+-
+-void TranslatorVisitor::PRMT_imm(u64) {
+-    ThrowNotImplemented(Opcode::PRMT_imm);
+-}
+-
+ void TranslatorVisitor::R2B(u64) {
+     ThrowNotImplemented(Opcode::R2B);
+ }

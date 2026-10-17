@@ -1,0 +1,128 @@
+Carafe bench: a texture buffer GL can't view directly is read from a copy. glTextureBufferRange needs an offset
+that is a multiple of GL_TEXTURE_BUFFER_OFFSET_ALIGNMENT (256 on Mesa d3d12, 16 on the guest's GPU); otherwise
+it fails with GL_INVALID_VALUE, the view keeps no buffer and reads zeros, and Mesa's pixel-buffer uploads in the
+guest (OpenTTD's OpenGL video and animation buffers) came out black. Buffer textures also have no swizzle, so a
+B8G8R8A8 view (patch 0014) read as RGBA8 had red and blue swapped. The range is copied to the start of a scratch
+buffer, and B8G8R8A8 texels get red and blue swapped there by a compute shader.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.cpp
+@@ -7,10 +7,12 @@
+ #include <algorithm>
+ #include <span>
+ 
++#include "common/bit_util.h"
+ #include "shader_recompiler/backend/glasm/emit_glasm.h"
+ #include "video_core/buffer_cache/buffer_cache.h"
+ #include "video_core/renderer_opengl/gl_buffer_cache.h"
+ #include "video_core/renderer_opengl/gl_device.h"
++#include "video_core/renderer_opengl/gl_shader_util.h"
+ #include "video_core/renderer_opengl/maxwell_to_gl.h"
+ 
+ namespace OpenGL {
+@@ -119,6 +121,9 @@ BufferCacheRuntime::BufferCacheRuntime(const Device& device_,
+     GLint gl_max_attributes;
+     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &gl_max_attributes);
+     max_attributes = static_cast<u32>(gl_max_attributes);
++    GLint gl_texture_buffer_alignment;
++    glGetIntegerv(GL_TEXTURE_BUFFER_OFFSET_ALIGNMENT, &gl_texture_buffer_alignment);
++    texture_buffer_alignment = static_cast<u32>(gl_texture_buffer_alignment);
+     for (auto& stage_uniforms : fast_uniforms) {
+         for (OGLBuffer& buffer : stage_uniforms) {
+             buffer.Create();
+@@ -371,9 +376,69 @@ void BufferCacheRuntime::BindTransformFeedbackBuffers(VideoCommon::HostBindings<
+ 
+ void BufferCacheRuntime::BindTextureBuffer(Buffer& buffer, u32 offset, u32 size,
+                                            PixelFormat format) {
++    const bool is_bgra = format == PixelFormat::B8G8R8A8_UNORM;
++    if (!use_assembly_shaders && (is_bgra || offset % texture_buffer_alignment != 0)) {
++        *texture_handles++ = CopiedView(buffer, offset, size, format);
++        return;
++    }
+     *texture_handles++ = buffer.View(offset, size, format);
+ }
+ 
++GLuint BufferCacheRuntime::CopiedView(Buffer& buffer, u32 offset, u32 size, PixelFormat format) {
++    static constexpr std::string_view BGRA_SWIZZLE_COMP = R"(#version 430
++layout(local_size_x = 64) in;
++layout(binding = 0, rgba8) uniform restrict imageBuffer texels;
++layout(location = 0) uniform int count;
++layout(location = 1) uniform int first;
++void main() {
++    const int texel = first + int(gl_GlobalInvocationID.x);
++    if (texel < count) {
++        imageStore(texels, texel, imageLoad(texels, texel).bgra);
++    }
++}
++)";
++    static constexpr u32 MAX_GROUPS = 65535;
++    TextureBufferCopy& copy = texture_buffer_copies[next_texture_buffer_copy++ %
++                                                    texture_buffer_copies.size()];
++    if (copy.size < size) {
++        copy.buffer.Release();
++        copy.buffer.Create();
++        copy.size = Common::NextPow2(size);
++        glNamedBufferData(copy.buffer.handle, copy.size, nullptr, GL_STREAM_COPY);
++    }
++    if (copy.view.handle == 0) {
++        copy.view.Create(GL_TEXTURE_BUFFER);
++    }
++    // The last shader that wrote this copy must be done before it is overwritten.
++    glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
++    glCopyNamedBufferSubData(buffer.Handle(), copy.buffer.handle, offset, 0, size);
++    if (format != PixelFormat::B8G8R8A8_UNORM) {
++        const GLenum gl_format{MaxwellToGL::GetFormatTuple(format).internal_format};
++        glTextureBufferRange(copy.view.handle, GetTextureBufferFormat(gl_format),
++                             copy.buffer.handle, 0, size);
++        return copy.view.handle;
++    }
++    // Buffer textures have no swizzle: swap red and blue in the copy.
++    glTextureBufferRange(copy.view.handle, GL_RGBA8, copy.buffer.handle, 0, size);
++    if (bgra_swizzle_program.handle == 0) {
++        bgra_swizzle_program = CreateProgram(BGRA_SWIZZLE_COMP, GL_COMPUTE_SHADER);
++    }
++    const GLint count = static_cast<GLint>(size / 4);
++    GLint program = 0;
++    glGetIntegerv(GL_CURRENT_PROGRAM, &program);
++    glUseProgram(bgra_swizzle_program.handle);
++    glBindImageTexture(0, copy.view.handle, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA8);
++    glUniform1i(0, count);
++    for (GLint first = 0; first < count; first += MAX_GROUPS * 64) {
++        glUniform1i(1, first);
++        const GLint left = count - first;
++        glDispatchCompute(std::min<u32>(MAX_GROUPS, static_cast<u32>((left + 63) / 64)), 1, 1);
++    }
++    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
++    glUseProgram(static_cast<GLuint>(program));
++    return copy.view.handle;
++}
++
+ void BufferCacheRuntime::BindImageBuffer(Buffer& buffer, u32 offset, u32 size, PixelFormat format) {
+     *image_handles++ = buffer.View(offset, size, format);
+ }
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.h
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.h
+@@ -229,6 +229,22 @@ private:
+     GLuint* texture_handles = nullptr;
+     GLuint* image_handles = nullptr;
+ 
++    /// A view of a copy of the range, for a range GL can't view directly: an offset that is not a
++    /// multiple of GL_TEXTURE_BUFFER_OFFSET_ALIGNMENT, or BGRA texels (buffer textures have no
++    /// swizzle).
++    GLuint CopiedView(Buffer& buffer, u32 offset, u32 size,
++                      VideoCore::Surface::PixelFormat format);
++
++    struct TextureBufferCopy {
++        OGLBuffer buffer;
++        OGLTexture view;
++        u32 size = 0;
++    };
++    u32 texture_buffer_alignment = 1;
++    OGLProgram bgra_swizzle_program;
++    std::array<TextureBufferCopy, 8> texture_buffer_copies;
++    size_t next_texture_buffer_copy = 0;
++
+     std::optional<StreamBuffer> stream_buffer;
+ 
+     std::array<std::array<OGLBuffer, VideoCommon::NUM_GRAPHICS_UNIFORM_BUFFERS>,

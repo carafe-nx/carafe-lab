@@ -1,0 +1,24 @@
+Carafe bench: a 32-bit process is created with ASLR, as Atmosphere's loader creates every process that
+does not ask to disable it (stratosphere/loader/source/ldr_process_creation.cpp). Without it the kernel
+placed each new thread-local page first-fit from 0x200000, inside the range a 32-bit Wine guest reserves,
+so the runtime's placement check refused every new page: 0xd001 after 256 retries. 39-bit processes keep
+the fixed layout of 0008. Replaces 0016.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/kernel/k_process.cpp
++++ b/src/core/hle/kernel/k_process.cpp
+@@ -1218,10 +1218,14 @@ Result KProcess::LoadFromMetadata(const FileSys::ProgramMetadata& metadata, std:
+         break;
+     case FileSys::ProgramAddressSpaceType::Is32Bit:
+         flag |= Svc::CreateProcessFlag::AddressSpace32Bit;
++        // As Atmosphere's loader: ASLR unless the process asks for none. In 4 GiB the kernel
++        // otherwise puts thread-local pages first-fit at 0x200000, where a 32-bit guest lives.
++        flag |= Svc::CreateProcessFlag::EnableAslr;
+         code_address = 0x20'0000 + aslr_space_offset;
+         break;
+     case FileSys::ProgramAddressSpaceType::Is32BitNoMap:
+         flag |= Svc::CreateProcessFlag::AddressSpace32BitWithoutAlias;
++        flag |= Svc::CreateProcessFlag::EnableAslr;
+         code_address = 0x20'0000 + aslr_space_offset;
+         break;
+     }

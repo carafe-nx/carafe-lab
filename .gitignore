@@ -1,0 +1,12 @@
+/build/
+/app/target/
+node_modules/
+/app/ui/dist/
+/app/crates/lab-desktop/gen/
+/tools/probes/build/
+/lab.json
+/.idea/
+*.keys
+*.nsp
+*.nca
+*.xci

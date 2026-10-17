@@ -1,0 +1,125 @@
+Carafe bench: a sampler heap index that NAK assembles from bytes. For DXVK 3.x's D3D9 shaders NAK loads the
+16-bit index from the push data as two bytes and joins them with BitFieldInsert:
+umin(bfi(bfi(bfi(bfi(0, bfe(c0[push], 0, 8), 0, 8), bfe(c0[push], 8, 8), 8, 8), 0, 16, 8), 0, 24, 8), 0x7ff).
+The texture pass did not know this form, took the push data word itself as the handle's low half and the
+texture descriptor's word as its high half, so nearly every draw of the game read an empty TIC slot and
+sampled black. A chain of BitFieldInsert whose fields are contiguous bytes of one constant buffer word, with
+zeros above them, now tracks as a bit field of that word, like a BitFieldUExtract.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/shader_recompiler/ir_opt/texture_pass.cpp
++++ b/src/shader_recompiler/ir_opt/texture_pass.cpp
+@@ -373,6 +373,96 @@
+     return std::nullopt;
+ }
+ 
++std::optional<u32> FoldedImmediate(const IR::Value& value) {
++    if (value.IsImmediate()) {
++        return value.U32();
++    }
++    const IR::Inst* const inst{value.InstRecursive()};
++    if (inst->GetOpcode() == IR::Opcode::ShiftLeftLogical32 && inst->Arg(0).IsImmediate() &&
++        inst->Arg(1).IsImmediate()) {
++        return inst->Arg(0).U32() << inst->Arg(1).U32();
++    }
++    return std::nullopt;
++}
++
++struct AssembledField {
++    const IR::Inst* source;
++    u32 bit_offset;
++    u32 bit_count;
++};
++
++std::optional<AssembledField> TrackAssembledField(const IR::Inst* inst) {
++    const IR::Inst* source{};
++    u32 source_shift{};
++    std::optional<u32> delta;
++    u32 low_insert{32};
++    u32 high_insert{};
++    u32 inserted_bits{};
++    u32 lowest_zero{32};
++    for (;;) {
++        if (inst->GetOpcode() != IR::Opcode::BitFieldInsert || inst->Arg(1).IsImmediate()) {
++            return std::nullopt;
++        }
++        const std::optional<u32> insert_offset{FoldedImmediate(inst->Arg(2))};
++        const std::optional<u32> insert_count{FoldedImmediate(inst->Arg(3))};
++        const IR::Inst* const extract{inst->Arg(1).InstRecursive()};
++        if (!insert_offset || !insert_count || extract->GetOpcode() != IR::Opcode::BitFieldUExtract) {
++            return std::nullopt;
++        }
++        const std::optional<u32> extract_offset{FoldedImmediate(extract->Arg(1))};
++        const std::optional<u32> extract_count{FoldedImmediate(extract->Arg(2))};
++        if (!extract_offset || !extract_count || *extract_count != *insert_count) {
++            return std::nullopt;
++        }
++        if (extract->Arg(0).IsImmediate()) {
++            if (extract->Arg(0).U32() != 0) {
++                return std::nullopt;
++            }
++            lowest_zero = (std::min)(lowest_zero, *insert_offset);
++        } else {
++            const IR::Inst* from{extract->Arg(0).InstRecursive()};
++            u32 shift{};
++            if (from->GetOpcode() == IR::Opcode::ShiftRightLogical32) {
++                const std::optional<u32> amount{FoldedImmediate(from->Arg(1))};
++                if (!amount || from->Arg(0).IsImmediate()) {
++                    return std::nullopt;
++                }
++                shift = *amount;
++                from = from->Arg(0).InstRecursive();
++            }
++            if (from->GetOpcode() != IR::Opcode::GetCbufU32 || *extract_offset < *insert_offset) {
++                return std::nullopt;
++            }
++            const u32 this_delta{*extract_offset - *insert_offset};
++            if (source && (source != from || source_shift != shift || *delta != this_delta)) {
++                return std::nullopt;
++            }
++            source = from;
++            source_shift = shift;
++            delta = this_delta;
++            low_insert = (std::min)(low_insert, *insert_offset);
++            high_insert = (std::max)(high_insert, *insert_offset + *insert_count);
++            inserted_bits += *insert_count;
++        }
++        if (inst->Arg(0).IsImmediate()) {
++            if (inst->Arg(0).U32() != 0) {
++                return std::nullopt;
++            }
++            break;
++        }
++        inst = inst->Arg(0).InstRecursive();
++    }
++    if (!source || low_insert != 0 || inserted_bits != high_insert || high_insert > lowest_zero ||
++        source_shift + *delta + high_insert > 32) {
++        return std::nullopt;
++    }
++    return AssembledField{
++        .source = source,
++        .bit_offset = source_shift + *delta,
++        .bit_count = high_insert,
++    };
++}
++
+ std::optional<IndirectHandle> TrackIndirectHandle(const IR::Value& value) {
+     if (value.IsImmediate()) {
+         return std::nullopt;
+@@ -448,6 +538,16 @@
+         result.bit_offset = dynamic->Arg(1).U32();
+         dynamic = dynamic->Arg(0).InstRecursive();
+         break;
++    case IR::Opcode::BitFieldInsert: {
++        const std::optional<AssembledField> field{TrackAssembledField(dynamic)};
++        if (!field) {
++            return std::nullopt;
++        }
++        result.bit_offset = field->bit_offset;
++        result.bit_count = (std::min)(result.bit_count, field->bit_count);
++        dynamic = field->source;
++        break;
++    }
+     default:
+         break;
+     }

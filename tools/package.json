@@ -1,0 +1,13 @@
+{
+  "name": "carafe-lab-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "look": "node look.mjs",
+    "watch": "node watch.mjs",
+    "burst": "node burst.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
+}

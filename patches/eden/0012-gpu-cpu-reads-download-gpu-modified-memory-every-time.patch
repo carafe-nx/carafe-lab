@@ -1,0 +1,45 @@
+Carafe bench: a CPU read of memory the GPU has modified downloads it every time, as the hardware shows the
+CPU what the GPU wrote. Eden skipped the download for buffers, for an image read before, and for any read
+inside the area a core read last, so glReadPixels through a staging buffer returned stale zeros.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -754,11 +754,6 @@
+         const size_t core = system.GetCurrentHostThreadID();
+         auto& current_area = rasterizer_read_areas[core];
+         gpu_device_memory->ApplyOpOnPointer(p, scratch_buffers[core], [&](DAddr address) {
+-            const DAddr end_address = address + size;
+-            if (current_area.start_address <= address && end_address <= current_area.end_address)
+-                [[likely]] {
+-                return;
+-            }
+             current_area = system.GPU().OnCPURead(address, size);
+         });
+     }
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -676,7 +676,7 @@
+             auto& image_view = slot_image_views[image_view_id];
+             image_view.flags |= ImageViewFlagBits::PreemtiveDownload;
+         }
+-        area->preemtive &= image.info.forced_flushed;
++        area->preemtive = false;
+         image.info.forced_flushed = true;
+     });
+     return area;
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -671,6 +671,12 @@
+         .end_address = Common::AlignUp(addr + size, Core::DEVICE_PAGESIZE),
+         .preemtive = true,
+     };
++    {
++        std::scoped_lock lock{buffer_cache.mutex};
++        if (buffer_cache.IsRegionGpuModified(addr, size)) {
++            new_area.preemtive = false;
++        }
++    }
+     return new_area;
+ }
+ 

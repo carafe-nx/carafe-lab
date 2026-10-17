@@ -1,0 +1,284 @@
+{
+  "steps": [
+    {
+      "step": "launch"
+    },
+    {
+      "step": "waitFor",
+      "milestone": "firstFrame",
+      "timeout": 300
+    },
+    {
+      "step": "wait",
+      "seconds": 20
+    },
+    {
+      "step": "screenshot",
+      "name": "r00-title"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "RRIGHT",
+        "RDOWN"
+      ],
+      "hold": 4
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "PLUS"
+      ],
+      "hold": 0.6
+    },
+    {
+      "step": "wait",
+      "seconds": 45
+    },
+    {
+      "step": "screenshot",
+      "name": "r01-account"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 6
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "X"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 1
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "X"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 1
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "Y"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 2
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 12
+    },
+    {
+      "step": "screenshot",
+      "name": "r02-main"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 12
+    },
+    {
+      "step": "screenshot",
+      "name": "r03-mode"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 14
+    },
+    {
+      "step": "screenshot",
+      "name": "r04-car"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 12
+    },
+    {
+      "step": "screenshot",
+      "name": "r05-gear"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 12
+    },
+    {
+      "step": "screenshot",
+      "name": "r06-track"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 10
+    },
+    {
+      "step": "screenshot",
+      "name": "r07-params"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 12
+    },
+    {
+      "step": "screenshot",
+      "name": "r07b"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 3
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.3
+    },
+    {
+      "step": "wait",
+      "seconds": 45
+    },
+    {
+      "step": "screenshot",
+      "name": "r08-race"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "ZR"
+      ],
+      "hold": 10
+    },
+    {
+      "step": "screenshot",
+      "name": "r10-drive"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "ZR"
+      ],
+      "hold": 10
+    },
+    {
+      "step": "screenshot",
+      "name": "r11-drive"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "ZR"
+      ],
+      "hold": 10
+    },
+    {
+      "step": "screenshot",
+      "name": "r12-drive"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "ZR"
+      ],
+      "hold": 10
+    },
+    {
+      "step": "screenshot",
+      "name": "r13-drive"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "ZR"
+      ],
+      "hold": 10
+    },
+    {
+      "step": "screenshot",
+      "name": "r14-drive"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "ZR"
+      ],
+      "hold": 10
+    },
+    {
+      "step": "screenshot",
+      "name": "r15-drive"
+    }
+  ]
+}

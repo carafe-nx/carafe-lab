@@ -1,0 +1,304 @@
+Carafe bench: a global memory access through a pointer the shader loaded from memory becomes a storage
+buffer bound from that pointer. NAK reads a uniform buffer in a descriptor buffer in two loads: the buffer
+address from the set (whose address is in c0[56 + 16 * set]), then the data. Eden tracked the data load to the
+set pointer in c0 and read the set at offset "buffer address - set address": zeros, logged only as "Storage
+buffer tracked without bias". DXVK keeps D3D9 vertex shader constants in set 2 (c0[88]), so every vertex went
+to the origin and the game showed only its clear colour. The hardware LDG reads the computed address.
+When the low and high address words are elements k and k+1 of one global load whose own address is a constant
+buffer pointer, the buffer is indirect: at bind time the pointer plus offset gives the descriptor {u64
+address, u32 size}; a size of 0 uses the mapped size. The shader offset is taken from the loaded address.
+NVN-biased and direct accesses are unchanged; global memory fallbacks skip indirect buffers.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/shader_recompiler/backend/glasm/emit_glasm_memory.cpp b/src/shader_recompiler/backend/glasm/emit_glasm_memory.cpp
+--- a/src/shader_recompiler/backend/glasm/emit_glasm_memory.cpp
++++ b/src/shader_recompiler/backend/glasm/emit_glasm_memory.cpp
+@@ -34,3 +34,3 @@ void GlobalStorageOp(EmitContext& ctx, Register address, bool pointer_based, std
+     for (size_t index = 0; index < num_buffers; ++index) {
+-        if (!ctx.info.nvn_buffer_used[index]) {
++        if (!ctx.info.nvn_buffer_used[index] || ctx.info.storage_buffers_descriptors[index].indirect) {
+             continue;
+diff --git a/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp b/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
+--- a/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
++++ b/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
+@@ -635,3 +635,3 @@ std::string EmitContext::DefineGlobalMemoryFunctions() {
+     for (size_t index = 0; index < num_buffers; ++index) {
+-        if (!info.nvn_buffer_used[index]) {
++        if (!info.nvn_buffer_used[index] || info.storage_buffers_descriptors[index].indirect) {
+             continue;
+diff --git a/src/shader_recompiler/backend/spirv/spirv_emit_context.cpp b/src/shader_recompiler/backend/spirv/spirv_emit_context.cpp
+--- a/src/shader_recompiler/backend/spirv/spirv_emit_context.cpp
++++ b/src/shader_recompiler/backend/spirv/spirv_emit_context.cpp
+@@ -947,3 +947,3 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
+         for (size_t index = 0; index < num_buffers; ++index) {
+-            if (!info.nvn_buffer_used[index]) {
++            if (!info.nvn_buffer_used[index] || info.storage_buffers_descriptors[index].indirect) {
+                 continue;
+diff --git a/src/shader_recompiler/frontend/maxwell/translate_program.cpp b/src/shader_recompiler/frontend/maxwell/translate_program.cpp
+--- a/src/shader_recompiler/frontend/maxwell/translate_program.cpp
++++ b/src/shader_recompiler/frontend/maxwell/translate_program.cpp
+@@ -120,3 +120,5 @@ void AddNVNStorageBuffers(IR::Program& program) {
+         const u32 offset{base + index * descriptor_size};
+-        const auto it{std::ranges::find(descs, offset, &StorageBufferDescriptor::cbuf_offset)};
++        const auto it{std::ranges::find_if(descs, [offset](const StorageBufferDescriptor& desc) {
++            return !desc.indirect && desc.cbuf_offset == offset;
++        })};
+         if (it != descs.end()) {
+diff --git a/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp b/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp
+--- a/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp
++++ b/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp
+@@ -24,2 +24,4 @@ struct StorageBufferAddr {
+     u32 offset;
++    bool indirect{};
++    u32 indirect_offset{};
+ };
+@@ -31,2 +33,3 @@ struct StorageInst {
+     IR::Block* block;
++    IR::Value pointer_low{};
+ };
+@@ -283,2 +286,3 @@ struct LowAddrInfo {
+     s32 imm_offset;
++    IR::Value high{};
+ };
+@@ -328,2 +332,3 @@ std::optional<LowAddrInfo> TrackLowAddress(IR::Inst* inst) {
+         .imm_offset = imm_offset,
++        .high = addr_inst->Arg(1),
+     };
+@@ -368,2 +373,77 @@ std::optional<StorageBufferAddr> Track(const IR::Value& value, const Bias* bias)
+ 
++bool IsGlobalPointerLoad(IR::Opcode opcode) {
++    return opcode == IR::Opcode::LoadGlobal64 || opcode == IR::Opcode::LoadGlobal128;
++}
++
++struct IndirectInfo {
++    StorageBufferAddr storage_buffer;
++    IR::Value pointer_low;
++};
++
++const IR::Inst* PointerWord(const IR::Value& value) {
++    if (value.IsImmediate()) {
++        return nullptr;
++    }
++    const IR::Inst* const inst{value.InstRecursive()};
++    const IR::Opcode opcode{inst->GetOpcode()};
++    if (opcode != IR::Opcode::CompositeExtractU32x2 && opcode != IR::Opcode::CompositeExtractU32x4) {
++        return nullptr;
++    }
++    if (inst->Arg(0).IsImmediate() || !inst->Arg(1).IsImmediate()) {
++        return nullptr;
++    }
++    if (!IsGlobalPointerLoad(inst->Arg(0).InstRecursive()->GetOpcode())) {
++        return nullptr;
++    }
++    return inst;
++}
++
++std::optional<IndirectInfo> TrackIndirect(IR::Inst& inst) {
++    const std::optional<LowAddrInfo> low_addr{TrackLowAddress(&inst)};
++    if (!low_addr) {
++        return std::nullopt;
++    }
++    const IR::Inst* low_word{PointerWord(low_addr->value)};
++    if (!low_word && !low_addr->value.IsImmediate()) {
++        const IR::Inst* const add{low_addr->value.InstRecursive()};
++        if (add->GetOpcode() == IR::Opcode::IAdd32) {
++            low_word = PointerWord(add->Arg(0));
++            if (!low_word) {
++                low_word = PointerWord(add->Arg(1));
++            }
++        }
++    }
++    const IR::Inst* const high_word{PointerWord(low_addr->high)};
++    if (!low_word || !high_word) {
++        return std::nullopt;
++    }
++    const u32 element{low_word->Arg(1).U32()};
++    if (low_word->Arg(0).InstRecursive() != high_word->Arg(0).InstRecursive() ||
++        high_word->Arg(1).U32() != element + 1 || (element % 2) != 0) {
++        return std::nullopt;
++    }
++    IR::Inst* const load{low_word->Arg(0).InstRecursive()};
++    const std::optional<LowAddrInfo> load_addr{TrackLowAddress(load)};
++    if (!load_addr) {
++        return std::nullopt;
++    }
++    const std::optional<StorageBufferAddr> base{Track(load_addr->value, nullptr)};
++    if (!base) {
++        return std::nullopt;
++    }
++    const s32 descriptor_offset{load_addr->imm_offset + static_cast<s32>(element * 4)};
++    if (descriptor_offset < 0) {
++        return std::nullopt;
++    }
++    return IndirectInfo{
++        .storage_buffer{
++            .index = base->index,
++            .offset = base->offset,
++            .indirect = true,
++            .indirect_offset = static_cast<u32>(descriptor_offset),
++        },
++        .pointer_low = IR::Value{const_cast<IR::Inst*>(low_word)},
++    };
++}
++
+ /// Collects the storage buffer used by a global memory instruction and the instruction itself
+@@ -388,2 +468,20 @@ void CollectStorageBuffers(IR::Block& block, IR::Inst& inst, StorageInfo& info)
+     if (!storage_buffer) {
++        if (const std::optional<IndirectInfo> indirect{TrackIndirect(inst)}) {
++            LOG_WARNING(Shader,
++                        "Storage buffer tracked through a pointer in memory, index {} offset {} "
++                        "pointer offset {}",
++                        indirect->storage_buffer.index, indirect->storage_buffer.offset,
++                        indirect->storage_buffer.indirect_offset);
++            if (IsGlobalMemoryWrite(inst)) {
++                info.writes.insert(indirect->storage_buffer);
++            }
++            info.set.insert(indirect->storage_buffer);
++            info.to_replace.push_back(StorageInst{
++                .storage_buffer{indirect->storage_buffer},
++                .inst = &inst,
++                .block = &block,
++                .pointer_low = indirect->pointer_low,
++            });
++            return;
++        }
+         // If it fails, track without a bias
+@@ -411,3 +509,4 @@ void CollectStorageBuffers(IR::Block& block, IR::Inst& inst, StorageInfo& info)
+ /// Returns the offset in indices (not bytes) for an equivalent storage instruction
+-IR::U32 StorageOffset(IR::Block& block, IR::Inst& inst, StorageBufferAddr buffer, u32 alignment) {
++IR::U32 StorageOffset(IR::Block& block, IR::Inst& inst, StorageBufferAddr buffer, u32 alignment,
++                      const IR::Value& pointer_low) {
+     IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
+@@ -424,3 +523,4 @@ IR::U32 StorageOffset(IR::Block& block, IR::Inst& inst, StorageBufferAddr buffer
+     // buffer offset in bytes.
+-    IR::U32 low_cbuf{ir.GetCbuf(ir.Imm32(buffer.index), ir.Imm32(buffer.offset))};
++    IR::U32 low_cbuf{buffer.indirect ? IR::U32{pointer_low}
++                                     : ir.GetCbuf(ir.Imm32(buffer.index), ir.Imm32(buffer.offset))};
+ 
+@@ -538,2 +638,4 @@ void GlobalMemoryToStorageBufferPass(IR::Program& program, const HostTranslateIn
+             .is_written = info.writes.contains(storage_buffer),
++            .indirect = storage_buffer.indirect,
++            .indirect_offset = storage_buffer.indirect_offset,
+         });
+@@ -547,3 +649,4 @@ void GlobalMemoryToStorageBufferPass(IR::Program& program, const HostTranslateIn
+         const IR::U32 offset{
+-            StorageOffset(*block, *inst, storage_buffer, host_info.min_ssbo_alignment)};
++            StorageOffset(*block, *inst, storage_buffer, host_info.min_ssbo_alignment,
++                          storage_inst.pointer_low)};
+         Replace(*block, *inst, index, offset);
+diff --git a/src/shader_recompiler/shader_info.h b/src/shader_recompiler/shader_info.h
+--- a/src/shader_recompiler/shader_info.h
++++ b/src/shader_recompiler/shader_info.h
+@@ -174,2 +174,4 @@ struct StorageBufferDescriptor {
+     bool is_written;
++    bool indirect{};
++    u32 indirect_offset{};
+ 
+diff --git a/src/video_core/buffer_cache/buffer_cache.h b/src/video_core/buffer_cache/buffer_cache.h
+--- a/src/video_core/buffer_cache/buffer_cache.h
++++ b/src/video_core/buffer_cache/buffer_cache.h
+@@ -425,3 +425,4 @@ template <class P>
+ bool BufferCache<P>::BindGraphicsStorageBuffer(size_t stage, size_t ssbo_index, u32 cbuf_index,
+-                                               u32 cbuf_offset, bool is_written) {
++                                               u32 cbuf_offset, bool is_written, bool indirect,
++                                               u32 indirect_offset) {
+     const bool already_enabled =
+@@ -448,5 +449,8 @@ bool BufferCache<P>::BindGraphicsStorageBuffer(size_t stage, size_t ssbo_index,
+     const auto& cbufs = maxwell3d->state.shader_stages[stage];
+-    const GPUVAddr ssbo_addr = cbufs.const_buffers[cbuf_index].address + cbuf_offset;
++    GPUVAddr ssbo_addr = cbufs.const_buffers[cbuf_index].address + cbuf_offset;
++    if (indirect) {
++        ssbo_addr = gpu_memory->Read<u64>(ssbo_addr) + indirect_offset;
++    }
+     channel_state->storage_buffers[stage][ssbo_index] =
+-        StorageBufferBinding(ssbo_addr, cbuf_index, is_written);
++        StorageBufferBinding(ssbo_addr, cbuf_index, is_written, indirect);
+     return (channel_state->storage_buffers[stage][ssbo_index].buffer_id != NULL_BUFFER_ID);
+@@ -489,3 +493,4 @@ template <class P>
+ void BufferCache<P>::BindComputeStorageBuffer(size_t ssbo_index, u32 cbuf_index, u32 cbuf_offset,
+-                                              bool is_written) {
++                                              bool is_written, bool indirect,
++                                              u32 indirect_offset) {
+     if (ssbo_index >= channel_state->compute_storage_buffers.size()) [[unlikely]] {
+@@ -524,5 +529,8 @@ void BufferCache<P>::BindComputeStorageBuffer(size_t ssbo_index, u32 cbuf_index,
+     const auto& cbufs = launch_desc.const_buffer_config;
+-    const GPUVAddr ssbo_addr = cbufs[cbuf_index].Address() + cbuf_offset;
++    GPUVAddr ssbo_addr = cbufs[cbuf_index].Address() + cbuf_offset;
++    if (indirect) {
++        ssbo_addr = gpu_memory->Read<u64>(ssbo_addr) + indirect_offset;
++    }
+     channel_state->compute_storage_buffers[ssbo_index] =
+-        StorageBufferBinding(ssbo_addr, cbuf_index, is_written);
++        StorageBufferBinding(ssbo_addr, cbuf_index, is_written, indirect);
+ }
+@@ -1888,3 +1896,3 @@ template <class P>
+ Binding BufferCache<P>::StorageBufferBinding(GPUVAddr ssbo_addr, u32 cbuf_index,
+-                                             bool is_written) const {
++                                             bool is_written, bool descriptor) const {
+     const GPUVAddr gpu_addr = gpu_memory->Read<u64>(ssbo_addr);
+@@ -1898,3 +1906,9 @@ Binding BufferCache<P>::StorageBufferBinding(GPUVAddr ssbo_addr, u32 cbuf_index,
+     const auto size = [&]() {
+-        const bool is_nvn_cbuf = cbuf_index == 0;
++        if (descriptor) {
++            const u32 descriptor_size = gpu_memory->Read<u32>(ssbo_addr + 8);
++            if (descriptor_size != 0) {
++                return descriptor_size;
++            }
++        }
++        const bool is_nvn_cbuf = cbuf_index == 0 && !descriptor;
+         if (is_nvn_cbuf) {
+diff --git a/src/video_core/buffer_cache/buffer_cache_base.h b/src/video_core/buffer_cache/buffer_cache_base.h
+--- a/src/video_core/buffer_cache/buffer_cache_base.h
++++ b/src/video_core/buffer_cache/buffer_cache_base.h
+@@ -251,3 +251,4 @@ public:
+     bool BindGraphicsStorageBuffer(size_t stage, size_t ssbo_index, u32 cbuf_index, u32 cbuf_offset,
+-                                   bool is_written);
++                                   bool is_written, bool indirect = false,
++                                   u32 indirect_offset = 0);
+ 
+@@ -261,3 +262,3 @@ public:
+     void BindComputeStorageBuffer(size_t ssbo_index, u32 cbuf_index, u32 cbuf_offset,
+-                                  bool is_written);
++                                  bool is_written, bool indirect = false, u32 indirect_offset = 0);
+ 
+@@ -450,3 +451,3 @@ private:
+     [[nodiscard]] Binding StorageBufferBinding(GPUVAddr ssbo_addr, u32 cbuf_index,
+-                                               bool is_written) const;
++                                               bool is_written, bool descriptor = false) const;
+ 
+diff --git a/src/video_core/renderer_opengl/gl_compute_pipeline.cpp b/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
+--- a/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
++++ b/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
+@@ -89,3 +89,4 @@ void ComputePipeline::Configure() {
+         buffer_cache.BindComputeStorageBuffer(ssbo_index, desc.cbuf_index, desc.cbuf_offset,
+-                                              desc.is_written);
++                                              desc.is_written, desc.indirect,
++                                              desc.indirect_offset);
+         ++ssbo_index;
+diff --git a/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp b/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
+--- a/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
++++ b/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
+@@ -302,3 +302,4 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
+                 buffer_cache.BindGraphicsStorageBuffer(stage, ssbo_index, desc.cbuf_index,
+-                                                       desc.cbuf_offset, desc.is_written);
++                                                       desc.cbuf_offset, desc.is_written,
++                                                       desc.indirect, desc.indirect_offset);
+                 ++ssbo_index;
+diff --git a/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp b/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
+--- a/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
++++ b/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
+@@ -123,3 +123,4 @@ void ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
+         buffer_cache.BindComputeStorageBuffer(ssbo_index, desc.cbuf_index, desc.cbuf_offset,
+-                                              desc.is_written);
++                                              desc.is_written, desc.indirect,
++                                              desc.indirect_offset);
+         ++ssbo_index;
+diff --git a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+--- a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
++++ b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+@@ -335,3 +335,4 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
+                 buffer_cache.BindGraphicsStorageBuffer(stage, ssbo_index, desc.cbuf_index,
+-                                                       desc.cbuf_offset, desc.is_written);
++                                                       desc.cbuf_offset, desc.is_written,
++                                                       desc.indirect, desc.indirect_offset);
+                 ++ssbo_index;

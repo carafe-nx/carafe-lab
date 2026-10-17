@@ -1,0 +1,575 @@
+Carafe bench: samplers from a heap indexed by a constant, and samplers that force unnormalized
+coordinates. DXVK 3.x indexes a sampler heap with push data; NAK builds the bindless handle as
+(c[tex] & 0xfffff) | (ldc c[heap][umin(bfe(c0[push],0,16),0x7ff) << 2] & 0xfff00000). Eden took the push
+data cbuf as the sampler and the mask 0xfff00000 as a shift of 20, so it read a wrong TSC entry. The texture
+pass now tracks this indirect form, the descriptor keeps the heap's cbuf, offset, bit field, clamp and
+shift, and the pipelines read the index at draw time to find the sampler handle. A TSC with
+FLOAT_COORD_NORMALIZATION = FORCE_UNNORMALIZED (NVK sets it for unnormalized samplers, DXVK's HUD font
+uses one) now makes the shader sample with unnormalized coordinates: ReadTextureType reports Color2DRect
+for such a sampler and the sample patch for rectangle textures runs on implicit and explicit LOD samples.
+Before, the HUD text sampled the font with pixel coordinates as if normalized and drew nothing.
+GPL-3.0-or-later, as the files it changes.
+diff --git a/src/shader_recompiler/environment.h b/src/shader_recompiler/environment.h
+--- a/src/shader_recompiler/environment.h
++++ b/src/shader_recompiler/environment.h
+@@ -39,9 +39,12 @@ struct HandleKey {
+     u32 index, offset, shift_left;
+     u32 sec_index, sec_offset, sec_shift_left;
+     bool has_secondary;
++    u32 sec_indirect_offset{};
+     constexpr bool operator==(const HandleKey& o) const noexcept {
+-        return std::tie(index, offset, shift_left, sec_index, sec_offset, sec_shift_left, has_secondary)
+-            == std::tie(o.index, o.offset, o.shift_left, o.sec_index, o.sec_offset, o.sec_shift_left, o.has_secondary);
++        return std::tie(index, offset, shift_left, sec_index, sec_offset, sec_shift_left, has_secondary,
++                        sec_indirect_offset)
++            == std::tie(o.index, o.offset, o.shift_left, o.sec_index, o.sec_offset, o.sec_shift_left,
++                        o.has_secondary, o.sec_indirect_offset);
+     }
+ };
+ struct HandleKeyHash {
+@@ -51,6 +54,7 @@ struct HandleKeyHash {
+         h ^= (size_t(k.sec_index) << 33) ^ (size_t(k.sec_offset) << 2);
+         h ^= (size_t(k.sec_shift_left) << 3);
+         h ^= k.has_secondary ? 0x9e3779b97f4a7c15ULL : 0ULL;
++        h ^= size_t(k.sec_indirect_offset) << 4;
+         return h;
+     }
+ };
+@@ -65,6 +69,13 @@ struct ConstBufferAddr {
+     IR::U32 dynamic_offset;
+     u32 count;
+     bool has_secondary;
++    bool secondary_indirect{};
++    u32 secondary_indirect_index{};
++    u32 secondary_indirect_offset{};
++    u32 secondary_indirect_bit_offset{};
++    u32 secondary_indirect_bit_count{};
++    u32 secondary_indirect_max{};
++    u32 secondary_indirect_shift{};
+ };
+ 
+ class Environment {
+diff --git a/src/shader_recompiler/ir_opt/texture_pass.cpp b/src/shader_recompiler/ir_opt/texture_pass.cpp
+--- a/src/shader_recompiler/ir_opt/texture_pass.cpp
++++ b/src/shader_recompiler/ir_opt/texture_pass.cpp
+@@ -277,9 +277,18 @@ static inline u32 ReadCbufCached(Environment& env, u32 index, u32 offset) {
+ 
+ static inline u32 GetTextureHandleCached(Environment& env, const ConstBufferAddr& cbuf) {
+     const u32 sec_idx  = cbuf.has_secondary ? cbuf.secondary_index  : cbuf.index;
+-    const u32 sec_off  = cbuf.has_secondary ? cbuf.secondary_offset : cbuf.offset;
++    u32 sec_off  = cbuf.has_secondary ? cbuf.secondary_offset : cbuf.offset;
++    u32 sec_indirect_offset{};
++    if (cbuf.has_secondary && cbuf.secondary_indirect) {
++        sec_indirect_offset = IndirectDescriptorOffset(
++            ReadCbufCached(env, cbuf.secondary_indirect_index, cbuf.secondary_indirect_offset),
++            cbuf.secondary_indirect_bit_offset, cbuf.secondary_indirect_bit_count,
++            cbuf.secondary_indirect_max, cbuf.secondary_indirect_shift);
++        sec_off += sec_indirect_offset;
++    }
+     const HandleKey hk{cbuf.index, cbuf.offset, cbuf.shift_left,
+-                        sec_idx, sec_off, cbuf.secondary_shift_left, cbuf.has_secondary};
++                        sec_idx, sec_off, cbuf.secondary_shift_left, cbuf.has_secondary,
++                        sec_indirect_offset};
+     if (auto it = env.handle_cache.find(hk); it != env.handle_cache.end()) return it->second;
+ 
+     const u32 lhs = ReadCbufCached(env, cbuf.index, cbuf.offset) << cbuf.shift_left;
+@@ -341,11 +350,166 @@ std::optional<u32> TryGetConstant(IR::Value& value, Environment& env) {
+     return ReadCbufCached(env, index_number, offset_number);
+ }
+ 
++struct IndirectHandle {
++    u32 index;
++    u32 offset;
++    u32 dynamic_index;
++    u32 dynamic_offset;
++    u32 bit_offset;
++    u32 bit_count;
++    u32 max;
++    u32 shift;
++};
++
++std::optional<std::pair<const IR::Inst*, u32>> SplitImmediate(const IR::Inst* inst) {
++    const IR::Value lhs{inst->Arg(0)};
++    const IR::Value rhs{inst->Arg(1)};
++    if (rhs.IsImmediate() && !lhs.IsImmediate()) {
++        return std::pair{lhs.InstRecursive(), rhs.U32()};
++    }
++    if (lhs.IsImmediate() && !rhs.IsImmediate()) {
++        return std::pair{rhs.InstRecursive(), lhs.U32()};
++    }
++    return std::nullopt;
++}
++
++std::optional<IndirectHandle> TrackIndirectHandle(const IR::Value& value) {
++    if (value.IsImmediate()) {
++        return std::nullopt;
++    }
++    const IR::Inst* inst{value.InstRecursive()};
++    if (inst->GetOpcode() == IR::Opcode::BitwiseAnd32) {
++        const auto split{SplitImmediate(inst)};
++        if (!split) {
++            return std::nullopt;
++        }
++        inst = split->first;
++    }
++    if (inst->GetOpcode() != IR::Opcode::GetCbufU32 || !inst->Arg(0).IsImmediate() ||
++        inst->Arg(1).IsImmediate()) {
++        return std::nullopt;
++    }
++    IndirectHandle result{
++        .index = inst->Arg(0).U32(),
++        .offset = 0,
++        .dynamic_index = 0,
++        .dynamic_offset = 0,
++        .bit_offset = 0,
++        .bit_count = 32,
++        .max = 0xffffffffU,
++        .shift = 0,
++    };
++    const IR::Inst* dynamic{inst->Arg(1).InstRecursive()};
++    if (dynamic->GetOpcode() == IR::Opcode::IAdd32) {
++        const auto split{SplitImmediate(dynamic)};
++        if (!split) {
++            return std::nullopt;
++        }
++        result.offset = split->second;
++        dynamic = split->first;
++    }
++    if (dynamic->GetOpcode() == IR::Opcode::ShiftLeftLogical32) {
++        if (dynamic->Arg(0).IsImmediate() || !dynamic->Arg(1).IsImmediate()) {
++            return std::nullopt;
++        }
++        result.shift = dynamic->Arg(1).U32();
++        dynamic = dynamic->Arg(0).InstRecursive();
++    }
++    if (dynamic->GetOpcode() == IR::Opcode::UMin32) {
++        const auto split{SplitImmediate(dynamic)};
++        if (!split) {
++            return std::nullopt;
++        }
++        result.max = split->second;
++        dynamic = split->first;
++    }
++    if (dynamic->GetOpcode() == IR::Opcode::BitwiseAnd32) {
++        const auto split{SplitImmediate(dynamic)};
++        if (!split || (split->second & (split->second + 1)) != 0) {
++            return std::nullopt;
++        }
++        result.bit_count = static_cast<u32>(std::popcount(split->second));
++        dynamic = split->first;
++    }
++    switch (dynamic->GetOpcode()) {
++    case IR::Opcode::BitFieldUExtract:
++        if (dynamic->Arg(0).IsImmediate() || !dynamic->Arg(1).IsImmediate() ||
++            !dynamic->Arg(2).IsImmediate()) {
++            return std::nullopt;
++        }
++        result.bit_offset = dynamic->Arg(1).U32();
++        result.bit_count = (std::min)(result.bit_count, dynamic->Arg(2).U32());
++        dynamic = dynamic->Arg(0).InstRecursive();
++        break;
++    case IR::Opcode::ShiftRightLogical32:
++        if (dynamic->Arg(0).IsImmediate() || !dynamic->Arg(1).IsImmediate()) {
++            return std::nullopt;
++        }
++        result.bit_offset = dynamic->Arg(1).U32();
++        dynamic = dynamic->Arg(0).InstRecursive();
++        break;
++    default:
++        break;
++    }
++    if (!dynamic->Arg(0).IsImmediate() || !dynamic->Arg(1).IsImmediate()) {
++        return std::nullopt;
++    }
++    const u32 dynamic_offset{dynamic->Arg(1).U32()};
++    switch (dynamic->GetOpcode()) {
++    case IR::Opcode::GetCbufU32:
++        break;
++    case IR::Opcode::GetCbufU16:
++        result.bit_offset += (dynamic_offset & 3) * 8;
++        result.bit_count = (std::min)(result.bit_count, 16U);
++        break;
++    case IR::Opcode::GetCbufU8:
++        result.bit_offset += (dynamic_offset & 3) * 8;
++        result.bit_count = (std::min)(result.bit_count, 8U);
++        break;
++    default:
++        return std::nullopt;
++    }
++    if (result.bit_offset >= 32) {
++        return std::nullopt;
++    }
++    result.dynamic_index = dynamic->Arg(0).U32();
++    result.dynamic_offset = dynamic_offset & ~3U;
++    return result;
++}
++
+ std::optional<ConstBufferAddr> TryGetConstBuffer(const IR::Inst* inst, Environment& env) {
+     switch (inst->GetOpcode()) {
+     default:
+         return std::nullopt;
+     case IR::Opcode::BitwiseOr32: {
++        for (size_t arg = 0; arg < 2; ++arg) {
++            const std::optional<IndirectHandle> indirect{TrackIndirectHandle(inst->Arg(arg))};
++            if (!indirect) {
++                continue;
++            }
++            const std::optional other{TrackCached(inst->Arg(1 - arg), env)};
++            if (!other || other->has_secondary || other->count > 1) {
++                return std::nullopt;
++            }
++            return ConstBufferAddr{
++                .index = other->index,
++                .offset = other->offset,
++                .shift_left = other->shift_left,
++                .secondary_index = indirect->index,
++                .secondary_offset = indirect->offset,
++                .secondary_shift_left = 0,
++                .dynamic_offset = {},
++                .count = 1,
++                .has_secondary = true,
++                .secondary_indirect = true,
++                .secondary_indirect_index = indirect->dynamic_index,
++                .secondary_indirect_offset = indirect->dynamic_offset,
++                .secondary_indirect_bit_offset = indirect->bit_offset,
++                .secondary_indirect_bit_count = indirect->bit_count,
++                .secondary_indirect_max = indirect->max,
++                .secondary_indirect_shift = indirect->shift,
++            };
++        }
+         std::optional lhs{TrackCached(inst->Arg(0), env)};
+         std::optional rhs{TrackCached(inst->Arg(1), env)};
+         if (!lhs || !rhs) {
+@@ -390,6 +554,7 @@ std::optional<ConstBufferAddr> TryGetConstBuffer(const IR::Inst* inst, Environme
+         if (op1.IsImmediate()) {
+             std::swap(op1, op2);
+         }
++        const bool mask_from_cbuf{!op2.IsImmediate()};
+         if (!op2.IsImmediate() && !op1.IsImmediate()) {
+             do {
+                 auto try_index = TryGetConstant(op1, env);
+@@ -407,7 +572,7 @@ std::optional<ConstBufferAddr> TryGetConstBuffer(const IR::Inst* inst, Environme
+             } while (false);
+         }
+         std::optional lhs{TrackCached(op1, env)};
+-        if (lhs) {
++        if (lhs && mask_from_cbuf) {
+             lhs->shift_left = static_cast<u32>(std::countr_zero(op2.U32()));
+         }
+         return lhs;
+@@ -498,7 +663,13 @@ TextureInst MakeInst(Environment& env, IR::Block* block, IR::Inst& inst) {
+ 
+ u32 GetTextureHandle(Environment& env, const ConstBufferAddr& cbuf) {
+     const u32 secondary_index{cbuf.has_secondary ? cbuf.secondary_index : cbuf.index};
+-    const u32 secondary_offset{cbuf.has_secondary ? cbuf.secondary_offset : cbuf.offset};
++    u32 secondary_offset{cbuf.has_secondary ? cbuf.secondary_offset : cbuf.offset};
++    if (cbuf.has_secondary && cbuf.secondary_indirect) {
++        secondary_offset += IndirectDescriptorOffset(
++            env.ReadCbufValue(cbuf.secondary_indirect_index, cbuf.secondary_indirect_offset),
++            cbuf.secondary_indirect_bit_offset, cbuf.secondary_indirect_bit_count,
++            cbuf.secondary_indirect_max, cbuf.secondary_indirect_shift);
++    }
+     const u32 lhs_raw{env.ReadCbufValue(cbuf.index, cbuf.offset) << cbuf.shift_left};
+     const u32 rhs_raw{env.ReadCbufValue(secondary_index, secondary_offset)
+                       << cbuf.secondary_shift_left};
+@@ -536,7 +707,14 @@ public:
+                    desc.secondary_cbuf_offset == existing.secondary_cbuf_offset &&
+                    desc.secondary_shift_left == existing.secondary_shift_left &&
+                    desc.count == existing.count && desc.size_shift == existing.size_shift &&
+-                   desc.has_secondary == existing.has_secondary;
++                   desc.has_secondary == existing.has_secondary &&
++                   desc.secondary_indirect == existing.secondary_indirect &&
++                   desc.secondary_indirect_cbuf_index == existing.secondary_indirect_cbuf_index &&
++                   desc.secondary_indirect_cbuf_offset == existing.secondary_indirect_cbuf_offset &&
++                   desc.secondary_indirect_bit_offset == existing.secondary_indirect_bit_offset &&
++                   desc.secondary_indirect_bit_count == existing.secondary_indirect_bit_count &&
++                   desc.secondary_indirect_max == existing.secondary_indirect_max &&
++                   desc.secondary_indirect_shift == existing.secondary_indirect_shift;
+         });
+     }
+ 
+@@ -562,7 +740,14 @@ public:
+                    desc.secondary_cbuf_index == existing.secondary_cbuf_index &&
+                    desc.secondary_cbuf_offset == existing.secondary_cbuf_offset &&
+                    desc.secondary_shift_left == existing.secondary_shift_left &&
+-                   desc.count == existing.count && desc.size_shift == existing.size_shift;
++                   desc.count == existing.count && desc.size_shift == existing.size_shift &&
++                   desc.secondary_indirect == existing.secondary_indirect &&
++                   desc.secondary_indirect_cbuf_index == existing.secondary_indirect_cbuf_index &&
++                   desc.secondary_indirect_cbuf_offset == existing.secondary_indirect_cbuf_offset &&
++                   desc.secondary_indirect_bit_offset == existing.secondary_indirect_bit_offset &&
++                   desc.secondary_indirect_bit_count == existing.secondary_indirect_bit_count &&
++                   desc.secondary_indirect_max == existing.secondary_indirect_max &&
++                   desc.secondary_indirect_shift == existing.secondary_indirect_shift;
+         })};
+         // TODO: Read this from TIC
+         texture_descriptors[index].is_multisample |= desc.is_multisample;
+@@ -600,11 +785,11 @@ private:
+     ImageDescriptors& image_descriptors;
+ };
+ 
+-void PatchImageSampleImplicitLod(IR::Block& block, IR::Inst& inst) {
++void PatchUnnormalizedSample(IR::Block& block, IR::Inst& inst) {
+     IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
+     const auto info{inst.Flags<IR::TextureInstInfo>()};
+     const IR::Value coord(inst.Arg(1));
+-    const IR::Value handle(ir.Imm32(0));
++    const IR::Value handle(inst.Arg(0));
+     const IR::U32 lod{ir.Imm32(0)};
+     const IR::U1 skip_mips{ir.Imm1(true)};
+     const IR::Value texture_size = ir.ImageQueryDimension(handle, lod, skip_mips, info);
+@@ -698,17 +883,17 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
+         const auto& cbuf{texture_inst.cbuf};
+         auto flags{inst->Flags<IR::TextureInstInfo>()};
+         bool is_multisample{false};
++        bool unnormalized{false};
+         switch (inst->GetOpcode()) {
+         case IR::Opcode::ImageQueryDimensions:
+             flags.type.Assign(ReadTextureTypeCached(env, cbuf));
+             inst->SetFlags(flags);
+             break;
+         case IR::Opcode::ImageSampleImplicitLod:
+-            if (flags.type != TextureType::Color2D) {
+-                break;
+-            }
+-            if (ReadTextureTypeCached(env, cbuf) == TextureType::Color2DRect) {
+-                PatchImageSampleImplicitLod(*texture_inst.block, *texture_inst.inst);
++        case IR::Opcode::ImageSampleExplicitLod:
++            if (flags.type == TextureType::Color2D &&
++                ReadTextureTypeCached(env, cbuf) == TextureType::Color2DRect) {
++                unnormalized = true;
+             }
+             break;
+         case IR::Opcode::ImageFetch:
+@@ -794,6 +979,13 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
+                     .secondary_shift_left = cbuf.secondary_shift_left,
+                     .count = count,
+                     .size_shift = size_shift,
++                    .secondary_indirect = cbuf.secondary_indirect,
++                    .secondary_indirect_cbuf_index = cbuf.secondary_indirect_index,
++                    .secondary_indirect_cbuf_offset = cbuf.secondary_indirect_offset,
++                    .secondary_indirect_bit_offset = cbuf.secondary_indirect_bit_offset,
++                    .secondary_indirect_bit_count = cbuf.secondary_indirect_bit_count,
++                    .secondary_indirect_max = cbuf.secondary_indirect_max,
++                    .secondary_indirect_shift = cbuf.secondary_indirect_shift,
+                 });
+             } else {
+                 count = std::min(count, sampled_dynamic_cap);
+@@ -810,6 +1002,13 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
+                     .secondary_shift_left = cbuf.secondary_shift_left,
+                     .count = count,
+                     .size_shift = size_shift,
++                    .secondary_indirect = cbuf.secondary_indirect,
++                    .secondary_indirect_cbuf_index = cbuf.secondary_indirect_index,
++                    .secondary_indirect_cbuf_offset = cbuf.secondary_indirect_offset,
++                    .secondary_indirect_bit_offset = cbuf.secondary_indirect_bit_offset,
++                    .secondary_indirect_bit_count = cbuf.secondary_indirect_bit_count,
++                    .secondary_indirect_max = cbuf.secondary_indirect_max,
++                    .secondary_indirect_shift = cbuf.secondary_indirect_shift,
+                 });
+             }
+             break;
+@@ -826,6 +1025,9 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
+         } else {
+             inst->SetArg(0, IR::Value{});
+         }
++        if (unnormalized) {
++            PatchUnnormalizedSample(*texture_inst.block, *texture_inst.inst);
++        }
+ 
+         if (!host_info.support_snorm_render_buffer && inst->GetOpcode() == IR::Opcode::ImageFetch &&
+             flags.type == TextureType::Buffer) {
+diff --git a/src/shader_recompiler/shader_info.h b/src/shader_recompiler/shader_info.h
+--- a/src/shader_recompiler/shader_info.h
++++ b/src/shader_recompiler/shader_info.h
+@@ -178,6 +178,15 @@ struct StorageBufferDescriptor {
+     auto operator<=>(const StorageBufferDescriptor&) const = default;
+ };
+ 
++[[nodiscard]] constexpr u32 IndirectDescriptorOffset(u32 raw, u32 bit_offset, u32 bit_count,
++                                                     u32 max, u32 shift) {
++    u32 value{raw >> bit_offset};
++    if (bit_count < 32) {
++        value &= (1U << bit_count) - 1U;
++    }
++    return (value < max ? value : max) << shift;
++}
++
+ struct TextureBufferDescriptor {
+     bool has_secondary;
+     u32 cbuf_index;
+@@ -188,6 +197,14 @@ struct TextureBufferDescriptor {
+     u32 secondary_shift_left;
+     u32 count;
+     u32 size_shift;
++    bool secondary_indirect{};
++    u32 secondary_indirect_cbuf_index{};
++    u32 secondary_indirect_cbuf_offset{};
++    u32 secondary_indirect_bit_offset{};
++    u32 secondary_indirect_bit_count{};
++    u32 secondary_indirect_max{};
++    u32 secondary_indirect_shift{};
++
+ 
+     auto operator<=>(const TextureBufferDescriptor&) const = default;
+ };
+@@ -220,6 +237,14 @@ struct TextureDescriptor {
+     u32 secondary_shift_left;
+     u32 count;
+     u32 size_shift;
++    bool secondary_indirect{};
++    u32 secondary_indirect_cbuf_index{};
++    u32 secondary_indirect_cbuf_offset{};
++    u32 secondary_indirect_bit_offset{};
++    u32 secondary_indirect_bit_count{};
++    u32 secondary_indirect_max{};
++    u32 secondary_indirect_shift{};
++
+ 
+     auto operator<=>(const TextureDescriptor&) const = default;
+ };
+diff --git a/src/video_core/renderer_opengl/gl_compute_pipeline.cpp b/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
+--- a/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
++++ b/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
+@@ -114,7 +114,16 @@ void ComputePipeline::Configure() {
+                       std::is_same_v<decltype(desc), const Shader::TextureBufferDescriptor&>) {
+             if (desc.has_secondary) {
+                 ASSERT(((qmd.const_buffer_enable_mask >> desc.secondary_cbuf_index) & 1) != 0);
+-                const u32 secondary_offset{desc.secondary_cbuf_offset + index_offset};
++                u32 secondary_offset{desc.secondary_cbuf_offset + index_offset};
++                if (desc.secondary_indirect) {
++                    ASSERT(((qmd.const_buffer_enable_mask >> desc.secondary_indirect_cbuf_index) &
++                            1) != 0);
++                    secondary_offset += Shader::IndirectDescriptorOffset(
++                        gpu_memory->Read<u32>(cbufs[desc.secondary_indirect_cbuf_index].Address() +
++                                             desc.secondary_indirect_cbuf_offset),
++                        desc.secondary_indirect_bit_offset, desc.secondary_indirect_bit_count,
++                        desc.secondary_indirect_max, desc.secondary_indirect_shift);
++                }
+                 const GPUVAddr separate_addr{cbufs[desc.secondary_cbuf_index].Address() +
+                                              secondary_offset};
+                 const u32 lhs_raw{gpu_memory->Read<u32>(addr) << desc.shift_left};
+diff --git a/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp b/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
+--- a/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
++++ b/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
+@@ -315,7 +315,15 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
+                           std::is_same_v<decltype(desc), const TextureBufferDescriptor&>) {
+                 if (desc.has_secondary) {
+                     ASSERT(cbufs[desc.secondary_cbuf_index].enabled);
+-                    const u32 second_offset{desc.secondary_cbuf_offset + index_offset};
++                    u32 second_offset{desc.secondary_cbuf_offset + index_offset};
++                    if (desc.secondary_indirect) {
++                        ASSERT(cbufs[desc.secondary_indirect_cbuf_index].enabled);
++                        second_offset += Shader::IndirectDescriptorOffset(
++                            gpu_memory->Read<u32>(cbufs[desc.secondary_indirect_cbuf_index].address +
++                                                  desc.secondary_indirect_cbuf_offset),
++                            desc.secondary_indirect_bit_offset, desc.secondary_indirect_bit_count,
++                            desc.secondary_indirect_max, desc.secondary_indirect_shift);
++                    }
+                     const GPUVAddr separate_addr{cbufs[desc.secondary_cbuf_index].address +
+                                                  second_offset};
+                     const u32 lhs_raw{gpu_memory->Read<u32>(addr) << desc.shift_left};
+diff --git a/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp b/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
+--- a/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
++++ b/src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
+@@ -143,7 +143,16 @@ void ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
+                       std::is_same_v<decltype(desc), const Shader::TextureBufferDescriptor&>) {
+             if (desc.has_secondary) {
+                 ASSERT(((qmd.const_buffer_enable_mask >> desc.secondary_cbuf_index) & 1) != 0);
+-                const u32 secondary_offset{desc.secondary_cbuf_offset + index_offset};
++                u32 secondary_offset{desc.secondary_cbuf_offset + index_offset};
++                if (desc.secondary_indirect) {
++                    ASSERT(((qmd.const_buffer_enable_mask >> desc.secondary_indirect_cbuf_index) &
++                            1) != 0);
++                    secondary_offset += Shader::IndirectDescriptorOffset(
++                        gpu_memory.Read<u32>(cbufs[desc.secondary_indirect_cbuf_index].Address() +
++                                             desc.secondary_indirect_cbuf_offset),
++                        desc.secondary_indirect_bit_offset, desc.secondary_indirect_bit_count,
++                        desc.secondary_indirect_max, desc.secondary_indirect_shift);
++                }
+                 const GPUVAddr separate_addr{cbufs[desc.secondary_cbuf_index].Address() +
+                                              secondary_offset};
+                 const u32 lhs_raw{gpu_memory.Read<u32>(addr) << desc.shift_left};
+diff --git a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+--- a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
++++ b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+@@ -348,7 +348,15 @@ bool GraphicsPipeline::ConfigureImpl(bool is_indexed) {
+                           std::is_same_v<decltype(desc), const Shader::TextureBufferDescriptor&>) {
+                 if (desc.has_secondary) {
+                     ASSERT(cbufs[desc.secondary_cbuf_index].enabled);
+-                    const u32 second_offset{desc.secondary_cbuf_offset + index_offset};
++                    u32 second_offset{desc.secondary_cbuf_offset + index_offset};
++                    if (desc.secondary_indirect) {
++                        ASSERT(cbufs[desc.secondary_indirect_cbuf_index].enabled);
++                        second_offset += Shader::IndirectDescriptorOffset(
++                            gpu_memory->Read<u32>(cbufs[desc.secondary_indirect_cbuf_index].address +
++                                                  desc.secondary_indirect_cbuf_offset),
++                            desc.secondary_indirect_bit_offset, desc.secondary_indirect_bit_count,
++                            desc.secondary_indirect_max, desc.secondary_indirect_shift);
++                    }
+                     const GPUVAddr separate_addr{cbufs[desc.secondary_cbuf_index].address +
+                                                  second_offset};
+                     const u32 lhs_raw{gpu_memory->Read<u32>(addr) << desc.shift_left};
+diff --git a/src/video_core/shader_environment.cpp b/src/video_core/shader_environment.cpp
+--- a/src/video_core/shader_environment.cpp
++++ b/src/video_core/shader_environment.cpp
+@@ -284,6 +284,23 @@ Tegra::Texture::TICEntry GenericEnvironment::ReadTextureInfo(GPUVAddr tic_addr,
+     return entry;
+ }
+ 
++bool GenericEnvironment::SamplerForcesUnnormalizedCoords(GPUVAddr tsc_addr, u32 tsc_limit,
++                                                         bool via_header_index, u32 raw) {
++    const auto handle{Tegra::Texture::TexturePair(raw, via_header_index)};
++    if (handle.second > tsc_limit) {
++        return false;
++    }
++    Tegra::Texture::TSCEntry entry;
++    gpu_memory->ReadBlock(tsc_addr + handle.second * sizeof(Tegra::Texture::TSCEntry), &entry,
++                          sizeof(entry));
++    return entry.float_coord_normalization != 0;
++}
++
++static Shader::TextureType ApplySamplerNormalization(Shader::TextureType type, bool unnormalized) {
++    return unnormalized && type == Shader::TextureType::Color2D ? Shader::TextureType::Color2DRect
++                                                                : type;
++}
++
+ GraphicsEnvironment::GraphicsEnvironment(Tegra::Engines::Maxwell3D& maxwell3d_,
+                                          Tegra::MemoryManager& gpu_memory_,
+                                          Maxwell::ShaderType program, GPUVAddr program_base_,
+@@ -372,7 +389,10 @@ Shader::TextureType GraphicsEnvironment::ReadTextureType(u32 handle) {
+     const bool via_header_index{regs.sampler_binding == Maxwell::SamplerBinding::ViaHeaderBinding};
+     auto entry =
+         ReadTextureInfo(regs.tex_header.Address(), regs.tex_header.limit, via_header_index, handle);
+-    const Shader::TextureType result{ConvertTextureType(entry)};
++    const Shader::TextureType result{ApplySamplerNormalization(
++        ConvertTextureType(entry),
++        SamplerForcesUnnormalizedCoords(regs.tex_sampler.Address(), regs.tex_sampler.limit,
++                                        via_header_index, handle))};
+     texture_types.emplace(handle, result);
+     return result;
+ }
+@@ -428,7 +448,9 @@ Shader::TextureType ComputeEnvironment::ReadTextureType(u32 handle) {
+     const auto& regs{kepler_compute->regs};
+     const auto& qmd{kepler_compute->launch_description};
+     auto entry = ReadTextureInfo(regs.tic.Address(), regs.tic.limit, qmd.linked_tsc != 0, handle);
+-    const Shader::TextureType result{ConvertTextureType(entry)};
++    const Shader::TextureType result{ApplySamplerNormalization(
++        ConvertTextureType(entry), SamplerForcesUnnormalizedCoords(regs.tsc.Address(), regs.tsc.limit,
++                                                                   qmd.linked_tsc != 0, handle))};
+     texture_types.emplace(handle, result);
+     return result;
+ }
+diff --git a/src/video_core/shader_environment.h b/src/video_core/shader_environment.h
+--- a/src/video_core/shader_environment.h
++++ b/src/video_core/shader_environment.h
+@@ -75,6 +75,9 @@ protected:
+     Tegra::Texture::TICEntry ReadTextureInfo(GPUVAddr tic_addr, u32 tic_limit,
+                                              bool via_header_index, u32 raw);
+ 
++    bool SamplerForcesUnnormalizedCoords(GPUVAddr tsc_addr, u32 tsc_limit, bool via_header_index,
++                                         u32 raw);
++
+     Tegra::MemoryManager* gpu_memory{};
+     GPUVAddr program_base{};
+ 

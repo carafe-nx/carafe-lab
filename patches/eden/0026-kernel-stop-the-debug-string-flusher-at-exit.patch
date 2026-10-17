@@ -1,0 +1,28 @@
+Carafe bench: the debug string flusher is stopped at exit. OutputDebugString starts a static std::jthread that
+waits on a condition variable; at exit the jthread destructor requests a stop and joins, but nothing wakes the
+condition variable, so Eden never exited once the software had printed a debug string (carafe-overlay prints
+every line). The stop is requested under the mutex and the condition variable notified before the join.
+GPL-3.0-or-later, as the file it changes.
+
+diff --git a/src/core/hle/kernel/svc/svc_debug_string.cpp b/src/core/hle/kernel/svc/svc_debug_string.cpp
+index c190fa7..22f4e5a 100644
+--- a/src/core/hle/kernel/svc/svc_debug_string.cpp
++++ b/src/core/hle/kernel/svc/svc_debug_string.cpp
+@@ -28,6 +28,17 @@ Result OutputDebugString(Core::System& system, u64 address, u64 len) {
+         std::condition_variable msg_cv;
+         std::chrono::steady_clock::time_point last_msg_time;
+         std::optional<std::jthread> thread;
++
++        ~DebugFlusher() {
++            if (!thread) {
++                return;
++            }
++            {
++                std::lock_guard lock(msg_mutex);
++                thread->request_stop();
++            }
++            msg_cv.notify_all();
++        }
+     } flusher_data;
+     R_SUCCEED_IF(len == 0);
+     // Only start the thread the very first time this function is called

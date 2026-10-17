@@ -1,0 +1,154 @@
+Carafe bench: OpenGL typeless image stores and loads through red/blue-swizzled views keep the byte order.
+This is the OpenGL side of the Vulkan fix for the same views. NVK describes a BGRA image as A8B8G8R8 with a
+B, G, R, A swizzle; a typeless store ignores the swizzle, so NFSU's back-buffer copy came out with red and
+blue exchanged. OpenGL has no BGRA image format, so each such view sets a bit in a per-stage uniform and the
+GLSL store and load swap the first and third components when the bit is set.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
++++ b/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
+@@ -4,6 +4,8 @@
+ // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
++#include <algorithm>
++
+ #include "common/div_ceil.h"
+ #include "shader_recompiler/backend/bindings.h"
+ #include "shader_recompiler/backend/glsl/glsl_emit_context.h"
+@@ -365,6 +367,11 @@
+     if (info.uses_render_area) {
+         header += "layout(location=1) uniform vec4 render_area;";
+     }
++    if (std::ranges::any_of(info.image_descriptors, [](const ImageDescriptor& desc) {
++            return desc.format == ImageFormat::Typeless && !desc.is_integer;
++        })) {
++        header += "layout(location=2) uniform uint red_blue_images;";
++    }
+     DefineConstantBuffers(bindings);
+     DefineConstantBufferIndirect();
+     DefineStorageBuffers(bindings);
+--- a/src/shader_recompiler/backend/glsl/emit_glsl_image.cpp
++++ b/src/shader_recompiler/backend/glsl/emit_glsl_image.cpp
+@@ -587,7 +587,9 @@
+     }
+     const auto image{Image(ctx, info, index)};
+     if (!IsImageInteger(ctx, info)) {
+-        ctx.AddU32x4("{}=floatBitsToUint(imageLoad({},{}));", inst, image, CoordsCastToInt(coords, info));
++        const auto int_coords{CoordsCastToInt(coords, info)};
++        ctx.AddU32x4("{}=floatBitsToUint(((red_blue_images>>{}u)&1u)!=0u?imageLoad({},{}).zyxw:imageLoad({},{}));",
++                     inst, static_cast<u32>(info.descriptor_index), image, int_coords, image, int_coords);
+         return;
+     }
+     ctx.AddU32x4("{}=uvec4(imageLoad({},{}));", inst, image, CoordsCastToInt(coords, info));
+@@ -598,7 +600,8 @@
+     const auto info{inst.Flags<IR::TextureInstInfo>()};
+     const auto image{Image(ctx, info, index)};
+     if (!IsImageInteger(ctx, info)) {
+-        ctx.Add("imageStore({},{},uintBitsToFloat({}));", image, CoordsCastToInt(coords, info), color);
++        ctx.Add("imageStore({},{},((red_blue_images>>{}u)&1u)!=0u?uintBitsToFloat({}).zyxw:uintBitsToFloat({}));",
++                image, CoordsCastToInt(coords, info), static_cast<u32>(info.descriptor_index), color, color);
+         return;
+     }
+     ctx.Add("imageStore({},{},{});", image, CoordsCastToInt(coords, info), color);
+--- a/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
++++ b/src/video_core/renderer_opengl/gl_compute_pipeline.cpp
+@@ -234,7 +234,12 @@
+         }
+     }
+     u32 image_scaling_mask{};
++    u32 red_blue_images{};
++    bool uses_red_blue_images{};
++    u32 image_descriptor_index{};
+     for (const auto& desc : info.image_descriptors) {
++        const bool typeless_float{desc.format == Shader::ImageFormat::Typeless && !desc.is_integer};
++        uses_red_blue_images |= typeless_float;
+         for (u32 index = 0; index < desc.count; ++index) {
+             ImageView& image_view{texture_cache.GetImageView((views_it++)->id)};
+             if (desc.is_written) {
+@@ -244,8 +249,17 @@
+             if (texture_cache.IsRescaling(image_view)) {
+                 image_scaling_mask |= 1u << image_binding;
+             }
++            if (typeless_float && index == 0 && image_view.SwapsRedBlue()) {
++                red_blue_images |= 1u << image_descriptor_index;
++            }
+             ++image_binding;
+         }
++        ++image_descriptor_index;
++    }
++    const bool glsl_backend{::Settings::values.renderer_backend.GetValue() ==
++                            Settings::RendererBackend::OpenGL_GLSL};
++    if (uses_red_blue_images && glsl_backend) {
++        glProgramUniform1ui(source_program.handle, 2, red_blue_images);
+     }
+     if (info.uses_rescaling_uniform) {
+         const f32 float_texture_scaling_mask{std::bit_cast<f32>(texture_scaling_mask)};
+--- a/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
++++ b/src/video_core/renderer_opengl/gl_graphics_pipeline.cpp
+@@ -504,7 +504,12 @@
+                     use_fallback_sampler ? sampler.HandleWithDefaultAnisotropy() : sampler.Handle();
+             }
+         }
++        u32 red_blue_images{};
++        bool uses_red_blue_images{};
++        u32 image_descriptor_index{};
+         for (const auto& desc : info.image_descriptors) {
++            const bool typeless_float{desc.format == Shader::ImageFormat::Typeless && !desc.is_integer};
++            uses_red_blue_images |= typeless_float;
+             for (u32 index = 0; index < desc.count; ++index) {
+                 ImageView& image_view{texture_cache.GetImageView((views_it++)->id)};
+                 if (desc.is_written) {
+@@ -514,9 +519,18 @@
+                 if (texture_cache.IsRescaling(image_view)) {
+                     image_scaling_mask |= 1u << stage_image_binding;
+                 }
++                if (typeless_float && index == 0 && image_view.SwapsRedBlue()) {
++                    red_blue_images |= 1u << image_descriptor_index;
++                }
+                 ++image_binding;
+                 ++stage_image_binding;
+             }
++            ++image_descriptor_index;
++        }
++        const bool glsl_backend{::Settings::values.renderer_backend.GetValue() ==
++                                Settings::RendererBackend::OpenGL_GLSL};
++        if (uses_red_blue_images && glsl_backend) {
++            glProgramUniform1ui(source_programs[stage].handle, 2, red_blue_images);
+         }
+         if (info.uses_rescaling_uniform) {
+             const f32 float_texture_scaling_mask{std::bit_cast<f32>(texture_scaling_mask)};
+--- a/src/video_core/renderer_opengl/gl_texture_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_texture_cache.cpp
+@@ -1128,6 +1128,10 @@
+         swizzle[1] = info.y_source;
+         swizzle[2] = info.z_source;
+         swizzle[3] = info.w_source;
++        swaps_red_blue = info.format == PixelFormat::A8B8G8R8_UNORM &&
++                         swizzle[0] == static_cast<u8>(SwizzleSource::B) &&
++                         swizzle[1] == static_cast<u8>(SwizzleSource::G) &&
++                         swizzle[2] == static_cast<u8>(SwizzleSource::R);
+     }
+     switch (info.type) {
+     case ImageViewType::e1DArray:
+--- a/src/video_core/renderer_opengl/gl_texture_cache.h
++++ b/src/video_core/renderer_opengl/gl_texture_cache.h
+@@ -267,6 +267,10 @@
+     ImageView(ImageView&&) = default;
+     ImageView& operator=(ImageView&&) = default;
+ 
++    [[nodiscard]] bool SwapsRedBlue() const noexcept {
++        return swaps_red_blue;
++    }
++
+     [[nodiscard]] GLuint StorageView(Shader::TextureType texture_type,
+                                      Shader::ImageFormat image_format);
+ 
+@@ -313,6 +317,7 @@
+     std::array<u8, 4> swizzle{};
+     bool set_object_label = false;
+     bool is_render_target = false;
++    bool swaps_red_blue = false;
+ };
+ 
+ class ImageAlloc : public VideoCommon::ImageAllocBase {};

@@ -1,0 +1,23 @@
+Carafe bench: when a shader has no self-branch after its end, as with Mesa's nvc0, the control flow graph that
+finds its size starts after the program header, as the translation does. Eden decoded the header as code, so
+the size and hash were wrong and draws could get another shader with the same start.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/shader_cache.cpp
++++ b/src/video_core/shader_cache.cpp
+@@ -236,10 +236,13 @@
+     } else {
+         // Slow path, not really hit on commercial games
+         // Build a control flow graph to get the real shader size
++        const u32 header_size{env.ShaderStage() == Shader::Stage::Compute
++                                  ? 0U
++                                  : static_cast<u32>(sizeof(Shader::ProgramHeader))};
+         Shader::ObjectPool<Shader::Maxwell::Flow::Block> flow_block;
+-        Shader::Maxwell::Flow::CFG cfg{env, flow_block, env.StartAddress()};
++        Shader::Maxwell::Flow::CFG cfg{env, flow_block, env.StartAddress() + header_size};
+         info->unique_hash = env.CalculateHash();
+-        info->size_bytes = env.ReadSizeBytes();
++        info->size_bytes = env.ReadSizeBytes() + header_size;
+     }
+     const size_t size_bytes{info->size_bytes};
+     const ShaderInfo* const result{info.get()};

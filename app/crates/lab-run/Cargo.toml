@@ -1,0 +1,17 @@
+[package]
+name = "lab-run"
+description = "Carafe Lab's runs: the steps of a scenario against an emulator, and the report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-core = { workspace = true }
+carafe-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

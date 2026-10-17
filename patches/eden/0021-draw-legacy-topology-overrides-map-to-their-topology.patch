@@ -1,0 +1,44 @@
+Carafe bench: the legacy values of SET_PRIMITIVE_TOPOLOGY (0x1001-0x101B) map to their topology.
+Eden cast them straight to PrimitiveTopology, so a triangle fan (0x1015), which NVK sends for
+VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN on Maxwell, became "Invalid topology=4117": OpenGL skipped the
+draw and the Vulkan renderer crashed (Need for Speed Underground through DXVK, ~70 s in).
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/engines/draw_manager.cpp
++++ b/src/video_core/engines/draw_manager.cpp
+@@ -217,14 +217,35 @@
+         case Maxwell3D::Regs::PrimitiveTopologyOverride::None:
+             break;
+         case Maxwell3D::Regs::PrimitiveTopologyOverride::Points:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyPoints:
+             draw_state.topology = Maxwell3D::Regs::PrimitiveTopology::Points;
+             break;
+         case Maxwell3D::Regs::PrimitiveTopologyOverride::Lines:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyIndexedLines:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyLines:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyLinesImm:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyIndexedLines2:
+             draw_state.topology = Maxwell3D::Regs::PrimitiveTopology::Lines;
+             break;
+         case Maxwell3D::Regs::PrimitiveTopologyOverride::LineStrip:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyLineStrip:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyIndexedLineStrip:
+             draw_state.topology = Maxwell3D::Regs::PrimitiveTopology::LineStrip;
+             break;
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyIndexedTriangles:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyTriangles:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyIndexedTriangles2:
++            draw_state.topology = Maxwell3D::Regs::PrimitiveTopology::Triangles;
++            break;
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyTriangleStrip:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyIndexedTriangleStrip:
++            draw_state.topology = Maxwell3D::Regs::PrimitiveTopology::TriangleStrip;
++            break;
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyTriangleFan:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyIndexedTriangleFan:
++        case Maxwell3D::Regs::PrimitiveTopologyOverride::LegacyTriangleFanImm:
++            draw_state.topology = Maxwell3D::Regs::PrimitiveTopology::TriangleFan;
++            break;
+         default:
+             draw_state.topology = Maxwell3D::Regs::PrimitiveTopology(maxwell3d.regs.topology_override);
+             break;

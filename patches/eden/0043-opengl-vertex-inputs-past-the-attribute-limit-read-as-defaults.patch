@@ -1,0 +1,53 @@
+Carafe bench: vertex shader inputs past GL_MAX_VERTEX_ATTRIBS read as (0, 0, 0, 1) in OpenGL.
+Mesa's d3d12 driver has 16 vertex attributes, and DXVK's fixed-function vertex shader declares generic
+inputs 16 and 17. The GLSL program failed to link ("invalid explicit location 16"), so NFSU's full-screen
+colour pass drew with no vertex shader and painted the frame black. Eden never enables those attributes in
+OpenGL, so the first stage now treats them as not written: they are not declared and read as the defaults.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
++++ b/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
+@@ -580,7 +580,7 @@
+         }
+         const u32 base_attribute_value = static_cast<u32>(IR::Attribute::Generic0X) >> 2;
+         for (u32 index = 0; index < IR::NUM_GENERICS; ++index) {
+-            if (!info.loads.Generic(index)) {
++            if (!info.loads.Generic(index) || !runtime_info.previous_stage_stores.Generic(index)) {
+                 continue;
+             }
+             const auto vertex_idx{is_array ? "[vertex]" : ""};
+--- a/src/video_core/renderer_opengl/gl_shader_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_shader_cache.cpp
+@@ -75,7 +75,8 @@
+ Shader::RuntimeInfo MakeRuntimeInfo(const GraphicsPipelineKey& key,
+                                     const Shader::IR::Program& program,
+                                     const Shader::IR::Program* previous_program,
+-                                    bool glasm_use_storage_buffers, bool use_assembly_shaders) {
++                                    bool glasm_use_storage_buffers, bool use_assembly_shaders,
++                                    u32 max_vertex_attributes) {
+     Shader::RuntimeInfo info;
+     if (previous_program) {
+         info.previous_stage_stores = previous_program->info.stores;
+@@ -83,6 +84,12 @@
+     } else {
+         // Mark all stores as available for vertex shaders
+         info.previous_stage_stores.mask.set();
++        const size_t first_generic{static_cast<size_t>(Shader::IR::Attribute::Generic0X)};
++        for (size_t index = max_vertex_attributes; index < Shader::IR::NUM_GENERICS; ++index) {
++            for (size_t component = 0; component < 4; ++component) {
++                info.previous_stage_stores.mask.reset(first_generic + index * 4 + component);
++            }
++        }
+     }
+     switch (program.stage) {
+     case Shader::Stage::VertexB:
+@@ -521,7 +528,8 @@
+         const size_t stage_index{index - 1};
+         infos[stage_index] = &program.info;
+ 
+-        const auto runtime_info = MakeRuntimeInfo(key, program, previous_program, glasm_use_storage_buffers, use_glasm);
++        const auto runtime_info = MakeRuntimeInfo(key, program, previous_program, glasm_use_storage_buffers, use_glasm,
++                                                  device.GetMaxVertexAttributes());
+         switch (::Settings::values.renderer_backend.GetValue()) {
+         case Settings::RendererBackend::OpenGL_GLSL:
+             ConvertLegacyToGeneric(program, runtime_info);

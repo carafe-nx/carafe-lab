@@ -1,0 +1,66 @@
+Carafe bench: when a producer disconnects from a layer, the compositor drops the frame it kept.
+The kept frame held a duplicate of the nvmap handle, so the buffer stayed mapped for the GPU after
+the game freed its memory and reused it for new GPU buffers.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/core/hle/service/nvnflinger/consumer_base.cpp b/src/core/hle/service/nvnflinger/consumer_base.cpp
+index ee8edc8..1103aa2 100644
+--- a/src/core/hle/service/nvnflinger/consumer_base.cpp
++++ b/src/core/hle/service/nvnflinger/consumer_base.cpp
+@@ -7,6 +7,8 @@
+ // Parts of this implementation were based on:
+ // https://cs.android.com/android/platform/superproject/+/android-5.1.1_r38:frameworks/native/libs/gui/ConsumerBase.cpp
+ 
++#include <utility>
++
+ #include "common/assert.h"
+ #include "common/logging.h"
+ #include "core/hle/service/nvnflinger/buffer_item.h"
+@@ -83,6 +85,12 @@ void ConsumerBase::OnBuffersReleased() {
+             FreeBufferLocked(i);
+         }
+     }
++    buffers_released = true;
++}
++
++bool ConsumerBase::TakeBuffersReleased() {
++    std::scoped_lock lock{mutex};
++    return std::exchange(buffers_released, false);
+ }
+ 
+ void ConsumerBase::OnSidebandStreamChanged() {}
+diff --git a/src/core/hle/service/nvnflinger/consumer_base.h b/src/core/hle/service/nvnflinger/consumer_base.h
+index b29c16f..2052161 100644
+--- a/src/core/hle/service/nvnflinger/consumer_base.h
++++ b/src/core/hle/service/nvnflinger/consumer_base.h
+@@ -25,6 +25,7 @@ class ConsumerBase : public IConsumerListener, public std::enable_shared_from_th
+ public:
+     void Connect(bool controlled_by_app);
+     void Abandon();
++    bool TakeBuffersReleased();
+ 
+ protected:
+     explicit ConsumerBase(std::shared_ptr<BufferQueueConsumer> consumer_);
+@@ -53,6 +54,7 @@ protected:
+     std::array<Slot, BufferQueueDefs::NUM_BUFFER_SLOTS> slots;
+ 
+     bool is_abandoned{};
++    bool buffers_released{};
+ 
+     std::shared_ptr<BufferQueueConsumer> consumer;
+ 
+diff --git a/src/core/hle/service/nvnflinger/hardware_composer.cpp b/src/core/hle/service/nvnflinger/hardware_composer.cpp
+index cfd9994..6348934 100644
+--- a/src/core/hle/service/nvnflinger/hardware_composer.cpp
++++ b/src/core/hle/service/nvnflinger/hardware_composer.cpp
+@@ -78,6 +78,10 @@ u32 HardwareComposer::ComposeLocked(f32* out_speed_scale, Display& display,
+     for (auto& layer : display.stack.layers) {
+         auto consumer_id = layer->consumer_id;
+ 
++        if (layer->buffer_item_consumer->TakeBuffersReleased()) {
++            this->RemoveLayerLocked(display, consumer_id);
++        }
++
+         bool should_try_acquire = true;
+         if (!layer->is_overlay) {
+             auto fb_it = m_framebuffers.find(consumer_id);

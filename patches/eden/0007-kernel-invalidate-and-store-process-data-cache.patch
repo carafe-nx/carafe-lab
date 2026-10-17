@@ -1,0 +1,33 @@
+Carafe bench: svcInvalidateProcessDataCache and svcStoreProcessDataCache are implemented like
+svcFlushProcessDataCache instead of failing with NotImplemented.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/kernel/svc/svc_cache.cpp
++++ b/src/core/hle/kernel/svc/svc_cache.cpp
+@@ -20,14 +20,22 @@
+ 
+ Result InvalidateProcessDataCache(Core::System& system, Handle process_handle, uint64_t address,
+                                   uint64_t size) {
+-    UNIMPLEMENTED();
+-    R_THROW(ResultNotImplemented);
++    R_UNLESS(size > 0, ResultInvalidSize);
++    KScopedAutoObject process =
++        GetCurrentProcess(system.Kernel()).GetHandleTable().GetObject<KProcess>(process_handle);
++    R_UNLESS(process.IsNotNull(), ResultInvalidHandle);
++    R_UNLESS(process->GetPageTable().Contains(address, size), ResultInvalidCurrentMemory);
++    R_RETURN(GetCurrentMemory(system.Kernel()).InvalidateDataCache(address, size));
+ }
+ 
+ Result StoreProcessDataCache(Core::System& system, Handle process_handle, uint64_t address,
+                              uint64_t size) {
+-    UNIMPLEMENTED();
+-    R_THROW(ResultNotImplemented);
++    R_UNLESS(size > 0, ResultInvalidSize);
++    KScopedAutoObject process =
++        GetCurrentProcess(system.Kernel()).GetHandleTable().GetObject<KProcess>(process_handle);
++    R_UNLESS(process.IsNotNull(), ResultInvalidHandle);
++    R_UNLESS(process->GetPageTable().Contains(address, size), ResultInvalidCurrentMemory);
++    R_RETURN(GetCurrentMemory(system.Kernel()).StoreDataCache(address, size));
+ }
+ 
+ Result FlushProcessDataCache(Core::System& system, Handle process_handle, u64 address, u64 size) {

@@ -1,0 +1,76 @@
+Carafe bench: the arm64 backend emits an ordered load as a plain load followed by DMB ISH and an ordered store
+as DMB ISH, a plain store and DMB ISH, instead of LDAR and STLR. LDAR and STLR need an aligned address on the
+host, so a guest ordered access to an unaligned address raised SIGBUS and killed Eden. FEX emits such accesses
+for every x86 load and store when it emulates total store ordering; on the console the access takes an
+alignment fault and FEX rewrites it as a plain access with a barrier, which is what this emits.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/dynarmic/src/dynarmic/backend/arm64/emit_arm64_memory.cpp
++++ b/src/dynarmic/src/dynarmic/backend/arm64/emit_arm64_memory.cpp
+@@ -302,24 +302,24 @@
+ 
+         switch (bitsize) {
+         case 8:
+-            code.LDARB(oaknut::WReg{value_idx}, Xscratch0);
++            code.LDRB(oaknut::WReg{value_idx}, Xscratch0);
+             break;
+         case 16:
+-            code.LDARH(oaknut::WReg{value_idx}, Xscratch0);
++            code.LDRH(oaknut::WReg{value_idx}, Xscratch0);
+             break;
+         case 32:
+-            code.LDAR(oaknut::WReg{value_idx}, Xscratch0);
++            code.LDR(oaknut::WReg{value_idx}, Xscratch0);
+             break;
+         case 64:
+-            code.LDAR(oaknut::XReg{value_idx}, Xscratch0);
++            code.LDR(oaknut::XReg{value_idx}, Xscratch0);
+             break;
+         case 128:
+             code.LDR(oaknut::QReg{value_idx}, Xscratch0);
+-            code.DMB(oaknut::BarrierOp::ISH);
+             break;
+         default:
+             UNREACHABLE();
+         }
++        code.DMB(oaknut::BarrierOp::ISH);
+     } else {
+         fastmem_location = code.xptr<CodePtr>();
+ 
+@@ -357,30 +357,30 @@
+ 
+     if (ordered) {
+         code.ADD(Xscratch0, Xbase, Roffset, add_ext);
++        code.DMB(oaknut::BarrierOp::ISH);
+ 
+         fastmem_location = code.xptr<CodePtr>();
+ 
+         switch (bitsize) {
+         case 8:
+-            code.STLRB(oaknut::WReg{value_idx}, Xscratch0);
++            code.STRB(oaknut::WReg{value_idx}, Xscratch0);
+             break;
+         case 16:
+-            code.STLRH(oaknut::WReg{value_idx}, Xscratch0);
++            code.STRH(oaknut::WReg{value_idx}, Xscratch0);
+             break;
+         case 32:
+-            code.STLR(oaknut::WReg{value_idx}, Xscratch0);
++            code.STR(oaknut::WReg{value_idx}, Xscratch0);
+             break;
+         case 64:
+-            code.STLR(oaknut::XReg{value_idx}, Xscratch0);
++            code.STR(oaknut::XReg{value_idx}, Xscratch0);
+             break;
+         case 128:
+-            code.DMB(oaknut::BarrierOp::ISH);
+             code.STR(oaknut::QReg{value_idx}, Xscratch0);
+-            code.DMB(oaknut::BarrierOp::ISH);
+             break;
+         default:
+             UNREACHABLE();
+         }
++        code.DMB(oaknut::BarrierOp::ISH);
+     } else {
+         fastmem_location = code.xptr<CodePtr>();
+ 

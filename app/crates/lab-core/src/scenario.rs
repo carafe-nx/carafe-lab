@@ -1,0 +1,460 @@
+//! A scenario: the steps the lab takes with one game, read from JSON.
+
+use carafe_core::settings::SwitchButton;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// A point in the launch the lab can wait for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Milestone {
+    /// Wine's virtual memory is ready.
+    Wine,
+    /// The loading screen is drawn.
+    LoadingScreen,
+    /// The game reached the screen.
+    FirstFrame,
+    /// The device save data was committed at least once since the launch.
+    Commit,
+}
+
+/// One step of a scenario.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "step", rename_all = "camelCase", deny_unknown_fields)]
+pub enum Step {
+    /// Starts the game in the emulator.
+    Launch,
+    /// Waits until the logs show `milestone`; fails after `timeout` seconds.
+    #[serde(rename_all = "camelCase")]
+    WaitFor {
+        /// What to wait for.
+        milestone: Milestone,
+        /// Seconds to wait at most.
+        timeout: u32,
+    },
+    /// Waits a fixed time.
+    Wait {
+        /// Seconds to wait.
+        seconds: f32,
+    },
+    /// Presses and releases buttons together.
+    #[serde(rename_all = "camelCase")]
+    Press {
+        /// The buttons, held together.
+        buttons: Vec<SwitchButton>,
+        /// Seconds the buttons stay down.
+        #[serde(default = "default_hold")]
+        hold: f32,
+    },
+    /// Saves a picture of the screen under `name`.
+    Screenshot {
+        /// Name of the picture, unique in the scenario.
+        name: String,
+    },
+    /// Checks that the screen changed between two pictures: the input reached the game.
+    ExpectChange {
+        /// The picture before.
+        from: String,
+        /// The picture after.
+        to: String,
+        /// The step only warns when the screen did not change.
+        #[serde(default)]
+        soft: bool,
+    },
+    /// Checks that a picture shows the graphics probes' four quadrants.
+    ExpectPattern {
+        /// The picture.
+        name: String,
+    },
+    /// Checks the input probe's log: every single-button press since the launch gave what the build's bindings say.
+    ExpectInput,
+    /// Checks that the game has written its save data and remembers it for [`Step::ExpectSaveKept`].
+    ExpectSave,
+    /// Checks that the save data remembered by [`Step::ExpectSave`] is still there and unchanged.
+    ExpectSaveKept,
+    /// Asks the game to close the way the HOME Menu does, and waits for it to end.
+    #[serde(rename_all = "camelCase")]
+    Close {
+        /// Seconds to wait for the game to end before it is stopped by force.
+        #[serde(default = "default_close_timeout")]
+        timeout: u32,
+    },
+}
+
+fn default_hold() -> f32 {
+    0.15
+}
+
+fn default_close_timeout() -> u32 {
+    60
+}
+
+/// A scenario: steps in order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Scenario {
+    /// The steps.
+    pub steps: Vec<Step>,
+}
+
+/// An error in a scenario.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ScenarioError {
+    /// The JSON does not describe a scenario.
+    #[error("not a scenario: {0}")]
+    Format(String),
+    /// A step comes before the game is launched or after it was closed.
+    #[error("step {0} needs a running game: add a launch step before it")]
+    NotRunning(usize),
+    /// The game is launched twice without closing it.
+    #[error("step {0} launches a game that is already running")]
+    AlreadyRunning(usize),
+    /// Two screenshots share a name.
+    #[error("step {0} reuses the screenshot name {1}")]
+    DuplicateScreenshot(usize, String),
+    /// A comparison names a screenshot no earlier step takes.
+    #[error("step {0} compares the screenshot {1}, which no earlier step takes")]
+    UnknownScreenshot(usize, String),
+    /// [`Step::ExpectSaveKept`] without an earlier [`Step::ExpectSave`].
+    #[error("step {0} checks kept save data, but no earlier step remembers it")]
+    NothingRemembered(usize),
+    /// A time is negative, not a number or zero where it must not be.
+    #[error("step {0} has an invalid time")]
+    Time(usize),
+}
+
+impl Scenario {
+    /// Reads and checks a scenario.
+    ///
+    /// # Errors
+    ///
+    /// [`ScenarioError::Format`] if `json` does not describe a scenario; another [`ScenarioError`] if the steps
+    /// do not make sense in this order.
+    pub fn parse(json: &str) -> Result<Self, ScenarioError> {
+        let scenario: Self =
+            serde_json::from_str(json).map_err(|error| ScenarioError::Format(error.to_string()))?;
+        scenario.check()?;
+        Ok(scenario)
+    }
+
+    /// Checks that the steps make sense in this order.
+    ///
+    /// # Errors
+    ///
+    /// The first [`ScenarioError`] found; step numbers count from one.
+    pub fn check(&self) -> Result<(), ScenarioError> {
+        let mut running = false;
+        let mut screenshots: Vec<&str> = Vec::new();
+        let mut remembered = false;
+        for (index, step) in self.steps.iter().enumerate() {
+            let number = index + 1;
+            let needs_game = matches!(
+                step,
+                Step::WaitFor { .. }
+                    | Step::Press { .. }
+                    | Step::Screenshot { .. }
+                    | Step::Close { .. }
+                    | Step::ExpectInput
+            );
+            if needs_game && !running {
+                return Err(ScenarioError::NotRunning(number));
+            }
+            match step {
+                Step::Launch => {
+                    if running {
+                        return Err(ScenarioError::AlreadyRunning(number));
+                    }
+                    running = true;
+                }
+                Step::Close { .. } => running = false,
+                Step::Wait { seconds } => check_time(*seconds, true, number)?,
+                Step::Press { hold, buttons } => {
+                    check_time(*hold, false, number)?;
+                    if buttons.is_empty() {
+                        return Err(ScenarioError::Format(format!(
+                            "step {number} presses no buttons"
+                        )));
+                    }
+                }
+                Step::WaitFor { timeout, .. } if *timeout == 0 => {
+                    return Err(ScenarioError::Time(number));
+                }
+                Step::Screenshot { name } => {
+                    if screenshots.contains(&name.as_str()) {
+                        return Err(ScenarioError::DuplicateScreenshot(number, name.clone()));
+                    }
+                    screenshots.push(name);
+                }
+                Step::ExpectChange { from, to, .. } => {
+                    for name in [from, to] {
+                        if !screenshots.contains(&name.as_str()) {
+                            return Err(ScenarioError::UnknownScreenshot(number, name.clone()));
+                        }
+                    }
+                }
+                Step::ExpectPattern { name } if !screenshots.contains(&name.as_str()) => {
+                    return Err(ScenarioError::UnknownScreenshot(number, name.clone()));
+                }
+                Step::ExpectSave => remembered = true,
+                Step::ExpectSaveKept if !remembered => {
+                    return Err(ScenarioError::NothingRemembered(number));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns the scenario for a game that has none of its own.
+    ///
+    /// It launches the game and waits for the first frame, presses A and looks for a change on the screen
+    /// (a warning only), closes the game the way the HOME Menu does, checks the save data, launches the game
+    /// again and checks that the save data is still there.
+    #[must_use]
+    pub fn standard(first_frame_timeout: u32) -> Self {
+        let wait_for_frame = Step::WaitFor {
+            milestone: Milestone::FirstFrame,
+            timeout: first_frame_timeout,
+        };
+        Self {
+            steps: vec![
+                Step::Launch,
+                wait_for_frame.clone(),
+                Step::Wait { seconds: 10.0 },
+                Step::Screenshot {
+                    name: "first-frame".to_owned(),
+                },
+                Step::Press {
+                    buttons: vec![SwitchButton::A],
+                    hold: default_hold(),
+                },
+                Step::Wait { seconds: 5.0 },
+                Step::Screenshot {
+                    name: "after-a".to_owned(),
+                },
+                Step::ExpectChange {
+                    from: "first-frame".to_owned(),
+                    to: "after-a".to_owned(),
+                    soft: true,
+                },
+                Step::Close {
+                    timeout: default_close_timeout(),
+                },
+                Step::ExpectSave,
+                Step::Launch,
+                wait_for_frame,
+                Step::ExpectSaveKept,
+                Step::Wait { seconds: 5.0 },
+                Step::Screenshot {
+                    name: "relaunch".to_owned(),
+                },
+                Step::Close {
+                    timeout: default_close_timeout(),
+                },
+            ],
+        }
+    }
+}
+
+impl Scenario {
+    /// Returns the scenario for a graphics probe: wait for the first frame, take a picture, check the pattern.
+    #[must_use]
+    pub fn graphics_probe(first_frame_timeout: u32) -> Self {
+        Self {
+            steps: vec![
+                Step::Launch,
+                Step::WaitFor {
+                    milestone: Milestone::FirstFrame,
+                    timeout: first_frame_timeout,
+                },
+                Step::Wait { seconds: 5.0 },
+                Step::Screenshot {
+                    name: "pattern".to_owned(),
+                },
+                Step::ExpectPattern {
+                    name: "pattern".to_owned(),
+                },
+                Step::Close {
+                    timeout: default_close_timeout(),
+                },
+            ],
+        }
+    }
+
+    /// Returns the scenario for the input probe: every Switch button pressed once, then the probe's log checked.
+    #[must_use]
+    pub fn input_probe(first_frame_timeout: u32) -> Self {
+        let mut steps = vec![
+            Step::Launch,
+            Step::WaitFor {
+                milestone: Milestone::FirstFrame,
+                timeout: first_frame_timeout,
+            },
+            Step::Wait { seconds: 5.0 },
+            Step::Screenshot {
+                name: "before".to_owned(),
+            },
+        ];
+        for button in SwitchButton::ALL {
+            steps.push(Step::Press {
+                buttons: vec![button],
+                hold: 0.3,
+            });
+            steps.push(Step::Wait { seconds: 1.5 });
+        }
+        steps.extend([
+            Step::Wait { seconds: 3.0 },
+            Step::Screenshot {
+                name: "after".to_owned(),
+            },
+            Step::ExpectInput,
+            Step::Close {
+                timeout: default_close_timeout(),
+            },
+        ]);
+        Self { steps }
+    }
+}
+
+fn check_time(seconds: f32, zero_allowed: bool, number: usize) -> Result<(), ScenarioError> {
+    let ok = seconds.is_finite() && (seconds > 0.0 || (zero_allowed && seconds == 0.0));
+    if ok {
+        Ok(())
+    } else {
+        Err(ScenarioError::Time(number))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_standard_scenario_is_valid() {
+        assert_eq!(Scenario::standard(600).check(), Ok(()));
+    }
+
+    #[test]
+    fn the_probe_scenarios_are_valid() {
+        assert_eq!(Scenario::graphics_probe(600).check(), Ok(()));
+        let input = Scenario::input_probe(600);
+        assert_eq!(input.check(), Ok(()));
+        let presses = input
+            .steps
+            .iter()
+            .filter(|step| matches!(step, Step::Press { .. }))
+            .count();
+        assert_eq!(presses, SwitchButton::ALL.len());
+    }
+
+    #[test]
+    fn a_pattern_needs_its_picture() {
+        let json = r#"{"steps": [{"step": "launch"}, {"step": "expectPattern", "name": "x"}]}"#;
+        assert_eq!(
+            Scenario::parse(json),
+            Err(ScenarioError::UnknownScreenshot(2, "x".to_owned()))
+        );
+    }
+
+    #[test]
+    fn reads_a_scenario_from_json() {
+        let json = r#"{"steps": [
+            {"step": "launch"},
+            {"step": "waitFor", "milestone": "firstFrame", "timeout": 300},
+            {"step": "press", "buttons": ["A", "ZR"]},
+            {"step": "screenshot", "name": "menu"},
+            {"step": "close"}
+        ]}"#;
+        let scenario = Scenario::parse(json).unwrap();
+        assert_eq!(scenario.steps.len(), 5);
+        assert_eq!(
+            scenario.steps[2],
+            Step::Press {
+                buttons: vec![SwitchButton::A, SwitchButton::Zr],
+                hold: 0.15
+            }
+        );
+        assert_eq!(scenario.steps[4], Step::Close { timeout: 60 });
+    }
+
+    #[test]
+    fn rejects_unknown_steps_and_fields() {
+        let unknown = r#"{"steps": [{"step": "jump"}]}"#;
+        assert!(matches!(
+            Scenario::parse(unknown),
+            Err(ScenarioError::Format(_))
+        ));
+        let extra = r#"{"steps": [{"step": "wait", "seconds": 1, "fast": true}]}"#;
+        assert!(matches!(
+            Scenario::parse(extra),
+            Err(ScenarioError::Format(_))
+        ));
+    }
+
+    #[test]
+    fn a_press_needs_a_running_game() {
+        let json = r#"{"steps": [{"step": "press", "buttons": ["A"]}]}"#;
+        assert_eq!(Scenario::parse(json), Err(ScenarioError::NotRunning(1)));
+    }
+
+    #[test]
+    fn a_second_launch_needs_a_close_first() {
+        let json = r#"{"steps": [{"step": "launch"}, {"step": "launch"}]}"#;
+        assert_eq!(Scenario::parse(json), Err(ScenarioError::AlreadyRunning(2)));
+    }
+
+    #[test]
+    fn comparisons_need_earlier_screenshots() {
+        let json = r#"{"steps": [
+            {"step": "launch"},
+            {"step": "screenshot", "name": "a"},
+            {"step": "expectChange", "from": "a", "to": "b"}
+        ]}"#;
+        assert_eq!(
+            Scenario::parse(json),
+            Err(ScenarioError::UnknownScreenshot(3, "b".to_owned()))
+        );
+    }
+
+    #[test]
+    fn screenshot_names_are_unique() {
+        let json = r#"{"steps": [
+            {"step": "launch"},
+            {"step": "screenshot", "name": "a"},
+            {"step": "screenshot", "name": "a"}
+        ]}"#;
+        assert_eq!(
+            Scenario::parse(json),
+            Err(ScenarioError::DuplicateScreenshot(3, "a".to_owned()))
+        );
+    }
+
+    #[test]
+    fn kept_save_needs_a_remembered_one() {
+        let json = r#"{"steps": [{"step": "expectSaveKept"}]}"#;
+        assert_eq!(
+            Scenario::parse(json),
+            Err(ScenarioError::NothingRemembered(1))
+        );
+    }
+
+    #[test]
+    fn times_must_make_sense() {
+        let negative = r#"{"steps": [{"step": "wait", "seconds": -1}]}"#;
+        assert_eq!(Scenario::parse(negative), Err(ScenarioError::Time(1)));
+        let zero_hold =
+            r#"{"steps": [{"step": "launch"}, {"step": "press", "buttons": ["A"], "hold": 0}]}"#;
+        assert_eq!(Scenario::parse(zero_hold), Err(ScenarioError::Time(2)));
+        let zero_timeout = r#"{"steps": [{"step": "launch"}, {"step": "waitFor", "milestone": "wine", "timeout": 0}]}"#;
+        assert_eq!(Scenario::parse(zero_timeout), Err(ScenarioError::Time(2)));
+    }
+
+    #[test]
+    fn a_press_needs_buttons() {
+        let json = r#"{"steps": [{"step": "launch"}, {"step": "press", "buttons": []}]}"#;
+        assert!(matches!(
+            Scenario::parse(json),
+            Err(ScenarioError::Format(_))
+        ));
+    }
+}

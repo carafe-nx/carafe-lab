@@ -1,0 +1,19 @@
+Carafe bench: a 39-bit process's code starts at 64 GiB instead of 2 GiB.
+Without ASLR every region is laid out right after the code, so the 64 GiB kernel map region, where thread
+local pages go, began inside the low 4 GiB. A 32-bit guest that reserves that window (Wine with WOW64) then
+left no room for thread local pages and thread creation failed with OutOfMemory after a few threads. 4 GiB is
+not far enough either: Wine maps fixed addresses just above it. On the console the regions are placed at
+random across the address space, all far above the low 4 GiB.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/kernel/k_process.cpp
++++ b/src/core/hle/kernel/k_process.cpp
+@@ -1210,7 +1210,7 @@
+         // existence of ASLR pages before the entry point, so we will adjust the load address
+         // to point to about 2GiB into the ASLR region.
+         flag |= Svc::CreateProcessFlag::AddressSpace64Bit;
+-        code_address = 0x8000'0000 + aslr_space_offset;
++        code_address = 0x10'0000'0000 + aslr_space_offset;
+         break;
+     case FileSys::ProgramAddressSpaceType::Is36Bit:
+         flag |= Svc::CreateProcessFlag::AddressSpace64BitDeprecated;

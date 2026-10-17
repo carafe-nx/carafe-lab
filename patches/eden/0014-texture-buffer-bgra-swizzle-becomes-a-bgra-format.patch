@@ -1,0 +1,63 @@
+Carafe bench: a texture buffer whose descriptor swaps red and blue over A8B8G8R8 is viewed as B8G8R8A8. The
+buffer view takes its format from the view, not the image, and uses B8G8R8A8 when the device can read texel
+buffers in it. Vulkan buffer views have no component swizzle, so Eden dropped it, and Mesa's pixel-buffer uploads
+in BGRA order (OpenTTD's OpenGL video buffer) came out with red and blue swapped.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/texture_cache/image_view_info.cpp
++++ b/src/video_core/texture_cache/image_view_info.cpp
+@@ -35,6 +35,17 @@
+       y_source{CastSwizzle(config.y_source)},
+       z_source{CastSwizzle(config.z_source)},
+       w_source{CastSwizzle(config.w_source)} {
++    const bool bgra_swizzle = x_source == CastSwizzle(SwizzleSource::B) &&
++                              y_source == CastSwizzle(SwizzleSource::G) &&
++                              z_source == CastSwizzle(SwizzleSource::R) &&
++                              w_source == CastSwizzle(SwizzleSource::A);
++    if (config.texture_type == TextureType::Texture1DBuffer && bgra_swizzle &&
++        (format == PixelFormat::A8B8G8R8_UNORM || format == PixelFormat::A8B8G8R8_SRGB)) {
++        format = format == PixelFormat::A8B8G8R8_UNORM ? PixelFormat::B8G8R8A8_UNORM
++                                                       : PixelFormat::B8G8R8A8_SRGB;
++        x_source = CastSwizzle(SwizzleSource::R);
++        z_source = CastSwizzle(SwizzleSource::B);
++    }
+     range.base = SubresourceBase{
+         .level = static_cast<s32>(config.res_min_mip_level),
+         .layer = base_layer,
+--- a/src/video_core/texture_cache/image_view_base.cpp
++++ b/src/video_core/texture_cache/image_view_base.cpp
+@@ -37,7 +37,7 @@
+ }
+ 
+ ImageViewBase::ImageViewBase(const ImageInfo& info, const ImageViewInfo& view_info, GPUVAddr addr)
+-    : image_id{NULL_IMAGE_ID}, gpu_addr{addr}, format{info.format}, type{ImageViewType::Buffer},
++    : image_id{NULL_IMAGE_ID}, gpu_addr{addr}, format{view_info.format}, type{ImageViewType::Buffer},
+       size{
+           .width = info.size.width,
+           .height = 1,
+--- a/src/video_core/renderer_vulkan/vk_buffer_cache.cpp
++++ b/src/video_core/renderer_vulkan/vk_buffer_cache.cpp
+@@ -116,6 +116,14 @@
+     if (it != views.end()) {
+         return *it->handle;
+     }
++    VkFormat view_format = MaxwellToVK::SurfaceFormat(*device, FormatType::Buffer, false, format).format;
++    const VkFormat bgra_format = format == VideoCore::Surface::PixelFormat::B8G8R8A8_UNORM ? VK_FORMAT_B8G8R8A8_UNORM
++                                 : format == VideoCore::Surface::PixelFormat::B8G8R8A8_SRGB ? VK_FORMAT_B8G8R8A8_SRGB
++                                                                                            : VK_FORMAT_UNDEFINED;
++    if (bgra_format != VK_FORMAT_UNDEFINED &&
++        device->IsFormatSupported(bgra_format, VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT, FormatType::Buffer)) {
++        view_format = bgra_format;
++    }
+     views.push_back({
+         .offset = offset,
+         .size = size,
+@@ -125,7 +133,7 @@
+             .pNext = nullptr,
+             .flags = 0,
+             .buffer = *buffer,
+-            .format = MaxwellToVK::SurfaceFormat(*device, FormatType::Buffer, false, format).format,
++            .format = view_format,
+             .offset = offset,
+             .range = size,
+         }),

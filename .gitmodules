@@ -1,0 +1,6 @@
+[submodule "external/eden"]
+	path = external/eden
+	url = https://git.eden-emu.dev/eden-emu/eden
+[submodule "external/carafe"]
+	path = external/carafe
+	url = https://github.com/carafe-nx/carafe.git

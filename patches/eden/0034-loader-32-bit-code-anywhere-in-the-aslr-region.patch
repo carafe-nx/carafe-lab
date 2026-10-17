@@ -1,0 +1,31 @@
+Carafe bench: a 32-bit process's code starts at a random 2 MiB step anywhere in its ASLR region, 0x200000 to
+0x40000000, as Atmosphere's loader places it, instead of within the first 16 MiB. Carafe's loader needs
+0x400000-0x795000 free for Need for Speed Underground's fixed image; with code in 16 MiB it landed there in about
+a quarter of the starts, asked for a program restart, and on the WSL GPU the restart crashed Mesa's d3d12 driver.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/loader/deconstructed_rom_directory.cpp
++++ b/src/core/loader/deconstructed_rom_directory.cpp
+@@ -228,8 +228,20 @@
+     code_size += patch_ctx.GetTotalPatchSize();
+ 
+     // TODO: this is bad form of ASLR, it sucks
+-    std::uintptr_t aslr_offset = ((::Settings::values.rng_seed_enabled.GetValue()
+-        ? ::Settings::values.rng_seed.GetValue() : Common::Random::Random64(0)) << 12) & 0xfff000;
++    const u64 aslr_random = ::Settings::values.rng_seed_enabled.GetValue()
++        ? ::Settings::values.rng_seed.GetValue() : Common::Random::Random64(0);
++    std::uintptr_t aslr_offset = (aslr_random << 12) & 0xfff000;
++    const auto address_space = metadata.GetAddressSpaceType();
++    if (address_space == FileSys::ProgramAddressSpaceType::Is32Bit ||
++        address_space == FileSys::ProgramAddressSpaceType::Is32BitNoMap) {
++        constexpr u64 aslr_size_32bit = 0x4000'0000 - 0x20'0000;
++        constexpr u64 aslr_alignment = 0x20'0000;
++        const u64 aligned_code_size = (code_size + aslr_alignment - 1) & ~(aslr_alignment - 1);
++        if (aligned_code_size < aslr_size_32bit) {
++            const u64 slots = (aslr_size_32bit - aligned_code_size) / aslr_alignment;
++            aslr_offset = (aslr_random % (slots + 1)) * aslr_alignment;
++        }
++    }
+ 
+     // Setup the process code layout
+     if (process.LoadFromMetadata(metadata, code_size, fastmem_base, aslr_offset, is_hbl).IsError()) {

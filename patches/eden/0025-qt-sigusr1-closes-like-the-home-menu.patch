@@ -1,0 +1,110 @@
+Carafe bench: SIGUSR1 closes the software the way the HOME menu does. The Stop Emulation hotkey cannot do this
+under Xvfb: without a window manager no window is active, so Qt never matches the F5 shortcut, and with the
+default confirmStop a locked exit waits on a question nobody answers. The software is asked to exit without a
+question, is stopped by force only if it holds the exit lock past the shutdown timeout, the log says which of
+the two happened, and Eden quits once emulation has stopped.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/yuzu/main_window.cpp b/src/yuzu/main_window.cpp
+index 7549325..5d60129 100644
+--- a/src/yuzu/main_window.cpp
++++ b/src/yuzu/main_window.cpp
+@@ -1849,6 +1849,12 @@ void MainWindow::SetupSigInterrupts() {
+     sigaction(SIGINT, &sa, nullptr);
+     sigaction(SIGTERM, &sa, nullptr);
+ 
++    struct sigaction home_sa;
++    home_sa.sa_handler = &MainWindow::HandleSigInterrupt;
++    sigemptyset(&home_sa.sa_mask);
++    home_sa.sa_flags = SA_RESTART;
++    sigaction(SIGUSR1, &home_sa, nullptr);
++
+     sig_interrupt_notifier = new QSocketNotifier(sig_interrupt_fds[1], QSocketNotifier::Read, this);
+     connect(sig_interrupt_notifier, &QSocketNotifier::activated, this,
+             &MainWindow::OnSigInterruptNotifierActivated);
+@@ -1862,7 +1868,7 @@ void MainWindow::HandleSigInterrupt(int sig) {
+ 
+     // Calling into Qt directly from a signal handler is not safe,
+     // so wake up a QSocketNotifier with this hacky write call instead.
+-    char a = 1;
++    char a = sig == SIGUSR1 ? 2 : 1;
+     int ret = write(sig_interrupt_fds[0], &a, sizeof(a));
+     (void)ret;
+ }
+@@ -1876,8 +1882,29 @@ void MainWindow::OnSigInterruptNotifierActivated() {
+ 
+     sig_interrupt_notifier->setEnabled(true);
+ 
++    if (ret == 1 && a == 2) {
++        OnCloseLikeHomeMenu();
++        return;
++    }
++
+     emit SigInterrupt();
+ }
++
++void MainWindow::OnCloseLikeHomeMenu() {
++    LOG_INFO(Frontend, "Close like HOME requested: running={}, exit locked={}", emulation_running,
++             QtCommon::system->GetExitLocked());
++    quit_after_stop = true;
++    if (!emulation_running) {
++        close();
++        return;
++    }
++    play_time_manager->Stop();
++    if (OnShutdownBegin()) {
++        OnShutdownBeginDialog();
++    } else {
++        OnEmulationStopped();
++    }
++}
+ #endif // __unix__
+ 
+ void MainWindow::PreventOSSleep() {
+@@ -2261,6 +2288,13 @@ void MainWindow::OnEmulationStopTimeExpired() {
+ }
+ 
+ void MainWindow::OnEmulationStopped() {
++#ifdef __unix__
++    if (quit_after_stop) {
++        LOG_INFO(Frontend, "Close like HOME: {}",
++                 shutdown_timer.isActive() ? "the software exited by itself"
++                                           : "stopped by force after the shutdown timeout");
++    }
++#endif
+     shutdown_timer.stop();
+     if (emu_thread) {
+         emu_thread->disconnect();
+@@ -2333,6 +2367,12 @@ void MainWindow::OnEmulationStopped() {
+     Settings::RestoreGlobalState(QtCommon::system->IsPoweredOn());
+     QtCommon::system->HIDCore().ReloadInputDevices();
+     UpdateStatusButtons();
++
++#ifdef __unix__
++    if (quit_after_stop) {
++        QTimer::singleShot(0, this, &MainWindow::close);
++    }
++#endif
+ }
+ 
+ void MainWindow::ShutdownGame() {
+diff --git a/src/yuzu/main_window.h b/src/yuzu/main_window.h
+index b676c05..f0249ff 100644
+--- a/src/yuzu/main_window.h
++++ b/src/yuzu/main_window.h
+@@ -328,6 +328,7 @@ private:
+     void SetupSigInterrupts();
+     static void HandleSigInterrupt(int);
+     void OnSigInterruptNotifierActivated();
++    void OnCloseLikeHomeMenu();
+ #endif
+     void SetGamemodeEnabled(bool state);
+ 
+@@ -591,6 +592,7 @@ private:
+ #ifdef __unix__
+     QSocketNotifier* sig_interrupt_notifier;
+     static std::array<int, 3> sig_interrupt_fds;
++    bool quit_after_stop{};
+ #endif
+ 
+     std::filesystem::path GetEdenCommand();

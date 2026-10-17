@@ -1,0 +1,26 @@
+Carafe bench: the software blitter lists A8R8G8B8 and A8B8G8R8 components from the low byte up, as its converter
+reads them and as the rest of Eden lays these formats out (B or R in byte 0). They were listed from the high byte,
+so a 2D copy from A8R8G8B8 to A8B8G8R8, which Mesa uses to upload OpenTTD's palette, turned (R, G, B) into
+(B, 255, R).
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/engines/sw_blitter/converter.cpp
++++ b/src/video_core/engines/sw_blitter/converter.cpp
+@@ -283,7 +283,7 @@
+         ComponentType::UNORM, ComponentType::UNORM, ComponentType::UNORM, ComponentType::UNORM};
+     static constexpr std::array<size_t, num_components> component_sizes = {8, 8, 8, 8};
+     static constexpr std::array<Swizzle, num_components> component_swizzle = {
+-        Swizzle::A, Swizzle::R, Swizzle::G, Swizzle::B};
++        Swizzle::B, Swizzle::G, Swizzle::R, Swizzle::A};
+ };
+ 
+ struct A8R8G8B8_SRGBTraits {
+@@ -328,7 +328,7 @@
+         ComponentType::UNORM, ComponentType::UNORM, ComponentType::UNORM, ComponentType::UNORM};
+     static constexpr std::array<size_t, num_components> component_sizes = {8, 8, 8, 8};
+     static constexpr std::array<Swizzle, num_components> component_swizzle = {
+-        Swizzle::A, Swizzle::B, Swizzle::G, Swizzle::R};
++        Swizzle::R, Swizzle::G, Swizzle::B, Swizzle::A};
+ };
+ 
+ struct A8B8G8R8_SRGBTraits {

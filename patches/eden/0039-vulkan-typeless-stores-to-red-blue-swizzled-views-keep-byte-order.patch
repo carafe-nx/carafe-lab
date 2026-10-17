@@ -1,0 +1,44 @@
+Carafe bench: a typeless image store to a view whose texture header swaps red and blue writes through a
+B8G8R8A8 view. NVK describes a BGRA image as RGBA8 with a (B, G, R, A) swizzle; Eden applied that swizzle when
+sampling, but a storage view has no swizzle, so a store through the same RGBA view put the bytes in RGBA order
+and the next sample read them swapped. NVK copies images with such stores, and Need for Speed Underground
+copies its back buffer every frame with StretchRect, so the whole picture came out with red and blue exchanged.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/renderer_vulkan/vk_texture_cache.h
++++ b/src/video_core/renderer_vulkan/vk_texture_cache.h
+@@ -380,6 +380,8 @@
+ 
+     std::array<vk::ImageView, Shader::NUM_TEXTURE_TYPES> image_views;
+     std::optional<StorageViews> storage_views;
++    vk::ImageView swapped_storage_view;
++    bool swaps_red_blue = false;
+     vk::ImageView depth_view;
+     vk::ImageView stencil_view;
+     vk::ImageView color_view;
+--- a/src/video_core/renderer_vulkan/vk_texture_cache.cpp
++++ b/src/video_core/renderer_vulkan/vk_texture_cache.cpp
+@@ -2137,6 +2137,8 @@
+         TryTransformSwizzleIfNeeded(format, swizzle,
+                         device->MustEmulateBGR565(),
+                         !device->IsExt4444FormatsSupported());
++        swaps_red_blue = format == PixelFormat::A8B8G8R8_UNORM && swizzle[0] == SwizzleSource::B &&
++                         swizzle[1] == SwizzleSource::G && swizzle[2] == SwizzleSource::R;
+         if ((aspect_mask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) != 0) {
+             std::ranges::transform(swizzle, swizzle.begin(), ConvertGreenRed);
+             SanitizeDepthStencilSwizzle(swizzle, device->SupportsDepthStencilSwizzleOne());
+@@ -2276,6 +2278,14 @@
+                                    Shader::ImageFormat image_format) {
+     if (image_handle) {
+         if (image_format == Shader::ImageFormat::Typeless) {
++            if (swaps_red_blue &&
++                device->IsFormatSupported(VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
++                                          FormatType::Optimal)) {
++                if (!swapped_storage_view) {
++                    swapped_storage_view = MakeView(VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
++                }
++                return *swapped_storage_view;
++            }
+             return Handle(texture_type);
+         }
+         const bool is_signed = image_format == Shader::ImageFormat::R8_SINT

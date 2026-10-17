@@ -1,0 +1,91 @@
+Carafe bench: the accelerated DMA copies between a buffer and an image count a remapped element in bytes. With
+remapping the copy engine moves elements of components x component size bytes, and NVK uploads BC textures that
+way: 16-byte elements, a line length of 64 for a 256x256 BC3 level. The software path multiplies by the element
+size, but the accelerated path passed one byte per pixel, so the texture cache divided the line length and the
+origin by the 16-byte block: 64 / 16 = 4 blocks per row reached an image that DXVK had cleared before, and the
+game's textures sampled almost entirely black. Widths, origins and lengths now reach the accelerated path in
+bytes; an origin that no longer fits its 16 bits takes the software path.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/engines/maxwell_dma.cpp
++++ b/src/video_core/engines/maxwell_dma.cpp
+@@ -154,25 +154,37 @@
+     ReleaseSemaphore();
+ }
+ 
++u32 MaxwellDMA::ElementSize() const {
++    if (regs.launch_dma.remap_enable == 0) {
++        return 1;
++    }
++    return (regs.remap_const.num_dst_components_minus_one + 1) *
++           (regs.remap_const.component_size_minus_one + 1);
++}
++
+ void MaxwellDMA::CopyBlockLinearToPitch() {
+    
+ 
+     u32 bytes_per_pixel = 1;
++    const u32 element_size = ElementSize();
+     DMA::ImageOperand src_operand;
+     src_operand.bytes_per_pixel = bytes_per_pixel;
+     src_operand.params = regs.src_params;
++    src_operand.params.width = regs.src_params.width * element_size;
++    src_operand.params.origin.x.Assign(regs.src_params.origin.x * element_size);
+     src_operand.address = regs.offset_in;
+ 
+     DMA::BufferOperand dst_operand;
+     dst_operand.pitch = static_cast<u32>(std::abs(regs.pitch_out));
+-    dst_operand.width = regs.line_length_in;
++    dst_operand.width = regs.line_length_in * element_size;
+     dst_operand.height = regs.line_count;
+     dst_operand.address = regs.offset_out;
+     DMA::ImageCopy copy_info{};
+-    copy_info.length_x = regs.line_length_in;
++    copy_info.length_x = regs.line_length_in * element_size;
+     copy_info.length_y = regs.line_count;
+     auto& accelerate = rasterizer->AccessAccelerateDMA();
+-    if (accelerate.ImageToBuffer(copy_info, src_operand, dst_operand)) {
++    if (regs.src_params.origin.x * element_size <= 0xffff &&
++        accelerate.ImageToBuffer(copy_info, src_operand, dst_operand)) {
+         return;
+     }
+ 
+@@ -232,20 +244,24 @@
+     const u32 remap_components_size = regs.remap_const.component_size_minus_one + 1;
+ 
+     u32 bytes_per_pixel = 1;
++    const u32 element_size = ElementSize();
+     DMA::ImageOperand dst_operand;
+     dst_operand.bytes_per_pixel = bytes_per_pixel;
+     dst_operand.params = regs.dst_params;
++    dst_operand.params.width = regs.dst_params.width * element_size;
++    dst_operand.params.origin.x.Assign(regs.dst_params.origin.x * element_size);
+     dst_operand.address = regs.offset_out;
+     DMA::BufferOperand src_operand;
+     src_operand.pitch = regs.pitch_in;
+-    src_operand.width = regs.line_length_in;
++    src_operand.width = regs.line_length_in * element_size;
+     src_operand.height = regs.line_count;
+     src_operand.address = regs.offset_in;
+     DMA::ImageCopy copy_info{};
+-    copy_info.length_x = regs.line_length_in;
++    copy_info.length_x = regs.line_length_in * element_size;
+     copy_info.length_y = regs.line_count;
+     auto& accelerate = rasterizer->AccessAccelerateDMA();
+-    if (accelerate.BufferToImage(copy_info, src_operand, dst_operand)) {
++    if (regs.dst_params.origin.x * element_size <= 0xffff &&
++        accelerate.BufferToImage(copy_info, src_operand, dst_operand)) {
+         return;
+     }
+ 
+--- a/src/video_core/engines/maxwell_dma.h
++++ b/src/video_core/engines/maxwell_dma.h
+@@ -253,6 +253,8 @@
+     /// registers.
+     void Launch();
+ 
++    u32 ElementSize() const;
++
+     void CopyBlockLinearToPitch();
+ 
+     void CopyPitchToBlockLinear();

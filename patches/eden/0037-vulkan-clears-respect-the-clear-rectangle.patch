@@ -1,0 +1,42 @@
+Carafe bench: a clear with USE_CLEAR_RECT clears only the rectangle in CLEAR_RECT_HORIZONTAL/VERTICAL. The Vulkan
+rasterizer honoured the scissor but never read the clear rectangle, so a partial clear became a full one. NVK
+clears with that rectangle for vkCmdClearAttachments: Need for Speed Underground clears the four letterbox bars
+around its 4:3 picture every frame, and each of those clears erased the whole frame, leaving it black. The
+rectangle is flipped and scaled like the scissor and intersected with it.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -428,9 +428,32 @@
+     VkClearRect clear_rect{
+         .rect = regs.clear_control.use_scissor ? GetScissorState(regs, 0, up_scale, down_shift)
+                                                : default_scissor,
+         .baseArrayLayer = regs.clear_surface.layer,
+         .layerCount = layer_count,
+     };
++    if (regs.clear_control.use_clear_rect) {
++        const bool lower_left = regs.window_origin.mode != Maxwell::WindowOrigin::Mode::UpperLeft;
++        const s32 clip_height = regs.surface_clip.height;
++        const s32 rect_min_y = lower_left ? clip_height - static_cast<s32>(regs.clear_rect.y_max.Value())
++                                          : static_cast<s32>(regs.clear_rect.y_min.Value());
++        const s32 rect_max_y = lower_left ? clip_height - static_cast<s32>(regs.clear_rect.y_min.Value())
++                                          : static_cast<s32>(regs.clear_rect.y_max.Value());
++        const auto scale = [up_scale, down_shift](s32 value) -> s64 {
++            return static_cast<s64>((std::max)(value, 0) * static_cast<s32>(up_scale)) >> down_shift;
++        };
++        const s64 left = (std::max)(s64{clear_rect.rect.offset.x},
++                                    scale(static_cast<s32>(regs.clear_rect.x_min.Value())));
++        const s64 top = (std::max)(s64{clear_rect.rect.offset.y}, scale(rect_min_y));
++        const s64 right = (std::min)(s64{clear_rect.rect.offset.x} + clear_rect.rect.extent.width,
++                                     scale(static_cast<s32>(regs.clear_rect.x_max.Value())));
++        const s64 bottom = (std::min)(s64{clear_rect.rect.offset.y} + clear_rect.rect.extent.height,
++                                      scale(rect_max_y));
++        if (right <= left || bottom <= top) {
++            return;
++        }
++        clear_rect.rect.offset = {static_cast<s32>(left), static_cast<s32>(top)};
++        clear_rect.rect.extent = {static_cast<u32>(right - left), static_cast<u32>(bottom - top)};
++    }
+     const auto clamp_rect_to_render_area = [render_area](VkRect2D& rect) -> bool {
+         const auto clamp_axis = [](s32& offset, u32& extent, u32 limit) {
+             auto clamp_offset = [&offset, limit]() {

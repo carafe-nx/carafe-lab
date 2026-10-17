@@ -1,0 +1,46 @@
+{
+  "steps": [
+    {
+      "step": "launch"
+    },
+    {
+      "step": "waitFor",
+      "milestone": "firstFrame",
+      "timeout": 300
+    },
+    {
+      "step": "wait",
+      "seconds": 20
+    },
+    {
+      "step": "screenshot",
+      "name": "title"
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "PLUS"
+      ],
+      "hold": 0.6
+    },
+    {
+      "step": "wait",
+      "seconds": 8
+    },
+    {
+      "step": "press",
+      "buttons": [
+        "B"
+      ],
+      "hold": 0.6
+    },
+    {
+      "step": "wait",
+      "seconds": 25
+    },
+    {
+      "step": "screenshot",
+      "name": "menu"
+    }
+  ]
+}

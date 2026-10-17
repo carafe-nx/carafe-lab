@@ -1,0 +1,26 @@
+Carafe bench: allocating the 3D object context binds subchannel 0 to the 3D engine, as nvgpu does.
+Mesa on the Switch relies on that binding and sends 3D methods before, or without, binding the
+subchannel itself.
+GPL-3.0-or-later, as the file it changes.
+
+diff --git a/src/core/hle/service/nvdrv/devices/nvhost_gpu.cpp b/src/core/hle/service/nvdrv/devices/nvhost_gpu.cpp
+index 5869bec..eeed631 100644
+--- a/src/core/hle/service/nvdrv/devices/nvhost_gpu.cpp
++++ b/src/core/hle/service/nvdrv/devices/nvhost_gpu.cpp
+@@ -295,6 +295,16 @@ NvResult nvhost_gpu::AllocateObjectContext(IoctlAllocObjCtx& params) {
+     // Defer actual hardware context binding until channel is initialized.
+     ctxObjs[ctx_class_number_index] = params;
+ 
++    if (params.class_num == static_cast<u32>(CtxClasses::Ctx3D) && channel_state->initialized) {
++        system.GPU().PushGPUEntries(
++            channel_state->bind_id,
++            Tegra::CommandList{boost::container::small_vector<Tegra::CommandHeader, 512>{
++                Tegra::BuildCommandHeader(Tegra::BufferMethods::BindObject, 1,
++                                          Tegra::SubmissionMode::Increasing),
++                {static_cast<u32>(params.class_num)},
++            }});
++    }
++
+     return NvResult::Success;
+ }
+ 

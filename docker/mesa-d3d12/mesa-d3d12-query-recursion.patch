@@ -1,0 +1,27 @@
+--- a/src/gallium/drivers/d3d12/d3d12_query.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_query.cpp
+@@ -394,6 +394,8 @@
+    grid.grid[0] = grid.grid[1] = grid.grid[2] = 1;
+    ctx->base.launch_grid(&ctx->base, &grid);
+
++   q_parent->subqueries[sub_query].curr_query = 1;
++
+    d3d12_restore_compute_transform_state(ctx, &save);
+ }
+
+@@ -449,10 +451,14 @@
+ begin_subquery(struct d3d12_context *ctx, struct d3d12_query *q_parent, unsigned sub_query)
+ {
+    struct d3d12_query_impl *q = &q_parent->subqueries[sub_query];
++   if (q->active)
++      return;
++
+    if (q->curr_query == q->num_queries) {
+       /* Accumulate current results and store in first slot */
+       accumulate_subresult_gpu(ctx, q_parent, sub_query);
+-      q->curr_query = 1;
++      if (q->active)
++         return;
+    }
+
+    ctx->cmdlist->BeginQuery(q->query_heap, q->d3d12qtype, q->curr_query);

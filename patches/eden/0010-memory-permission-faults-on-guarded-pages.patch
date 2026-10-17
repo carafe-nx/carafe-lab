@@ -1,0 +1,223 @@
+Carafe bench: a mapped page the guest may not access (permission None or read-only) gives a permission fault
+(DFSC 0x0F) with its address, as on Horizon. Eden changed only the host mapping for fastmem, so a write to a
+guard page went through: FEX's call-ret stack ran through its guard and wrote below its region.
+Each page keeps its guest permissions; a page that is not read-write takes the memory callbacks, which check them.
+Based on an outside analysis of the crash (eden-0010-guest-page-permissions).
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/common/page_table.h
++++ b/src/common/page_table.h
+@@ -133,11 +133,15 @@
+ 
+     /// Vector of memory pointers backing each page. An entry can only be non-null if the
+     /// corresponding attribute element is of type `Memory`.
++    static constexpr u64 PermRead = 1;
++    static constexpr u64 PermWrite = 2;
++    static constexpr u64 PermSlowPath = 4;
++
+     struct PageEntryData {
+         PageInfo ptr;
+         u64 block;
+         u64 addr;
+-        u64 padding;
++        u64 perms;
+     };
+     VirtualBuffer<PageEntryData> entries;
+     static_assert(sizeof(PageEntryData) == 32);
+--- a/src/core/memory.h
++++ b/src/core/memory.h
+@@ -137,6 +137,9 @@
+      */
+     [[nodiscard]] bool IsValidVirtualAddressRange(Common::ProcessAddress base, u64 size) const;
+ 
++    [[nodiscard]] std::optional<u64> FirstDeniedAddress(Common::ProcessAddress base, u64 size,
++                                                        bool write) const;
++
+     /**
+      * Gets a pointer to the given address.
+      *
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -8,6 +8,7 @@
+ #include <algorithm>
+ #include <cstring>
+ #include <mutex>
++#include <optional>
+ #include <span>
+ #include <thread>
+ #include <type_traits>
+@@ -73,12 +74,65 @@
+                    GetInteger(target));
+         MapPages(page_table, base / YUZU_PAGESIZE, size / YUZU_PAGESIZE, target,
+                  Common::PageType::Memory);
++        SetPagePermissions(page_table, GetInteger(base), size, perms);
+ 
+         if (current_page_table->fastmem_arena) {
+             host_buffer->Map(GetInteger(base), GetInteger(target) - DramMemoryMap::Base, size, perms, separate_heap);
+         }
+     }
+ 
++    void SetPagePermissions(Common::PageTable& page_table, u64 vaddr, u64 size,
++                            Common::MemoryPermission perms) {
++        u64 bits = 0;
++        if (True(perms & Common::MemoryPermission::Read)) {
++            bits |= Common::PageTable::PermRead;
++        }
++        if (True(perms & Common::MemoryPermission::Write)) {
++            bits |= Common::PageTable::PermWrite;
++        }
++        const bool restricted =
++            bits != (Common::PageTable::PermRead | Common::PageTable::PermWrite);
++
++        for (u64 addr = vaddr; addr < vaddr + size; addr += YUZU_PAGESIZE) {
++            auto& entry = page_table.entries[addr >> YUZU_PAGEBITS];
++            const bool forced = (entry.perms & Common::PageTable::PermSlowPath) != 0;
++            u64 new_bits = bits;
++            switch (entry.ptr.Type()) {
++            case Common::PageType::Memory:
++                if (restricted) {
++                    entry.ptr.Store(0, Common::PageType::DebugMemory);
++                    new_bits |= Common::PageTable::PermSlowPath;
++                }
++                break;
++            case Common::PageType::DebugMemory:
++                if (forced && restricted) {
++                    new_bits |= Common::PageTable::PermSlowPath;
++                } else if (forced) {
++                    u8* const pointer = system.DeviceMemory().GetPointer<u8>(entry.addr + addr);
++                    entry.ptr.Store(uintptr_t(pointer) - addr, Common::PageType::Memory);
++                }
++                break;
++            default:
++                break;
++            }
++            entry.perms = new_bits;
++        }
++    }
++
++    std::optional<u64> FirstDeniedAddress(u64 vaddr, u64 size, bool write) const {
++        const u64 needed = write ? Common::PageTable::PermWrite : Common::PageTable::PermRead;
++        const u64 end = vaddr + size;
++        for (u64 page = vaddr & ~YUZU_PAGEMASK; page < end; page += YUZU_PAGESIZE) {
++            if (!AddressSpaceContains(*current_page_table, page, 1)) {
++                return (std::max)(page, vaddr);
++            }
++            if ((current_page_table->entries[page >> YUZU_PAGEBITS].perms & needed) == 0) {
++                return (std::max)(page, vaddr);
++            }
++        }
++        return std::nullopt;
++    }
++
+     void UnmapRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
+                      bool separate_heap) {
+         ASSERT_MSG((size & YUZU_PAGEMASK) == 0, "non-page aligned size: {:016X}", size);
+@@ -96,6 +150,8 @@
+         ASSERT_MSG((size & YUZU_PAGEMASK) == 0, "non-page aligned size: {:016X}", size);
+         ASSERT_MSG((vaddr & YUZU_PAGEMASK) == 0, "non-page aligned base: {:016X}", vaddr);
+ 
++        SetPagePermissions(*current_page_table, vaddr, size, perms);
++
+         if (!current_page_table->fastmem_arena) {
+             return;
+         }
+@@ -433,6 +489,10 @@
+                     // Don't mess with already non-debug or rasterizer memory.
+                     break;
+                 case Common::PageType::DebugMemory: {
++                    if (current_page_table->entries[vaddr >> YUZU_PAGEBITS].perms &
++                        Common::PageTable::PermSlowPath) {
++                        break;
++                    }
+                     u8* const pointer = GetPointerFromDebugMemory(vaddr & ~YUZU_PAGEMASK);
+                     current_page_table->entries[vaddr >> YUZU_PAGEBITS].ptr.Store(uintptr_t(pointer) - (vaddr & ~YUZU_PAGEMASK), Common::PageType::Memory);
+                     break;
+@@ -478,6 +538,7 @@
+                 case Common::PageType::DebugMemory:
+                 case Common::PageType::Memory:
+                     current_page_table->entries[vaddr >> YUZU_PAGEBITS].ptr.Store(0, Common::PageType::RasterizerCachedMemory);
++                    current_page_table->entries[vaddr >> YUZU_PAGEBITS].perms &= ~Common::PageTable::PermSlowPath;
+                     break;
+                 case Common::PageType::RasterizerCachedMemory:
+                     // There can be more than one GPU region mapped per CPU region, so it's common
+@@ -504,6 +565,11 @@
+                         // pagetable after unmapping a VMA. In that case the underlying VMA will no
+                         // longer exist, and we should just leave the pagetable entry blank.
+                         current_page_table->entries[vaddr >> YUZU_PAGEBITS].ptr.Store(0, Common::PageType::Unmapped);
++                    } else if (auto& entry = current_page_table->entries[vaddr >> YUZU_PAGEBITS];
++                               (entry.perms & (Common::PageTable::PermRead | Common::PageTable::PermWrite)) !=
++                               (Common::PageTable::PermRead | Common::PageTable::PermWrite)) {
++                        entry.ptr.Store(0, Common::PageType::DebugMemory);
++                        entry.perms |= Common::PageTable::PermSlowPath;
+                     } else {
+                         current_page_table->entries[vaddr >> YUZU_PAGEBITS].ptr.Store(uintptr_t(pointer) - (vaddr & ~YUZU_PAGEMASK), Common::PageType::Memory);
+                     }
+@@ -543,6 +609,7 @@
+                 page_table.entries[base].ptr.Store(0, type);
+                 page_table.entries[base].addr = 0;
+                 page_table.entries[base].block = 0;
++                page_table.entries[base].perms = 0;
+                 base += 1;
+             }
+         } else {
+@@ -553,6 +620,8 @@
+                 page_table.entries[base].ptr.Store(host_ptr, type);
+                 page_table.entries[base].addr = backing;
+                 page_table.entries[base].block = orig_base << YUZU_PAGEBITS;
++                page_table.entries[base].perms =
++                    Common::PageTable::PermRead | Common::PageTable::PermWrite;
+ 
+                 ASSERT_MSG(page_table.entries[base].ptr.Pointer(),
+                            "memory mapping base yield a nullptr within the table");
+@@ -805,6 +874,11 @@
+     impl->ProtectRegion(page_table, GetInteger(vaddr), size, perms);
+ }
+ 
++std::optional<u64> Memory::FirstDeniedAddress(Common::ProcessAddress vaddr, u64 size,
++                                              bool write) const {
++    return impl->FirstDeniedAddress(GetInteger(vaddr), size, write);
++}
++
+ bool Memory::IsValidVirtualAddress(const Common::ProcessAddress vaddr) const {
+     const auto& page_table = *impl->current_page_table;
+     const size_t page = vaddr >> YUZU_PAGEBITS;
+--- a/src/core/arm/arm_interface.h
++++ b/src/core/arm/arm_interface.h
+@@ -44,6 +44,7 @@
+ struct MemoryAbort {
+     u64 address;
+     bool write;
++    bool permission{};
+ };
+ 
+ enum class Architecture {
+--- a/src/core/arm/dynarmic/arm_dynarmic_64.cpp
++++ b/src/core/arm/dynarmic/arm_dynarmic_64.cpp
+@@ -192,6 +192,15 @@
+         return false;
+     }
+ 
++    const bool write = type == Kernel::DebugWatchpointType::Write;
++    if (const auto denied = m_memory.FirstDeniedAddress(addr, size, write)) {
++        if (!m_parent.m_memory_abort) {
++            m_parent.m_memory_abort = MemoryAbort{*denied, write, true};
++        }
++        m_parent.m_jit->HaltExecution(DataAbort);
++        return false;
++    }
++
+     if (!m_debugger_enabled) {
+         return true;
+     }
+--- a/src/core/hle/kernel/physical_core.cpp
++++ b/src/core/hle/kernel/physical_core.cpp
+@@ -33,7 +33,8 @@
+     u64 far = 0;
+     u64 type = Svc::ExceptionTypeInstructionAbort;
+     if (memory_abort) {
+-        esr |= (0x24U << 26) | (memory_abort->write ? 1U << 6 : 0U) | 0x07U;
++        const u32 fault_status = memory_abort->permission ? 0x0FU : 0x07U;
++        esr |= (0x24U << 26) | (memory_abort->write ? 1U << 6 : 0U) | fault_status;
+         far = memory_abort->address;
+         type = Svc::ExceptionTypeDataAbort;
+     } else if (prefetch_abort) {

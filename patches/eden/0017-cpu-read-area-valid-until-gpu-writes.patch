@@ -1,0 +1,117 @@
+Carafe bench: the area a core read last needs no new check while the GPU has modified nothing since, so CPU reads
+inside it skip OnCPURead again. Every place that marks guest memory as GPU-modified advances an epoch, and an area
+checked at another epoch is checked again; a cache invalidation by the program always checks. 0012 dropped the area
+altogether, and every small CPU read of GPU-tracked memory took two locks and walked the caches.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/core/memory.cpp b/src/core/memory.cpp
+index 2c7ee26..a73f62f 100644
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -366,7 +366,7 @@ struct Memory::Impl {
+         auto on_rasterizer = [&](const Common::ProcessAddress current_vaddr, const std::size_t offset, const std::size_t block_size) {
+             // dc ivac: Invalidate to point of coherency
+             // GPU flush -> CPU invalidate
+-            HandleRasterizerDownload(GetInteger(current_vaddr), block_size);
++            HandleRasterizerDownload(GetInteger(current_vaddr), block_size, true);
+         };
+         return PerformCacheOperation(dest_addr, size, on_rasterizer);
+     }
+@@ -676,7 +676,7 @@ struct Memory::Impl {
+         return true;
+     }
+
+-    void HandleRasterizerDownload(VAddr v_address, size_t size) {
++    void HandleRasterizerDownload(VAddr v_address, size_t size, bool invalidate = false) {
+         const auto* p = GetPointerImpl(
+             v_address, []() {}, []() {});
+         if (!gpu_device_memory) [[unlikely]] {
+@@ -685,7 +685,14 @@ struct Memory::Impl {
+         const size_t core = system.GetCurrentHostThreadID();
+         auto& current_area = rasterizer_read_areas[core];
+         gpu_device_memory->ApplyOpOnPointer(p, scratch_buffers[core], [&](DAddr address) {
++            const DAddr end_address = address + size;
++            const u64 epoch = VideoCore::gpu_modification_epoch.load(std::memory_order_acquire);
++            if (!invalidate && current_area.epoch == epoch && current_area.start_address <= address &&
++                end_address <= current_area.end_address) [[likely]] {
++                return;
++            }
+             current_area = system.GPU().OnCPURead(address, size);
++            current_area.epoch = epoch;
+         });
+     }
+
+diff --git a/src/video_core/buffer_cache/memory_tracker_base.h b/src/video_core/buffer_cache/memory_tracker_base.h
+index 2c57127..000a74a 100644
+--- a/src/video_core/buffer_cache/memory_tracker_base.h
++++ b/src/video_core/buffer_cache/memory_tracker_base.h
+@@ -16,6 +16,7 @@
+
+ #include "common/alignment.h"
+ #include "common/common_types.h"
++#include "video_core/rasterizer_download_area.h"
+ #include "video_core/buffer_cache/word_manager.h"
+
+ namespace VideoCommon {
+@@ -86,6 +87,7 @@ public:
+
+     /// Mark region as modified from the host GPU
+     void MarkRegionAsGpuModified(VAddr dirty_cpu_addr, u64 query_size) noexcept {
++        VideoCore::gpu_modification_epoch.fetch_add(1, std::memory_order_release);
+         IteratePages<true>(dirty_cpu_addr, query_size, [](Manager* manager, u64 offset, size_t size) {
+             manager->ChangeRegionState(Type::GPU, true, manager->cpu_addr + offset, size);
+         });
+diff --git a/src/video_core/rasterizer_download_area.h b/src/video_core/rasterizer_download_area.h
+index d288260..e3b6d6f 100644
+--- a/src/video_core/rasterizer_download_area.h
++++ b/src/video_core/rasterizer_download_area.h
+@@ -3,14 +3,21 @@
+
+ #pragma once
+
++#include <atomic>
++
+ #include "common/common_types.h"
+
+ namespace VideoCore {
+
++/// Advances whenever a cache marks guest memory as modified by the GPU. A CPU read area checked
++/// at one value stays valid only while the value stays the same.
++inline std::atomic<u64> gpu_modification_epoch{0};
++
+ struct RasterizerDownloadArea {
+     VAddr start_address;
+     VAddr end_address;
+     bool preemtive;
++    u64 epoch{~0ULL};
+ };
+
+ } // namespace VideoCore
+diff --git a/src/video_core/texture_cache/texture_cache.h b/src/video_core/texture_cache/texture_cache.h
+index d95b8d7..d5838fa 100644
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -1752,6 +1752,7 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
+             continue;
+         }
+         if (True(overlap.flags & ImageFlagBits::GpuModified)) {
++            VideoCore::gpu_modification_epoch.fetch_add(1, std::memory_order_release);
+             new_image.flags |= ImageFlagBits::GpuModified;
+             const auto& resolution = Settings::values.resolution_info;
+             const SubresourceBase base = new_image.TryFindBase(overlap.gpu_addr).value();
+@@ -2551,6 +2552,7 @@ void TextureCache<P>::RemoveFramebuffers(std::span<const ImageViewId> removed_vi
+
+ template <class P>
+ void TextureCache<P>::MarkModification(ImageBase& image) noexcept {
++    VideoCore::gpu_modification_epoch.fetch_add(1, std::memory_order_release);
+     image.flags |= ImageFlagBits::GpuModified;
+     image.modification_tick = ++modification_tick;
+ }
+@@ -2584,6 +2586,7 @@ void TextureCache<P>::SynchronizeAliases(ImageId image_id) {
+     }
+     image.modification_tick = most_recent_tick;
+     if (any_modified) {
++        VideoCore::gpu_modification_epoch.fetch_add(1, std::memory_order_release);
+         image.flags |= ImageFlagBits::GpuModified;
+     }
+     std::ranges::sort(aliased_images, [this](const AliasedImage* lhs, const AliasedImage* rhs) {

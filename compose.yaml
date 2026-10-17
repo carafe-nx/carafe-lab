@@ -1,0 +1,45 @@
+services:
+  eden-build:
+    build: docker/eden-build
+    image: carafe-lab-eden-build
+    profiles: ["build"]
+    cpus: ${LAB_BUILD_CPUS:-2}
+    mem_limit: ${LAB_BUILD_MEMORY:-4g}
+    memswap_limit: ${LAB_BUILD_MEMORY:-4g}
+    environment:
+      CARAFE_JOBS: ${LAB_BUILD_JOBS:-2}
+    ulimits:
+      core: 1
+    volumes:
+      - eden-src:/src
+      - ./build/eden:/out
+      - ./docker/eden-build:/tools:ro
+      - .:/lab:ro
+    working_dir: /src
+    command: sh /tools/build-eden.sh
+
+  mesa-d3d12:
+    build: docker/mesa-d3d12
+    image: carafe-lab-mesa-d3d12
+    profiles: ["build"]
+
+  eden:
+    build:
+      context: build/eden/qt
+      dockerfile: ../../../docker/eden/Dockerfile
+      additional_contexts:
+        scripts: docker/eden
+    image: carafe-lab-eden
+    profiles: ["build"]
+
+  probes:
+    image: mstorsjo/llvm-mingw:20260505@sha256:974eec0b217e2a97cca35d7418741be32a55880010620937497a2a78e73cd482
+    profiles: ["build"]
+    volumes:
+      - .:/work
+    working_dir: /work
+    command: make -C tools/probes
+
+volumes:
+  eden-src:
+    name: carafe-lab-eden-src

@@ -1,0 +1,78 @@
+Carafe bench: the compute engine performs its SET_REPORT_SEMAPHORE release. Eden's KeplerCompute stored
+SET_REPORT_SEMAPHORE_A..D (0x1b00-0x1b0c) as plain registers and never wrote the payload. NVK emits a
+VkEvent set, reset, timestamp or buffer marker on the subchannel used last, so after a compute dispatch,
+an NVK meta copy (vkCmdCopyBufferToImage of every uncompressed colour format goes through a compute
+shader on GM20B) or a barrier that invalidates shader caches on the compute subchannel, vkCmdSetEvent2 is a
+compute report semaphore. DXVK signals each D3D9 event query with vkCmdSetEvent2 and GetData reads it with
+vkGetEventStatus, so the query never completed and a game spinning on GetData(D3DGETDATA_FLUSH) after a
+resource upload froze for good while every submission had retired. The release now goes through the query
+cache like the 3D engine's: one word as a fence, four words with a timestamp. On the hardware the compute
+class writes the semaphore as documented in clb1c0.h.
+GPL-3.0-or-later, as the files it changes.
+diff --git a/src/video_core/engines/kepler_compute.cpp b/src/video_core/engines/kepler_compute.cpp
+index 7b4efeb1e0..f8ece3207a 100644
+--- a/src/video_core/engines/kepler_compute.cpp
++++ b/src/video_core/engines/kepler_compute.cpp
+@@ -22,6 +22,7 @@ KeplerCompute::KeplerCompute(Core::System& system_, MemoryManager& memory_manage
+     execution_mask[KEPLER_COMPUTE_REG_INDEX(exec_upload)] = true;
+     execution_mask[KEPLER_COMPUTE_REG_INDEX(data_upload)] = true;
+     execution_mask[KEPLER_COMPUTE_REG_INDEX(launch)] = true;
++    execution_mask[REPORT_SEMAPHORE_D] = true;
+ }
+ 
+ KeplerCompute::~KeplerCompute() = default;
+@@ -73,6 +74,9 @@ void KeplerCompute::CallMethod(u32 method, u32 method_argument, bool is_last_cal
+         indirect_compute = std::nullopt;
+         break;
+     }
++    case REPORT_SEMAPHORE_D:
++        ProcessReportSemaphore();
++        break;
+     default:
+         break;
+     }
+@@ -100,6 +104,24 @@ void KeplerCompute::ProcessLaunch() {
+     rasterizer->DispatchCompute();
+ }
+ 
++void KeplerCompute::ProcessReportSemaphore() {
++    const u32 control = regs.reg_array[REPORT_SEMAPHORE_D];
++    const u32 operation = control & 0x3;
++    const bool one_word = ((control >> 28) & 0x1) != 0;
++    const GPUVAddr address =
++        (static_cast<GPUVAddr>(regs.reg_array[REPORT_SEMAPHORE_A] & 0xff) << 32) |
++        regs.reg_array[REPORT_SEMAPHORE_B];
++    const u32 payload = regs.reg_array[REPORT_SEMAPHORE_C];
++    if (operation != 0) {
++        LOG_WARNING(HW_GPU, "Unimplemented compute report semaphore operation {}", operation);
++        return;
++    }
++    const VideoCommon::QueryPropertiesFlags flags =
++        one_word ? VideoCommon::QueryPropertiesFlags::IsAFence
++                 : VideoCommon::QueryPropertiesFlags::HasTimeout;
++    rasterizer->Query(address, VideoCommon::QueryType::Payload, flags, payload, 0);
++}
++
+ Texture::TICEntry KeplerCompute::GetTICEntry(u32 tic_index) const {
+     const GPUVAddr tic_address_gpu{regs.tic.Address() + tic_index * sizeof(Texture::TICEntry)};
+ 
+diff --git a/src/video_core/engines/kepler_compute.h b/src/video_core/engines/kepler_compute.h
+index 735e05fb43..abf72be499 100644
+--- a/src/video_core/engines/kepler_compute.h
++++ b/src/video_core/engines/kepler_compute.h
+@@ -210,8 +210,15 @@ public:
+     }
+ 
+ private:
++    static constexpr u32 REPORT_SEMAPHORE_A = 0x6C0;
++    static constexpr u32 REPORT_SEMAPHORE_B = 0x6C1;
++    static constexpr u32 REPORT_SEMAPHORE_C = 0x6C2;
++    static constexpr u32 REPORT_SEMAPHORE_D = 0x6C3;
++
+     void ProcessLaunch();
+ 
++    void ProcessReportSemaphore();
++
+     void ConsumeSinkImpl() override;
+ 
+     /// Retrieves information about a specific TIC entry from the TIC buffer.

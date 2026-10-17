@@ -1,0 +1,16 @@
+Carafe bench: svcGetInfo(ThreadTickCount) reports the CPU time of another thread for all cores.
+Eden answered 0 unless the handle was the calling thread, so Autorun's [THREADS] lines read 0.00 cores and its
+sampling profiler never picked a thread. The time accumulated at the thread's last context switch is returned.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/kernel/svc/svc_info.cpp
++++ b/src/core/hle/kernel/svc/svc_info.cpp
+@@ -224,6 +224,8 @@
+             out_ticks = thread_ticks + (core_timing.GetClockTicks() - prev_ctx_ticks);
+         } else if (same_thread && info_sub_id == system.Kernel().CurrentPhysicalCoreIndex()) {
+             out_ticks = core_timing.GetClockTicks() - prev_ctx_ticks;
++        } else if (!same_thread && info_sub_id == 0xFFFFFFFFFFFFFFFF) {
++            out_ticks = static_cast<u64>(thread->GetCpuTime());
+         }
+ 
+         *result = out_ticks;

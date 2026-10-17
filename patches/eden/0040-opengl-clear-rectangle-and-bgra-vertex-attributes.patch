@@ -1,0 +1,52 @@
+Carafe bench: the OpenGL rasterizer gets the two Vulkan fixes of 0037 and 0038. A clear with USE_CLEAR_RECT
+clears only CLEAR_RECT_HORIZONTAL/VERTICAL, intersected with the scissor when the clear uses it, instead of the
+whole surface; and an 8-bit four-component UNORM vertex attribute with the BGRA bit set is read with GL_BGRA.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -118,8 +118,10 @@
+             glVertexAttribIFormat(gl_index, attrib.ComponentCount(),
+                                   MaxwellToGL::VertexFormat(attrib), attrib.offset);
+         } else {
+-            glVertexAttribFormat(gl_index, attrib.ComponentCount(),
+-                                 MaxwellToGL::VertexFormat(attrib),
++            const bool is_bgra = attrib.bgra != 0 && attrib.type == Maxwell::VertexAttribute::Type::UNorm &&
++                                 attrib.size == Maxwell::VertexAttribute::Size::Size_R8_G8_B8_A8;
++            const GLint components = is_bgra ? GL_BGRA : static_cast<GLint>(attrib.ComponentCount());
++            glVertexAttribFormat(gl_index, components, MaxwellToGL::VertexFormat(attrib),
+                                  attrib.IsNormalized() ? GL_TRUE : GL_FALSE, attrib.offset);
+         }
+         glVertexAttribBinding(gl_index, attrib.buffer);
+@@ -206,6 +208,31 @@
+         state_tracker.NotifyScissor0();
+         glDisablei(GL_SCISSOR_TEST, 0);
+     }
++    if (regs.clear_control.use_clear_rect) {
++        s64 left = regs.clear_rect.x_min.Value();
++        s64 right = regs.clear_rect.x_max.Value();
++        s64 top = regs.clear_rect.y_min.Value();
++        s64 bottom = regs.clear_rect.y_max.Value();
++        const auto& scissor = regs.scissor_test[0];
++        if (regs.clear_control.use_scissor && scissor.enable) {
++            left = (std::max)(left, s64{scissor.min_x.Value()});
++            right = (std::min)(right, s64{scissor.max_x.Value()});
++            top = (std::max)(top, s64{scissor.min_y.Value()});
++            bottom = (std::min)(bottom, s64{scissor.max_y.Value()});
++        }
++        if (right <= left || bottom <= top) {
++            return;
++        }
++        const auto& resolution = Settings::values.resolution_info;
++        const bool is_rescaling = texture_cache.IsRescaling();
++        const auto scale = [&](s64 value) -> GLint {
++            return static_cast<GLint>(is_rescaling ? resolution.ScaleUp(static_cast<s32>(value))
++                                                   : static_cast<s32>(value));
++        };
++        state_tracker.NotifyScissor0();
++        glEnablei(GL_SCISSOR_TEST, 0);
++        glScissorIndexed(0, scale(left), scale(top), scale(right - left), scale(bottom - top));
++    }
+     UNIMPLEMENTED_IF(regs.clear_control.use_viewport_clip0);
+ 
+     if (use_color) {

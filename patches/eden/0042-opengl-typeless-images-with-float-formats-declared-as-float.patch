@@ -1,0 +1,85 @@
+Carafe bench: OpenGL declares typeless storage images of non-integer formats as float images.
+The GLSL backend declared every storage image as uimage, so stores to an RGBA8 UNORM image did nothing on
+Mesa. Typeless images of float formats are now image* and their texels are bit-cast like the SPIR-V backend does.
+
+--- a/src/shader_recompiler/backend/glsl/emit_glsl_image.cpp
++++ b/src/shader_recompiler/backend/glsl/emit_glsl_image.cpp
+@@ -25,6 +25,14 @@
+     return fmt::format("img{}{}", def.binding, index_offset);
+ }
+ 
++bool IsImageInteger(EmitContext& ctx, const IR::TextureInstInfo& info) {
++    if (info.type == TextureType::Buffer) {
++        return true;
++    }
++    const auto& desc{ctx.info.image_descriptors.at(info.descriptor_index)};
++    return desc.is_integer || desc.format != ImageFormat::Typeless;
++}
++
+ bool IsTextureMsaa(EmitContext& ctx, const IR::TextureInstInfo& info) {
+     if (info.type == TextureType::Buffer) {
+         return false;
+@@ -578,6 +586,10 @@
+         throw NotImplementedException("EmitImageRead Sparse");
+     }
+     const auto image{Image(ctx, info, index)};
++    if (!IsImageInteger(ctx, info)) {
++        ctx.AddU32x4("{}=floatBitsToUint(imageLoad({},{}));", inst, image, CoordsCastToInt(coords, info));
++        return;
++    }
+     ctx.AddU32x4("{}=uvec4(imageLoad({},{}));", inst, image, CoordsCastToInt(coords, info));
+ }
+ 
+@@ -585,6 +597,10 @@
+                     std::string_view coords, std::string_view color) {
+     const auto info{inst.Flags<IR::TextureInstInfo>()};
+     const auto image{Image(ctx, info, index)};
++    if (!IsImageInteger(ctx, info)) {
++        ctx.Add("imageStore({},{},uintBitsToFloat({}));", image, CoordsCastToInt(coords, info), color);
++        return;
++    }
+     ctx.Add("imageStore({},{},{});", image, CoordsCastToInt(coords, info), color);
+ }
+ 
+--- a/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
++++ b/src/shader_recompiler/backend/glsl/glsl_emit_context.cpp
+@@ -111,22 +111,22 @@
+     }
+ }
+ 
+-std::string_view ImageType(TextureType type) {
++std::string_view ImageType(TextureType type, bool is_integer) {
+     switch (type) {
+     case TextureType::Color1D:
+-        return "uimage1D";
++        return is_integer ? "uimage1D" : "image1D";
+     case TextureType::ColorArray1D:
+-        return "uimage1DArray";
++        return is_integer ? "uimage1DArray" : "image1DArray";
+     case TextureType::Color2D:
+-        return "uimage2D";
++        return is_integer ? "uimage2D" : "image2D";
+     case TextureType::ColorArray2D:
+-        return "uimage2DArray";
++        return is_integer ? "uimage2DArray" : "image2DArray";
+     case TextureType::Color3D:
+-        return "uimage3D";
++        return is_integer ? "uimage3D" : "image3D";
+     case TextureType::ColorCube:
+-        return "uimageCube";
++        return is_integer ? "uimageCube" : "imageCube";
+     case TextureType::ColorArrayCube:
+-        return "uimageCubeArray";
++        return is_integer ? "uimageCubeArray" : "imageCubeArray";
+     case TextureType::Buffer:
+         return "uimageBuffer";
+     default:
+@@ -673,7 +673,7 @@
+     for (const auto& desc : info.image_descriptors) {
+         images.push_back({bindings.image, desc.count});
+         const auto format{ImageFormatString(desc.format)};
+-        const auto image_type{ImageType(desc.type)};
++        const auto image_type{ImageType(desc.type, desc.is_integer || desc.format != ImageFormat::Typeless)};
+         const auto qualifier{ImageAccessQualifier(desc.is_written, desc.is_read)};
+         const auto array_decorator{desc.count > 1 ? fmt::format("[{}]", desc.count) : ""};
+         header += fmt::format("layout(binding={}{})uniform {}{} img{}{};", bindings.image, format,

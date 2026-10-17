@@ -1,0 +1,26 @@
+Carafe bench: a syncpoint event is marked signalled before its kernel event is signalled, and a new wait
+clears the kernel event. The host action set the state to Signalling, woke the guest and only then stored
+Signalled; libnx's nvFenceWait woke up, freed its event slot and issued the next EventWaitAsync on the same
+slot while it was still Signalling, Eden answered BadParameter and NVK reported VK_ERROR_DEVICE_LOST. A signal
+that raced a cancelled wait also stayed on the kernel event and ended the next wait early, so the next wait
+on that slot found it still Waiting. On the hardware a wait is armed on a cleared event.
+GPL-3.0-or-later, as the file it changes.
+diff --git a/src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp b/src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp
+--- a/src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp
++++ b/src/core/hle/service/nvdrv/devices/nvhost_ctrl.cpp
+@@ -189,2 +189,3 @@ NvResult nvhost_ctrl::IocCtrlEventWait(IocCtrlEventWaitParams& params, bool is_a
+ 
++    event.kevent->Clear();
+     event.status.store(EventState::Waiting, std::memory_order_release);
+@@ -203,7 +204,8 @@ NvResult nvhost_ctrl::IocCtrlEventWait(IocCtrlEventWaitParams& params, bool is_a
+             auto& event_ = events[slot];
+-            if (event_.status.exchange(EventState::Signalling, std::memory_order_acq_rel) ==
+-                EventState::Waiting) {
++            const EventState previous =
++                event_.status.exchange(EventState::Signalling, std::memory_order_acq_rel);
++            event_.status.store(EventState::Signalled, std::memory_order_release);
++            if (previous == EventState::Waiting) {
+                 event_.kevent->Signal();
+             }
+-            event_.status.store(EventState::Signalled, std::memory_order_release);
+         });

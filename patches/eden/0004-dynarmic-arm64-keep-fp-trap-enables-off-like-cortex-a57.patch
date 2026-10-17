@@ -1,0 +1,48 @@
+Carafe bench: the guest's FPCR keeps its floating-point trap enables off, as on the Cortex-A57.
+The A57 ignores those bits; a host that implements them, such as the Snapdragon X, raised SIGFPE
+in Eden's own code while the guest's FPCR was loaded.
+GPL-3.0-or-later, as the files it changes (0BSD in dynarmic's own notice).
+
+diff --git a/src/dynarmic/src/dynarmic/backend/arm64/a64_interface.cpp b/src/dynarmic/src/dynarmic/backend/arm64/a64_interface.cpp
+index c1c5891..81d0b29 100644
+--- a/src/dynarmic/src/dynarmic/backend/arm64/a64_interface.cpp
++++ b/src/dynarmic/src/dynarmic/backend/arm64/a64_interface.cpp
+@@ -111,7 +111,7 @@ struct Jit::Impl final {
+     }
+ 
+     void SetFpcr(std::uint32_t value) {
+-        current_state.fpcr = value;
++        current_state.fpcr = value & ~fpcr_trap_enables;
+     }
+ 
+     std::uint32_t Fpsr() const {
+diff --git a/src/dynarmic/src/dynarmic/backend/arm64/a64_jitstate.h b/src/dynarmic/src/dynarmic/backend/arm64/a64_jitstate.h
+index 29bc001..2470acc 100644
+--- a/src/dynarmic/src/dynarmic/backend/arm64/a64_jitstate.h
++++ b/src/dynarmic/src/dynarmic/backend/arm64/a64_jitstate.h
+@@ -16,6 +16,8 @@
+ 
+ namespace Dynarmic::Backend::Arm64 {
+ 
++constexpr u32 fpcr_trap_enables = 0x9F00;
++
+ struct A64JitState {
+     std::array<u64, 31> reg{};
+     u64 sp = 0;
+diff --git a/src/dynarmic/src/dynarmic/backend/arm64/emit_arm64_a64.cpp b/src/dynarmic/src/dynarmic/backend/arm64/emit_arm64_a64.cpp
+index da4364c..a8ed6ea 100644
+--- a/src/dynarmic/src/dynarmic/backend/arm64/emit_arm64_a64.cpp
++++ b/src/dynarmic/src/dynarmic/backend/arm64/emit_arm64_a64.cpp
+@@ -356,8 +356,10 @@ void EmitIR<IR::Opcode::A64SetFPCR>(oaknut::CodeGenerator& code, EmitContext& ct
+     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+     auto Wvalue = ctx.reg_alloc.ReadW(args[0]);
+     RegAlloc::Realize(Wvalue);
+-    code.STR(Wvalue, Xstate, offsetof(A64JitState, fpcr));
+-    code.MSR(oaknut::SystemReg::FPCR, Wvalue->toX());
++    code.MOV(Wscratch0, fpcr_trap_enables);
++    code.BIC(Wscratch0, Wvalue, Wscratch0);
++    code.STR(Wscratch0, Xstate, offsetof(A64JitState, fpcr));
++    code.MSR(oaknut::SystemReg::FPCR, Xscratch0);
+ }
+ 
+ template<>

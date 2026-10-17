@@ -1,0 +1,20 @@
+Carafe bench: a graphics channel sends subchannel 4 to the copy engine without SET_OBJECT, as GM20B
+does. The hardware maps subchannels to engines by a fixed rule and subchannel 4 of a graphics
+channel is its copy engine; SET_OBJECT only checks the class. NVK relies on that: it binds 3D and
+compute itself and sends every vkCmdCopy* (texture uploads, buffer copies) on subchannel 4 without
+binding it, so Eden dropped all of them ("Method 0xc0 on subchannel 4 with no engine bound").
+A SET_OBJECT from the guest, as NVN, deko3d and Mesa nvc0 send, still rebinds the subchannel.
+GPL-3.0-or-later, as the file it changes.
+
+diff --git a/src/video_core/control/channel_state.cpp b/src/video_core/control/channel_state.cpp
+index d07c7e2..b7f6e46 100644
+--- a/src/video_core/control/channel_state.cpp
++++ b/src/video_core/control/channel_state.cpp
+@@ -28,6 +28,7 @@ void ChannelState::Init(Core::System& system, GPU& gpu, u64 program_id_) {
+     kepler_compute.emplace(system, *memory_manager);
+     maxwell_dma.emplace(system, *memory_manager);
+     kepler_memory.emplace(system, *memory_manager);
++    dma_pusher->BindSubchannel(&*maxwell_dma, 4, Engines::EngineTypes::MaxwellDMA);
+     initialized = true;
+ }
+ 

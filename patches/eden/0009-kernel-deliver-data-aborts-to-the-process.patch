@@ -1,0 +1,150 @@
+Carafe bench: an access to unmapped memory stops the JIT at that instruction and goes to the process's
+exception handler as a data abort with its address, as on the hardware, instead of reading zero and
+dropping the write. The runtime commits reserved memory lazily from that handler.
+When no handler takes it, the thread stops.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/arm/arm_interface.h
++++ b/src/core/arm/arm_interface.h
+@@ -4,8 +4,10 @@
+ #pragma once
+ 
+ #include <array>
++#include <optional>
+ #include <span>
+ #include <string>
++#include <utility>
+ #include <vector>
+ 
+ #include "common/common_funcs.h"
+@@ -39,6 +41,11 @@ enum class HaltReason : u64 {
+ };
+ DECLARE_ENUM_FLAG_OPERATORS(HaltReason);
+ 
++struct MemoryAbort {
++    u64 address;
++    bool write;
++};
++
+ enum class Architecture {
+     AArch64,
+     AArch32,
+@@ -101,12 +108,17 @@ public:
+     virtual const Kernel::DebugWatchpoint* HaltedWatchpoint() const = 0;
+     virtual void RewindBreakpointInstruction() = 0;
+ 
++    std::optional<MemoryAbort> TakeMemoryAbort() {
++        return std::exchange(m_memory_abort, std::nullopt);
++    }
++
+ protected:
+     const Kernel::DebugWatchpoint* MatchingWatchpoint(
+         u64 addr, u64 size, Kernel::DebugWatchpointType access_type) const;
+ 
+ protected:
+     const WatchpointArray* m_watchpoints{};
++    std::optional<MemoryAbort> m_memory_abort{};
+     bool m_uses_wall_clock{};
+ };
+ 
+--- a/src/core/arm/dynarmic/arm_dynarmic_64.cpp
++++ b/src/core/arm/dynarmic/arm_dynarmic_64.cpp
+@@ -18,7 +18,7 @@ using namespace Common::Literals;
+ DynarmicCallbacks64::DynarmicCallbacks64(ArmDynarmic64& parent, Kernel::KProcess* process)
+     : m_parent{parent}, m_memory(process->GetMemory())
+     , m_process(process), m_debugger_enabled{parent.m_system.DebuggerEnabled()}
+-    , m_check_memory_access{m_debugger_enabled || !Settings::values.cpuopt_ignore_memory_aborts.GetValue()}
++    , m_check_memory_access{true}
+ {}
+ 
+ u8 DynarmicCallbacks64::MemoryRead8(u64 vaddr) {
+@@ -185,9 +185,10 @@ bool DynarmicCallbacks64::CheckMemoryAccess(u64 addr, u64 size, Kernel::DebugWat
+     }
+ 
+     if (!m_memory.IsValidVirtualAddressRange(addr, size)) {
+-        LOG_CRITICAL(Core_ARM, "Stopping execution due to unmapped memory access at {:#x}",
+-                        addr);
+-        m_parent.m_jit->HaltExecution(PrefetchAbort);
++        if (!m_parent.m_memory_abort) {
++            m_parent.m_memory_abort = MemoryAbort{addr, type == Kernel::DebugWatchpointType::Write};
++        }
++        m_parent.m_jit->HaltExecution(DataAbort);
+         return false;
+     }
+ 
+@@ -267,9 +268,7 @@ void ArmDynarmic64::MakeJit(Common::PageTable* page_table, std::size_t address_s
+ #endif
+ 
+     // Allow memory fault handling to work
+-    if (m_system.DebuggerEnabled()) {
+-        config.check_halt_on_memory_access = true;
+-    }
++    config.check_halt_on_memory_access = true;
+ 
+     // null_jit
+     if (!page_table) {
+--- a/src/core/hle/kernel/physical_core.cpp
++++ b/src/core/hle/kernel/physical_core.cpp
+@@ -20,7 +20,8 @@ namespace Kernel {
+ namespace {
+ 
+ bool EnterUserExceptionHandler(KernelCore& kernel, KProcess& process, Core::ArmInterface& interface,
+-                               bool prefetch_abort) {
++                               bool prefetch_abort,
++                               const std::optional<Core::MemoryAbort>& memory_abort = std::nullopt) {
+     if (!process.Is64Bit()) {
+         return false;
+     }
+@@ -30,7 +31,12 @@ bool EnterUserExceptionHandler(KernelCore& kernel, KProcess& process, Core::ArmI
+ 
+     u32 esr = 1U << 25;
+     u64 far = 0;
+-    if (prefetch_abort) {
++    u64 type = Svc::ExceptionTypeInstructionAbort;
++    if (memory_abort) {
++        esr |= (0x24U << 26) | (memory_abort->write ? 1U << 6 : 0U) | 0x07U;
++        far = memory_abort->address;
++        type = Svc::ExceptionTypeDataAbort;
++    } else if (prefetch_abort) {
+         esr |= 0x20U << 26;
+         far = context.pc;
+     } else if (const u32 insn = process.GetMemory().Read32(context.pc); (insn & 0xFFE0001F) == 0xD4200000) {
+@@ -57,7 +63,7 @@ bool EnterUserExceptionHandler(KernelCore& kernel, KProcess& process, Core::ArmI
+     process.GetMemory().WriteBlock(info_address, &info, sizeof(info));
+ 
+     context.pc = GetInteger(process.GetEntryPoint());
+-    context.r[0] = Svc::ExceptionTypeInstructionAbort;
++    context.r[0] = type;
+     context.r[1] = info_address;
+     context.sp = Common::AlignDown(info_address, 0x10);
+     context.pstate = 0;
+@@ -173,6 +179,19 @@ void PhysicalCore::RunThread(Kernel::KThread* thread) {
+         // Since scheduling may occur here, we cannot use any cached
+         // state after returning from calls we make.
+ 
++        if (data_abort) {
++            if (const auto memory_abort = interface->TakeMemoryAbort()) {
++                if (EnterUserExceptionHandler(m_kernel, *process, *interface, false, memory_abort)) {
++                    return;
++                }
++                LOG_CRITICAL(Core_ARM, "Unhandled {} of unmapped memory at {:#x}",
++                             memory_abort->write ? "write" : "read", memory_abort->address);
++                interface->LogBacktrace(process);
++                thread->RequestSuspend(SuspendType::Debug);
++                return;
++            }
++        }
++
+         // Notify the debugger and go to sleep if a breakpoint was hit,
+         // or if the thread is unable to continue for any reason.
+         if (breakpoint || prefetch_abort) {
+--- a/src/core/hle/kernel/svc_types.h
++++ b/src/core/hle/kernel/svc_types.h
+@@ -124,6 +124,7 @@ constexpr inline size_t ThreadLocalRegionSize = 0x200;
+ 
+ constexpr inline size_t ProcessLocalRegionExceptionInfoOffset = 0x148;
+ constexpr inline u64 ExceptionTypeInstructionAbort = 0x100;
++constexpr inline u64 ExceptionTypeDataAbort = 0x101;
+ constexpr inline u32 ExceptionInfoPstateMask = 0xF0000000;
+ 
+ struct ExceptionInfo64 {

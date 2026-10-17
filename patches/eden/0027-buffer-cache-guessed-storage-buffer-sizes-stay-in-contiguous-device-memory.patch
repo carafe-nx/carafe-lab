@@ -1,0 +1,23 @@
+Carafe bench: a storage buffer whose size Eden guesses stays inside contiguous device memory. The NVN-style
+guess takes the GPU range of the same kind from GetMemoryLayoutSize, up to 8 MiB, and the buffer cache then
+registers that many bytes as one device-contiguous buffer. NVK's meta copy shaders take storage buffer
+addresses from push constants; for nvk-meta-copy-queries at GPU 0x16f9480000 the guess was 0x130000 bytes
+while only 0x10000 were contiguous in device memory. The cached buffer covered device pages that NVK later
+used for the root descriptor table of a vk-meta-copy-buffer dispatch. DeviceMemoryManager::Map does not
+invalidate the cache, so the CPU writes to that table were not seen, the copy ran with stale push constants,
+DXVK's shader data buffer stayed zero and its fixed-function draws produced no pixels. The size is now
+clamped to MaxContinuousRange. On the hardware the GPU reads memory directly and there is no such cache.
+GPL-3.0-or-later, as the file it changes.
+diff --git a/src/video_core/buffer_cache/buffer_cache.h b/src/video_core/buffer_cache/buffer_cache.h
+--- a/src/video_core/buffer_cache/buffer_cache.h
++++ b/src/video_core/buffer_cache/buffer_cache.h
+@@ -1924,7 +1924,8 @@ Binding BufferCache<P>::StorageBufferBinding(GPUVAddr ssbo_addr, u32 cbuf_index,
+         // Fall through: either not NVN cbuf (Doom Eternal & +), or NVN but ssbo_addr+8 is a GPU address (MCI)
+         const u32 memory_layout_size = static_cast<u32>(gpu_memory->GetMemoryLayoutSize(gpu_addr));
+         // Cap at 8MB to prevent allocator overflow from misinterpreted addresses
+-        return (std::min)(memory_layout_size, static_cast<u32>(8_MiB));
++        const u32 capped_size = (std::min)(memory_layout_size, static_cast<u32>(8_MiB));
++        return static_cast<u32>(gpu_memory->MaxContinuousRange(gpu_addr, capped_size));
+     }();
+ 
+     // Alignment only applies to the offset of the buffer

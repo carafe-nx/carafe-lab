@@ -1,0 +1,82 @@
+Carafe bench: a vertex attribute with the BGRA bit set is read with its red and blue components swapped, as the
+hardware does. Eden ignored the bit, so D3DCOLOR vertex colours, which DXVK and NVK pass as 8-bit UNORM
+attributes with BGRA set, reached the shaders with red and blue exchanged and tinted everything Need for Speed
+Underground draws with them. The bit is kept in the pipeline key and an 8-bit four-component UNORM attribute
+with it becomes VK_FORMAT_B8G8R8A8_UNORM, both for pipelines and for dynamic vertex input.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/renderer_vulkan/maxwell_to_vk.h
++++ b/src/video_core/renderer_vulkan/maxwell_to_vk.h
+@@ -52,7 +52,7 @@
+ VkPrimitiveTopology PrimitiveTopology(const Device& device, Maxwell::PrimitiveTopology topology);
+ 
+ VkFormat VertexFormat(const Device& device, Maxwell::VertexAttribute::Type type,
+-                      Maxwell::VertexAttribute::Size size);
++                      Maxwell::VertexAttribute::Size size, bool bgra = false);
+ 
+ VkCompareOp ComparisonOp(Maxwell::ComparisonOp comparison);
+ 
+--- a/src/video_core/renderer_vulkan/maxwell_to_vk.cpp
++++ b/src/video_core/renderer_vulkan/maxwell_to_vk.cpp
+@@ -357,7 +357,7 @@
+ }
+ 
+ VkFormat VertexFormat(const Device& device, Maxwell::VertexAttribute::Type type,
+-                      Maxwell::VertexAttribute::Size size) {
++                      Maxwell::VertexAttribute::Size size, bool bgra) {
+     if (device.MustEmulateScaledFormats()) {
+         if (type == Maxwell::VertexAttribute::Type::SScaled) {
+             type = Maxwell::VertexAttribute::Type::SInt;
+@@ -581,7 +581,8 @@
+         UNIMPLEMENTED_MSG("Unimplemented vertex format of type={} and size={}", type, size);
+     }
+ 
+-    return device.GetSupportedFormat(format, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT,
++    const VkFormat ordered = bgra && format == VK_FORMAT_R8G8B8A8_UNORM ? VK_FORMAT_B8G8R8A8_UNORM : format;
++    return device.GetSupportedFormat(ordered, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT,
+                                      FormatType::Buffer);
+ }
+ 
+--- a/src/video_core/renderer_vulkan/fixed_pipeline_state.h
++++ b/src/video_core/renderer_vulkan/fixed_pipeline_state.h
+@@ -116,6 +116,7 @@
+         BitField<6, 14, u32> offset;
+         BitField<20, 3, u32> type;
+         BitField<23, 6, u32> size;
++        BitField<29, 1, u32> bgra;
+ 
+         Maxwell::VertexAttribute::Type Type() const noexcept {
+             return static_cast<Maxwell::VertexAttribute::Type>(type.Value());
+--- a/src/video_core/renderer_vulkan/fixed_pipeline_state.cpp
++++ b/src/video_core/renderer_vulkan/fixed_pipeline_state.cpp
+@@ -161,6 +161,7 @@
+                 attribute.offset.Assign(input.offset);
+                 attribute.type.Assign(static_cast<u32>(input.type.Value()));
+                 attribute.size.Assign(static_cast<u32>(input.size.Value()));
++                attribute.bgra.Assign(input.bgra.Value());
+             }
+         }
+     }
+--- a/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
++++ b/src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+@@ -624,7 +624,8 @@
+             vertex_attributes.push_back({
+                 .location = static_cast<u32>(index),
+                 .binding = attribute.buffer,
+-                .format = MaxwellToVK::VertexFormat(device, attribute.Type(), attribute.Size()),
++                .format = MaxwellToVK::VertexFormat(device, attribute.Type(), attribute.Size(),
++                                                     attribute.bgra != 0),
+                 .offset = attribute.offset,
+             });
+         }
+--- a/src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ b/src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -1868,7 +1868,7 @@
+             .pNext = nullptr,
+             .location = index,
+             .binding = binding,
+-            .format = MaxwellToVK::VertexFormat(device, attribute.type, attribute.size),
++            .format = MaxwellToVK::VertexFormat(device, attribute.type, attribute.size, attribute.bgra != 0),
+             .offset = attribute.offset,
+         });
+     }

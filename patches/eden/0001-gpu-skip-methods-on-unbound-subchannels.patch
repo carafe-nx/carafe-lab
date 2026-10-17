@@ -1,0 +1,40 @@
+Carafe bench: a method sent to a subchannel with no engine bound is logged and skipped.
+Eden dereferenced the empty subchannel and crashed with SIGSEGV in DmaPusher::CallMethod.
+GPL-3.0-or-later, as the file it changes.
+
+diff --git a/src/video_core/dma_pusher.cpp b/src/video_core/dma_pusher.cpp
+index 75f1de5..e000c97 100644
+--- a/src/video_core/dma_pusher.cpp
++++ b/src/video_core/dma_pusher.cpp
+@@ -4,6 +4,7 @@
+ // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
++#include "common/logging.h"
+ #include "common/settings.h"
+ #include "core/core.h"
+ #include "video_core/dma_pusher.h"
+@@ -181,6 +182,11 @@ void DmaPusher::CallMethod(u32 argument) const {
+         });
+     } else {
+         auto subchannel = subchannels[dma_state.subchannel];
++        if (subchannel == nullptr) {
++            LOG_ERROR(HW_GPU, "Method {:#x} on subchannel {} with no engine bound, argument {:#x}, count {}",
++                      dma_state.method, dma_state.subchannel, argument, dma_state.method_count);
++            return;
++        }
+         if (subchannel->execution_mask[dma_state.method]) {
+             subchannel->ConsumeSink();
+             subchannel->current_dma_segment = dma_state.dma_get + dma_state.dma_word_offset;
+@@ -196,6 +202,11 @@ void DmaPusher::CallMultiMethod(const u32* base_start, u32 num_methods) const {
+         puller.CallMultiMethod(dma_state.method, dma_state.subchannel, base_start, num_methods, dma_state.method_count);
+     } else {
+         auto subchannel = subchannels[dma_state.subchannel];
++        if (subchannel == nullptr) {
++            LOG_ERROR(HW_GPU, "Methods from {:#x} on subchannel {} with no engine bound, {} of them",
++                      dma_state.method, dma_state.subchannel, num_methods);
++            return;
++        }
+         subchannel->ConsumeSink();
+         subchannel->current_dma_segment = dma_state.dma_get + dma_state.dma_word_offset;
+         subchannel->CallMultiMethod(dma_state.method, base_start, num_methods, dma_state.method_count);
