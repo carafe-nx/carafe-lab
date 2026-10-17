@@ -12,7 +12,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
-- [ ] `feature` The one Eden set up like the console (4 cores, 4 GB, docked, firmware from Carafe)
+- [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
 - [ ] `feature` Button presses through the control channel instead of xdotool
 - [ ] `feature` Watchdog: a hang during a game (not only at close) restarts Eden; "clean start" switch
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
@@ -96,6 +96,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` The one Eden set up like the console: 4 cores, 4 GB, docked; firmware optional, chosen in the window
 - [x] `feature` Library: tags, notes and the open ROADMAP items that name the game; search by name, tag or note
 - [x] `bug` One Eden runs game after game: stopped games give their memory back, a new Eden starts when memory runs short
 - [x] `bug` Eden no longer crashes in Mesa's d3d12 `end_query` when software stops on the WSL GPU ([research](docs/research/eden-stop-crash.md))

@@ -40,6 +40,12 @@
   color: var(--danger);
 }
 
+.off {
+  background: var(--panel-solid);
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+}
+
 .text {
   display: flex;
   flex-direction: column;

@@ -20,6 +20,9 @@ pub struct LocalSettings {
     /// The console files Lab packs with; `None` means the ones chosen in Carafe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keys: Option<PathBuf>,
+    /// The Switch firmware Eden runs with, a folder of `.nca` files; `None` means Eden runs without firmware.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<PathBuf>,
 }
 
 /// Where the console files come from.
@@ -119,6 +122,7 @@ mod tests {
     fn the_lab_choice_comes_before_carafe() {
         let local = LocalSettings {
             keys: Some(PathBuf::from("D:\\lab-files")),
+            firmware: None,
         };
         let found = find_keys(None, &local, None);
         assert_eq!(

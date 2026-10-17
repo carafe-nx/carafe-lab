@@ -15,7 +15,31 @@ import emulator from "./EmulatorPage.module.css";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-type Stage = { key: string; ok: boolean; detail: string; fix: string | null; action?: ReactNode };
+type Stage = {
+  key: string;
+  ok: boolean;
+  off?: boolean;
+  detail: string;
+  hint?: string;
+  fix: string | null;
+  action?: ReactNode;
+};
+
+function firmwareStage(status: LabStatus, t: Translate, action: ReactNode): Stage {
+  const firmware = status.firmware;
+  const chosen = firmware.folderName !== null;
+  const usable = chosen && firmware.problem === null;
+  return {
+    key: "firmware",
+    ok: firmware.problem === null,
+    off: !chosen && firmware.problem === null,
+    detail:
+      firmware.problem ?? (usable ? t("stages.firmwareReady", { folder: firmware.folderName, count: firmware.files }) : t("stages.firmwareNone")),
+    hint: usable ? undefined : t("stages.firmwareHint"),
+    fix: null,
+    action,
+  };
+}
 
 function keysDetail(status: LabStatus, t: Translate): string {
   const keys = status.keys;
@@ -26,7 +50,7 @@ function keysDetail(status: LabStatus, t: Translate): string {
   return t("stages.keysReady", { where, file: keys.fileName ?? "" });
 }
 
-function stages(status: LabStatus, t: Translate, keysAction: ReactNode): Stage[] {
+function stages(status: LabStatus, t: Translate, keysAction: ReactNode, firmwareAction: ReactNode): Stage[] {
   const dockerUp = status.docker === "ready" || status.docker === "noImage";
   const keysOk = status.keys.complete === true;
   return [
@@ -43,6 +67,7 @@ function stages(status: LabStatus, t: Translate, keysAction: ReactNode): Stage[]
       fix: keysOk ? null : t("stages.keysFix"),
       action: keysAction,
     },
+    firmwareStage(status, t, firmwareAction),
     {
       key: "carafe",
       ok: status.carafeCommit !== null,
@@ -93,6 +118,37 @@ export function EmulatorPage() {
       .then(() => status.refresh())
       .catch((reason: unknown) => setError(errorText(reason)));
   };
+  const chooseFirmware = async () => {
+    setError(null);
+    const picked = await open({ multiple: false, directory: true, title: t("stages.firmwarePick") });
+    if (typeof picked !== "string") return;
+    try {
+      await api.chooseFirmware(picked);
+      status.refresh();
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
+  const forgetFirmware = () => {
+    setError(null);
+    api
+      .forgetFirmware()
+      .then(() => status.refresh())
+      .catch((reason: unknown) => setError(errorText(reason)));
+  };
+  const firmwareAction = (
+    <span className={styles.actions}>
+      <Button onClick={() => void chooseFirmware()}>
+        <Icon name="folder" size={14} />
+        {t("stages.firmwareChoose")}
+      </Button>
+      {data?.firmware.folderName ? (
+        <Button variant="ghost" onClick={forgetFirmware}>
+          {t("stages.firmwareForget")}
+        </Button>
+      ) : null}
+    </span>
+  );
   const keysAction = (
     <span className={styles.actions}>
       <Button onClick={() => void choose()}>
@@ -114,12 +170,15 @@ export function EmulatorPage() {
       {data ? (
         <div className={styles.split}>
           <div className={emulator.stages}>
-            {stages(data, t, keysAction).map((stage) => (
+            {stages(data, t, keysAction, firmwareAction).map((stage) => (
               <div key={stage.key} className={emulator.stage}>
-                <span className={stage.ok ? `${emulator.mark} ${emulator.ok}` : `${emulator.mark} ${emulator.bad}`}>{stage.ok ? "✓" : "!"}</span>
+                <span className={`${emulator.mark} ${stage.off ? emulator.off : stage.ok ? emulator.ok : emulator.bad}`}>
+                  {stage.off ? "–" : stage.ok ? "✓" : "!"}
+                </span>
                 <span className={emulator.text}>
                   <b>{t(`stages.${stage.key}`)}</b>
                   <small>{stage.detail}</small>
+                  {stage.hint ? <small>{stage.hint}</small> : null}
                   {stage.fix ? <code className={emulator.fix}>{stage.fix}</code> : null}
                   {stage.action ?? null}
                 </span>

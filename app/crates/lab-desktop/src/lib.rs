@@ -27,6 +27,8 @@ pub fn run() {
             commands::save_game_notes,
             commands::choose_keys,
             commands::forget_keys,
+            commands::choose_firmware,
+            commands::forget_firmware,
             commands::open_path,
             commands::read_screen,
             commands::live_perf,

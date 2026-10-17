@@ -12,6 +12,7 @@ use carafe_core::ports::{FolderInspector, KeysChecker, KeysReport};
 use carafe_folder::DiskFolderInspector;
 use carafe_keys::FileKeysChecker;
 use lab_core::config;
+use lab_core::firmware;
 use lab_core::local::{self, KeysSource, LocalSettings};
 use lab_core::perf::{self, PerfSample};
 use lab_core::scenario::Scenario;
@@ -55,6 +56,8 @@ pub struct LabStatus {
     pub docker: DockerState,
     /// The console files Lab packs with.
     pub keys: KeysState,
+    /// The Switch firmware Eden runs with.
+    pub firmware: FirmwareState,
     /// Who holds the emulator and who waits.
     pub queue: QueueState,
 }
@@ -71,6 +74,19 @@ pub struct KeysState {
     /// The file has what packing needs; `None` when it cannot be read.
     pub complete: Option<bool>,
     /// Why `lab.local.json` cannot be read, if it cannot.
+    pub problem: Option<String>,
+}
+
+/// The Switch firmware Eden runs with, without its location.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FirmwareState {
+    /// The chosen folder's name, without its parent; `None` when Eden runs without firmware.
+    pub folder_name: Option<String>,
+    /// How many `.nca` files the folder has.
+    pub files: u32,
+    /// Why the choice cannot be used, if it cannot.
     pub problem: Option<String>,
 }
 
@@ -400,6 +416,48 @@ pub async fn forget_keys(lab: State<'_, Arc<Lab>>) -> Result<KeysState, CommandE
     .await
 }
 
+/// Chooses the folder `path` as the Switch firmware Eden runs with.
+///
+/// # Errors
+///
+/// [`CommandError`] when the folder has no `.nca` files or `lab.local.json` cannot be written.
+#[tauri::command]
+pub async fn choose_firmware(
+    lab: State<'_, Arc<Lab>>,
+    path: String,
+) -> Result<FirmwareState, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let folder = PathBuf::from(path);
+        firmware::read_folder(&folder)
+            .map_err(|_| CommandError::from("the folder has no .nca files"))?;
+        let file = lab.local_path();
+        let mut settings = LocalSettings::load(&file)?;
+        settings.firmware = Some(folder);
+        settings.save(&file)?;
+        Ok(firmware_state(&lab))
+    })
+    .await
+}
+
+/// Forgets the firmware, so Eden runs without it.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.local.json` cannot be read or written.
+#[tauri::command]
+pub async fn forget_firmware(lab: State<'_, Arc<Lab>>) -> Result<FirmwareState, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let file = lab.local_path();
+        let mut settings = LocalSettings::load(&file)?;
+        settings.firmware = None;
+        settings.save(&file)?;
+        Ok(firmware_state(&lab))
+    })
+    .await
+}
+
 /// Asks the run `id`, or the run holding the emulator, to stop.
 ///
 /// # Errors
@@ -538,6 +596,7 @@ fn status(lab: &Lab) -> LabStatus {
                 image: lab_eden::IMAGE.to_owned(),
                 docker: lab.docker(lab_eden::IMAGE),
                 keys: keys_state(lab),
+                firmware: firmware_state(lab),
                 queue: QueueState::default(),
             };
         }
@@ -563,7 +622,43 @@ fn status(lab: &Lab) -> LabStatus {
         docker: lab.docker(&image),
         image,
         keys: keys_state(lab),
+        firmware: firmware_state(lab),
         queue: Lab::queue(&config.work).state(unix_now()),
+    }
+}
+
+fn firmware_state(lab: &Lab) -> FirmwareState {
+    let folder = match LocalSettings::load(&lab.local_path()) {
+        Ok(settings) => settings.firmware,
+        Err(problem) => {
+            return FirmwareState {
+                folder_name: None,
+                files: 0,
+                problem: Some(problem),
+            };
+        }
+    };
+    let Some(folder) = folder else {
+        return FirmwareState {
+            folder_name: None,
+            files: 0,
+            problem: None,
+        };
+    };
+    let folder_name = folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned());
+    match firmware::read_folder(&folder) {
+        Ok(files) => FirmwareState {
+            folder_name,
+            files: u32::try_from(files.len()).unwrap_or(u32::MAX),
+            problem: None,
+        },
+        Err(_) => FirmwareState {
+            folder_name,
+            files: 0,
+            problem: Some("the folder cannot be read or has no .nca files".to_owned()),
+        },
     }
 }
 

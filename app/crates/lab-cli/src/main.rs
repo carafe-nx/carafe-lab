@@ -124,7 +124,8 @@ fn start(args: Args) -> Result<ExitCode, String> {
         config.emulator_cpu,
     )
     .with_settings(config.eden_settings.clone())
-    .with_one_eden(config.one_eden);
+    .with_one_eden(config.one_eden)
+    .with_firmware(local_settings(&config_path)?.firmware);
     if let Some(image) = &config.eden_image {
         eden = eden.with_image(image.clone());
     }
@@ -841,12 +842,16 @@ fn print_step(step: &StepResult) {
     );
 }
 
-fn console_files(argument: Option<&Path>, config_path: &Path) -> Result<PathBuf, String> {
+fn local_settings(config_path: &Path) -> Result<LocalSettings, String> {
     let local_file = config_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(local::LOCAL_FILE);
-    let settings = LocalSettings::load(&local_file)?;
+    LocalSettings::load(&local_file)
+}
+
+fn console_files(argument: Option<&Path>, config_path: &Path) -> Result<PathBuf, String> {
+    let settings = local_settings(config_path)?;
     let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
     local::find_keys(argument, &settings, appdata.as_deref())
         .map(|(path, _)| path)

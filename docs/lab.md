@@ -59,6 +59,10 @@ overrides both. Eden gets them read-only in a folder that
 exists only inside the container and goes away with it: nothing of them lands in the work folder, and their location
 is cut out of every message, log and report Lab writes.
 
+Eden is set up like the console: 4 cores, the 4 GB memory layout, docked. The firmware is optional: a folder of `.nca`
+files chosen in the same screen and kept in `lab.local.json`; Lab copies it into Eden's NAND once and again only when
+the folder changes ([decision 5](decisions/0005-firmware-chosen-in-lab.md)). Without it, Eden runs without firmware.
+
 ## Games
 
 Every game is an entry of `games` in `lab.json`. Only `name` and `folder` are needed; the rest is taken the way the

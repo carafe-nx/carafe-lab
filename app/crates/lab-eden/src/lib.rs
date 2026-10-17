@@ -23,6 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use carafe_core::TitleId;
 use carafe_core::settings::SwitchButton;
 use lab_core::emulator::{EdenCpu, Gpu};
+use lab_core::firmware;
 use lab_core::perf::{self, PerfSample};
 pub use lab_core::redact::redact;
 use sha2::{Digest, Sha256};
@@ -43,6 +44,21 @@ const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_GRACE: Duration = Duration::from_secs(15);
 const PERF_MARGIN_MS: u64 = 2000;
 const GAME_MEMORY: u64 = 4608 * 1024 * 1024;
+const PULLED_NAND: [&str; 2] = ["user", "system/save"];
+const PUSH_NAND: &str = "set -e
+R=/to/system/Contents/registered
+S=/to/system/.carafe-firmware
+find /to -mindepth 1 ! -path /to/system ! -path /to/system/Contents ! -path $R ! -path \"$R/*\" ! -path $S -delete
+cp -a /from/. /to/
+if [ -n \"$FIRMWARE\" ]; then
+  if [ \"$(cat $S 2>/dev/null)\" != \"$FIRMWARE\" ]; then
+    rm -rf $R && mkdir -p $R
+    find /firmware -maxdepth 1 -type f -iname '*.nca' -exec cp {} $R/ \\;
+    echo \"$FIRMWARE\" > $S
+  fi
+elif [ -f $S ]; then
+  rm -rf $R $S
+fi";
 const ZERO_USER: &str = "00000000000000000000000000000000";
 const KEEP_FILE: &str = ".carafe-lab";
 const SHARED_DIRS: [&str; 7] = [
@@ -69,6 +85,7 @@ pub struct Eden {
     one_eden: bool,
     session: Option<Session>,
     perf_from: Option<u64>,
+    firmware: Option<PathBuf>,
 }
 
 struct Session {
@@ -153,6 +170,7 @@ impl Eden {
             one_eden: false,
             session: None,
             perf_from: None,
+            firmware: None,
         }
     }
 
@@ -163,6 +181,16 @@ impl Eden {
     #[must_use]
     pub fn with_one_eden(mut self, one_eden: bool) -> Self {
         self.one_eden = one_eden;
+        self
+    }
+
+    /// Returns the emulator that runs with the Switch firmware in the folder `firmware`, a folder of `.nca` files;
+    /// `None` runs Eden without firmware.
+    ///
+    /// The files are copied into Eden's NAND once and again only when the folder changes.
+    #[must_use]
+    pub fn with_firmware(mut self, firmware: Option<PathBuf>) -> Self {
+        self.firmware = firmware;
         self
     }
 
@@ -312,32 +340,55 @@ impl Eden {
 
     fn push_nand(&self) -> Result<(), EmulatorError> {
         let nand = self.user_dir.join("nand");
-        docker_owned(&[
+        let mut args = vec![
             "run".to_owned(),
             "--rm".to_owned(),
             "-v".to_owned(),
             format!("{}:/from:ro", nand.display()),
             "-v".to_owned(),
             format!("{NAND_VOLUME}:/to"),
+        ];
+        if let Some(folder) = &self.firmware {
+            let files = firmware::read_folder(folder)
+                .map_err(|error| EmulatorError::Control(format!("firmware: {error}")))?;
+            args.extend([
+                "-v".to_owned(),
+                format!("{}:/firmware:ro", folder.display()),
+                "-e".to_owned(),
+                format!("FIRMWARE={}", firmware::stamp(&files)),
+            ]);
+        }
+        args.extend([
             "--entrypoint".to_owned(),
             "sh".to_owned(),
             self.image.clone(),
             "-c".to_owned(),
-            "find /to -mindepth 1 -delete && cp -a /from/. /to/".to_owned(),
-        ])
-        .map(|_| ())
+            PUSH_NAND.to_owned(),
+        ]);
+        docker_owned(&args).map(|_| ())
     }
 
     fn pull_nand(&self) {
         let nand = self.user_dir.join("nand");
         let staged = self.user_dir.join("nand.pulling");
         let _ = fs::remove_dir_all(&staged);
-        let copied = docker_owned(&[
-            "cp".to_owned(),
-            format!("{CONTAINER}:/work/user/nand/."),
-            staged.display().to_string(),
-        ]);
-        if copied.is_ok() && staged.is_dir() {
+        let mut copied = true;
+        for part in PULLED_NAND {
+            let inside = format!("{CONTAINER}:/work/user/nand/{part}/.");
+            let outside = staged.join(part);
+            let exists = self
+                .exec(&format!("test -d /work/user/nand/{part}"))
+                .is_ok();
+            if !exists {
+                continue;
+            }
+            let parent_made = outside
+                .parent()
+                .is_some_and(|parent| fs::create_dir_all(parent).is_ok());
+            copied &= parent_made
+                && docker_owned(&["cp".to_owned(), inside, outside.display().to_string()]).is_ok();
+        }
+        if copied && staged.is_dir() {
             let _ = fs::remove_dir_all(&nand);
             let _ = fs::rename(&staged, &nand);
         } else {
@@ -968,7 +1019,7 @@ pub fn eden_key(button: SwitchButton) -> &'static str {
     }
 }
 
-/// Returns Eden's `qt-config.ini` for the lab: full screen, no update check, no stop confirmation, no
+/// Returns Eden's `qt-config.ini` for the lab: the console's four cores and 4 GB, docked, full screen, no update check, no stop confirmation, no
 /// controller applet, audio through SDL's dummy driver, the processor mode `cpu`, and the renderer `gpu` can
 /// drive — OpenGL on Mesa's Direct3D 12 driver through WSL2, Vulkan on Mesa's software driver. `extra` replaces or
 /// adds settings; each key is `Section/key`, and a key without a section is ignored.
@@ -982,8 +1033,13 @@ pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> St
         EdenCpu::Dynarmic => "0",
         EdenCpu::Nce => "1",
     };
-    let sections: [(&str, &[(&str, &str)]); 4] = [
+    let sections: [(&str, &[(&str, &str)]); 6] = [
         ("Cpu", &[("cpu_backend", cpu_backend)]),
+        (
+            "Core",
+            &[("use_multi_core", "true"), ("memory_layout_mode", "0")],
+        ),
+        ("System", &[("use_docked_mode", "1")]),
         (
             "UI",
             &[
@@ -1168,6 +1224,14 @@ mod tests {
                 .contains("[Cpu]\ncpu_backend\\default=false\ncpu_backend=0\n")
         );
         assert!(qt_config(Gpu::Wsl, EdenCpu::Nce, &BTreeMap::new()).contains("\ncpu_backend=1\n"));
+    }
+
+    #[test]
+    fn eden_is_set_up_like_the_console() {
+        let config = qt_config(Gpu::Wsl, EdenCpu::Dynarmic, &BTreeMap::new());
+        assert!(config.contains("[Core]\nuse_multi_core\\default=false\nuse_multi_core=true\n"));
+        assert!(config.contains("\nmemory_layout_mode=0\n"));
+        assert!(config.contains("[System]\nuse_docked_mode\\default=false\nuse_docked_mode=1\n"));
     }
 
     #[test]

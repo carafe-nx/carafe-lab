@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CommandError } from "./bindings/CommandError";
 import type { Event } from "./bindings/Event";
+import type { FirmwareState } from "./bindings/FirmwareState";
 import type { KeysState } from "./bindings/KeysState";
 import type { LabStatus } from "./bindings/LabStatus";
 import type { LabView } from "./bindings/LabView";
@@ -21,6 +22,8 @@ export const api = {
   addGame: (folder: string) => invoke<string>("add_game", { folder }),
   chooseKeys: (path: string) => invoke<KeysState>("choose_keys", { path }),
   forgetKeys: () => invoke<KeysState>("forget_keys"),
+  chooseFirmware: (path: string) => invoke<FirmwareState>("choose_firmware", { path }),
+  forgetFirmware: () => invoke<FirmwareState>("forget_firmware"),
   openPath: (path: string) => invoke<void>("open_path", { path }),
   readScreen: () => invoke<Screen | null>("read_screen"),
   livePerf: (seconds: number) => invoke<PerfSample[]>("live_perf", { seconds }),
