@@ -19,4 +19,12 @@ medianFirstFrame: number | null,
 /**
  * The largest first-frame time minus the smallest.
  */
-spread: number | null, };
+spread: number | null, 
+/**
+ * The median of its launches' median FPS.
+ */
+medianFps: number | null, 
+/**
+ * The highest of its launches' median FPS minus the lowest.
+ */
+fpsSpread: number | null, };

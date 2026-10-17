@@ -24,4 +24,12 @@ differencePercent: number | null,
 /**
  * The difference of the medians is larger than the spread of either variant's first frames.
  */
-significant: boolean, };
+significant: boolean, 
+/**
+ * How much higher B's median FPS was than A's, in percent of A's; negative when lower.
+ */
+fpsDifferencePercent: number | null, 
+/**
+ * The difference of the median FPS is larger than the spread of either variant's median FPS.
+ */
+fpsSignificant: boolean, };

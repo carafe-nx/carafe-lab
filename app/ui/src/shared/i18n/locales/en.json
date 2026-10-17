@@ -264,7 +264,11 @@
     "noMedian": "no first frame",
     "slower": "B is {{percent}}% slower than A",
     "faster": "B is {{percent}}% faster than A",
-    "noise": "The difference is within the spread of the repeats, so it does not count"
+    "noise": "The difference is within the spread of the repeats, so it does not count",
+    "fps": "{{fps}} fps",
+    "fpsHigher": "B has {{percent}}% more frames per second",
+    "fpsLower": "B has {{percent}}% fewer frames per second",
+    "fpsNoise": "The FPS difference is within the spread of the repeats"
   },
   "fps": {
     "title": "Frames per second",

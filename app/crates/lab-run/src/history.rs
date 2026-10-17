@@ -88,6 +88,12 @@ pub struct Verdict {
     pub difference_percent: Option<f64>,
     /// The difference of the medians is larger than the spread of either variant's first frames.
     pub significant: bool,
+    /// How much higher B's median FPS was than A's, in percent of A's; negative when lower.
+    #[serde(default)]
+    pub fps_difference_percent: Option<f64>,
+    /// The difference of the median FPS is larger than the spread of either variant's median FPS.
+    #[serde(default)]
+    pub fps_significant: bool,
 }
 
 /// What one variant of an A/B run gave.
@@ -103,6 +109,12 @@ pub struct VariantResult {
     pub median_first_frame: Option<f64>,
     /// The largest first-frame time minus the smallest.
     pub spread: Option<f64>,
+    /// The median of its launches' median FPS.
+    #[serde(default)]
+    pub median_fps: Option<f64>,
+    /// The highest of its launches' median FPS minus the lowest.
+    #[serde(default)]
+    pub fps_spread: Option<f64>,
 }
 
 /// Suffix of the name variant A runs under.
@@ -128,42 +140,76 @@ pub fn verdict(games: &[GameSummary]) -> Option<Verdict> {
         (Some(first), Some(second)) if first > 0.0 => Some((second - first) / first * 100.0),
         _ => None,
     };
-    let significant = match (a.median_first_frame, b.median_first_frame) {
-        (Some(first), Some(second)) => {
-            let spread = a.spread.unwrap_or(0.0).max(b.spread.unwrap_or(0.0));
-            a.runs > 1 && b.runs > 1 && (second - first).abs() > spread
-        }
-        _ => false,
+    let significant = beyond_spread(
+        (a.median_first_frame, a.spread, a.runs),
+        (b.median_first_frame, b.spread, b.runs),
+    );
+    let fps_difference_percent = match (a.median_fps, b.median_fps) {
+        (Some(first), Some(second)) if first > 0.0 => Some((second - first) / first * 100.0),
+        _ => None,
     };
+    let fps_significant = beyond_spread(
+        (a.median_fps, a.fps_spread, a.runs),
+        (b.median_fps, b.fps_spread, b.runs),
+    );
     Some(Verdict {
         game: base,
         a,
         b,
         difference_percent,
         significant,
+        fps_difference_percent,
+        fps_significant,
     })
+}
+
+fn beyond_spread(
+    a: (Option<f64>, Option<f64>, usize),
+    b: (Option<f64>, Option<f64>, usize),
+) -> bool {
+    match (a.0, b.0) {
+        (Some(first), Some(second)) => {
+            let spread = a.1.unwrap_or(0.0).max(b.1.unwrap_or(0.0));
+            a.2 > 1 && b.2 > 1 && (second - first).abs() > spread
+        }
+        _ => false,
+    }
+}
+
+fn median_and_spread(mut values: Vec<f64>) -> (Option<f64>, Option<f64>) {
+    values.sort_by(f64::total_cmp);
+    let median = match values.len() {
+        0 => None,
+        count if count % 2 == 1 => Some(values[count / 2]),
+        count => Some(f64::midpoint(values[count / 2 - 1], values[count / 2])),
+    };
+    let spread = values
+        .last()
+        .zip(values.first())
+        .map(|(high, low)| high - low);
+    (median, spread)
 }
 
 fn variant<'a>(games: impl Iterator<Item = &'a GameSummary>) -> VariantResult {
     let games: Vec<&GameSummary> = games.collect();
-    let mut times: Vec<f64> = games.iter().filter_map(|game| game.first_frame).collect();
-    times.sort_by(f64::total_cmp);
-    let median = match times.len() {
-        0 => None,
-        count if count % 2 == 1 => Some(times[count / 2]),
-        count => Some(f64::midpoint(times[count / 2 - 1], times[count / 2])),
-    };
+    let (median_first_frame, spread) =
+        median_and_spread(games.iter().filter_map(|game| game.first_frame).collect());
+    let (median_fps, fps_spread) = median_and_spread(
+        games
+            .iter()
+            .filter_map(|game| game.perf.map(|perf| perf.median_fps))
+            .collect(),
+    );
     VariantResult {
         runs: games.len(),
         passed: games
             .iter()
             .filter(|game| game.outcome != Outcome::Fail)
             .count(),
-        median_first_frame: median,
-        spread: times
-            .last()
-            .zip(times.first())
-            .map(|(high, low)| high - low),
+        median_first_frame,
+        spread,
+        median_fps,
+        fps_spread,
     }
 }
 
@@ -317,6 +363,30 @@ mod tests {
         assert_eq!(verdict.b.passed, 1);
         assert!(verdict.significant);
         assert!(verdict.difference_percent.unwrap() < -20.0);
+    }
+
+    #[test]
+    fn the_verdict_compares_the_median_fps_too() {
+        let with_fps = |name: &str, fps: f64| GameSummary {
+            perf: Some(PerfSummary {
+                samples: 10,
+                median_fps: fps,
+                low_fps: fps - 5.0,
+                median_speed: 1.0,
+            }),
+            ..game(name, Outcome::Pass, Some(60.0))
+        };
+        let games = [
+            with_fps("NFSU · A", 20.0),
+            with_fps("NFSU · B", 30.0),
+            with_fps("NFSU · A", 22.0),
+            with_fps("NFSU · B", 31.0),
+        ];
+        let verdict = verdict(&games).unwrap();
+        assert_eq!(verdict.a.median_fps, Some(21.0));
+        assert!(verdict.fps_significant);
+        assert!(verdict.fps_difference_percent.unwrap() > 40.0);
+        assert!(!verdict.significant);
     }
 
     #[test]

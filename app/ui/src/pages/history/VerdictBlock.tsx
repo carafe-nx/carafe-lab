@@ -9,6 +9,8 @@ export function VerdictBlock({ verdict }: { verdict: Verdict }) {
   const { t } = useTranslation();
   const percent = verdict.differencePercent === null ? null : Math.round(Math.abs(verdict.differencePercent));
   const slower = (verdict.differencePercent ?? 0) > 0;
+  const fpsPercent = verdict.fpsDifferencePercent === null ? null : Math.round(Math.abs(verdict.fpsDifferencePercent));
+  const fpsHigher = (verdict.fpsDifferencePercent ?? 0) > 0;
   return (
     <div className={history.verdict}>
       <span className={styles.label}>{t("ab.verdict")}</span>
@@ -18,6 +20,11 @@ export function VerdictBlock({ verdict }: { verdict: Verdict }) {
         <Chip tone={slower ? "bad" : "ok"}>{t(slower ? "ab.slower" : "ab.faster", { percent })}</Chip>
       ) : (
         <span className={styles.muted}>{t("ab.noise")}</span>
+      )}
+      {fpsPercent === null ? null : verdict.fpsSignificant ? (
+        <Chip tone={fpsHigher ? "ok" : "bad"}>{t(fpsHigher ? "ab.fpsHigher" : "ab.fpsLower", { percent: fpsPercent })}</Chip>
+      ) : (
+        <span className={styles.muted}>{t("ab.fpsNoise")}</span>
       )}
     </div>
   );
@@ -33,6 +40,7 @@ function Variant({ name, result }: { name: string; result: VariantResult }) {
         {result.medianFirstFrame === null
           ? t("ab.noMedian")
           : t("ab.median", { seconds: Math.round(result.medianFirstFrame), spread: Math.round(result.spread ?? 0) })}
+        {result.medianFps === null ? "" : ` · ${t("ab.fps", { fps: Math.round(result.medianFps) })}`}
       </span>
     </div>
   );
