@@ -4,6 +4,8 @@
 - [decisions/](decisions/) — decisions in force: what was chosen, why, and what was rejected.
 - [research/automated-testing/REPORT.md](research/automated-testing/REPORT.md) — why an emulator and which one.
 - [research/cloud-reports/](research/cloud-reports/) — the material of the cloud sessions that brought the bench up.
+- [research/eden-stop-crash.md](research/eden-stop-crash.md) — Eden's crash in Mesa's d3d12 queries when software
+  stops on the WSL GPU.
 
 ## Keeping it
 

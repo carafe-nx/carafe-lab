@@ -20,6 +20,8 @@ import { Spinner } from "@/shared/ui/Spinner";
 import styles from "@/shared/ui/lab.module.css";
 import run from "./RunPage.module.css";
 
+const LIVE_SCREEN = "http://127.0.0.1:6080/carafe.html";
+
 type GameState = { name: string; outcome: Outcome | null; current: boolean };
 
 type Derived = {
@@ -91,7 +93,13 @@ export function RunPage() {
   const events = useRunEvents(shownDir, live);
   const summary = runs.data?.find((entry) => entry.dir === shownDir) ?? null;
   const derived = derive(events, summary?.planned ?? []);
-  const screen = usePolling(api.readScreen, live ? 3000 : 0);
+  const screen = usePolling(api.readScreen, 0);
+  const [control, setControl] = useState(false);
+  const [reloads, setReloads] = useState(0);
+  const launches = events.filter(
+    (event) => event.event === "step" && event.step.step.step === "launch" && event.step.outcome === "pass",
+  ).length;
+  const showLive = liveDir !== null && launches > 0 && !derived.finished;
   const stop = (entry: QueueEntry) => {
     setError(null);
     api
@@ -142,10 +150,32 @@ export function RunPage() {
           <div className={run.switch}>
             <span className={run.joyLeft} />
             <div className={run.screen}>
-              {screen.data ? <img src={screen.data.url} alt={t("run.screen")} /> : <span>{t("run.noScreen")}</span>}
+              {showLive ? (
+                <iframe
+                  key={`${liveDir}-${launches}-${control}-${reloads}`}
+                  title={t("run.screen")}
+                  src={control ? LIVE_SCREEN : `${LIVE_SCREEN}?view_only`}
+                />
+              ) : screen.data ? (
+                <img src={screen.data.url} alt={t("run.screen")} />
+              ) : (
+                <span>{t("run.noScreen")}</span>
+              )}
             </div>
             <span className={run.joyRight} />
           </div>
+          {showLive ? (
+            <div className={styles.actions}>
+              <Button variant={control ? "primary" : "default"} onClick={() => setControl(!control)}>
+                {control ? t("run.giveBack") : t("run.takeControl")}
+              </Button>
+              <Button variant="ghost" onClick={() => setReloads(reloads + 1)}>
+                <Icon name="restart" size={14} />
+                {t("run.reload")}
+              </Button>
+              <span className={styles.muted}>{control ? t("run.controlHint") : t("run.watchHint")}</span>
+            </div>
+          ) : null}
           {holder && !liveDir ? (
             <Notice tone="info">{t("run.preparing")}</Notice>
           ) : null}

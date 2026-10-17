@@ -12,7 +12,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
-- [ ] **`bug` Eden crashes (SIGSEGV) when software stops on the WSL GPU, so the one Eden restarts after every game**
+- [ ] `bug` Eden crashes in Mesa's d3d12 `end_query` when software stops on the WSL GPU, so the one Eden restarts after every game ([research](docs/research/eden-stop-crash.md); needs Mesa's source)
 - [ ] `feature` The one Eden set up like the console (4 cores, 4 GB, docked, firmware from Carafe)
 - [ ] `feature` Button presses through the control channel instead of xdotool
 - [ ] `feature` Watchdog: a hang during a game (not only at close) restarts Eden; "clean start" switch

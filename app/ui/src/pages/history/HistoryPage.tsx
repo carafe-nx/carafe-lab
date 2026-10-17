@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router";
 import { useLab } from "@/features/lab/LabProvider";
-import { outcomeTone, runCounts, runPath } from "@/features/lab/outcome";
+import { outcomeTone, runCounts, runPath, type Tone } from "@/features/lab/outcome";
+import { folderName } from "@/features/lab/useRunEvents";
 import type { RunSummary } from "@/shared/api/bindings/RunSummary";
 import { api, errorText } from "@/shared/api/commands";
 import { Button } from "@/shared/ui/Button";
@@ -35,9 +36,41 @@ export function HistoryPage() {
   );
 }
 
-function RunRow({ run, selected, onPick }: { run: RunSummary; selected: boolean; onPick: () => void }) {
+function RunCounts({ run }: { run: RunSummary }) {
   const { t } = useTranslation();
   const counts = runCounts(run);
+  const shown: { key: keyof typeof counts; tone: Tone }[] = [
+    { key: "passed", tone: "ok" },
+    { key: "warned", tone: "warn" },
+    { key: "console", tone: "acc" },
+    { key: "failed", tone: "bad" },
+  ];
+  return (
+    <span className={styles.tags}>
+      {shown
+        .filter(({ key }) => counts[key] > 0)
+        .map(({ key, tone }) => (
+          <Chip key={key} tone={tone}>
+            {t(`history.${key}`, { count: counts[key] })}
+          </Chip>
+        ))}
+    </span>
+  );
+}
+
+function RunState({ run }: { run: RunSummary }) {
+  const { t } = useTranslation();
+  const { status } = useLab();
+  if (run.finished) {
+    return null;
+  }
+  const holderDir = status.data?.queue.holder?.runDir ?? null;
+  const running = holderDir !== null && folderName(holderDir) === run.dir;
+  return running ? <Chip tone="acc">{t("history.running")}</Chip> : <Chip tone="bad">{t("history.broken")}</Chip>;
+}
+
+function RunRow({ run, selected, onPick }: { run: RunSummary; selected: boolean; onPick: () => void }) {
+  const { t } = useTranslation();
   return (
     <button type="button" className={`${styles.row} ${styles.plainRow} ${selected ? styles.selected : ""}`} onClick={onPick}>
       <span className={styles.name}>
@@ -51,8 +84,8 @@ function RunRow({ run, selected, onPick }: { run: RunSummary; selected: boolean;
         </span>
       </span>
       <span className={styles.end}>
-        {run.finished ? null : <Chip tone="acc">{t("history.notFinished")}</Chip>}
-        <span>{t("history.counts", counts)}</span>
+        <RunState run={run} />
+        <RunCounts run={run} />
         <span>{t("units.minutes", { count: Math.max(1, Math.round(run.seconds / 60)) })}</span>
       </span>
     </button>
@@ -91,7 +124,9 @@ function RunCard({ run }: { run: RunSummary }) {
           <div key={index} className={`${styles.row} ${styles.plainRow}`}>
             <span className={styles.name}>
               <b>{game.name}</b>
-              <span className={styles.muted}>{game.settings}</span>
+              <span className={`${styles.muted} ${styles.oneLine}`} title={game.settings}>
+                {game.settings}
+              </span>
             </span>
             <Chip tone={outcomeTone(game.outcome)}>{t(`outcome.${game.outcome}`)}</Chip>
           </div>
