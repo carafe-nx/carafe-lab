@@ -43,6 +43,7 @@ const CPU_LIMIT: &str = "4";
 const NAND_VOLUME: &str = "carafe-lab-eden-nand";
 const SCREEN_FILE: &str = "lab-screen.png";
 const FRAME_FILE: &str = "lab-frame.png";
+const GLIMPSE_FILE: &str = "lab-glimpse.jpg";
 const FRAME_WAIT: Duration = Duration::from_secs(5);
 const CONTAINER_END_FILE: &str = "container-end.log";
 const SESSION_FILE: &str = "session.log";
@@ -931,6 +932,20 @@ impl Emulator for Eden {
             hold.as_secs_f64()
         );
         self.exec(&script).map(|_| ())
+    }
+
+    fn glimpse(&mut self, dest: &Path) -> Result<(), EmulatorError> {
+        let inside = format!("/work/user/screenshots/{GLIMPSE_FILE}");
+        self.exec(&format!(
+            "import -window root -display :1 -resize 640x360 -quality 70 jpg:{inside}"
+        ))?;
+        let outside = self.user_dir.join("screenshots").join(GLIMPSE_FILE);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(io)?;
+        }
+        fs::copy(&outside, dest).map_err(io)?;
+        let _ = fs::remove_file(&outside);
+        Ok(())
     }
 
     fn screenshot(&mut self, dest: &Path) -> Result<(), EmulatorError> {

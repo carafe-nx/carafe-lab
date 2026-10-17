@@ -20,6 +20,10 @@ use lab_core::resources::{self, ResourceSample, ResourceSummary};
 use lab_core::scenario::{Milestone, Scenario, Step};
 
 const POLL: Duration = Duration::from_millis(500);
+const GLIMPSE_EVERY: Duration = Duration::from_secs(10);
+
+/// Name of the folder in a launch's log folder with a small picture of the screen every ten seconds.
+pub const TIMELINE_DIR: &str = "timeline";
 
 /// Lines of an emulator log, in lower case, that report something missing on purpose: the loader asks for
 /// Atmosphère's `svcGetInfo` 65000 only to learn whether the kernel is Mesosphère and goes on without it.
@@ -150,6 +154,16 @@ pub trait Emulator {
         Vec::new()
     }
 
+    /// Saves a small, cheap picture of the screen to `dest`, for the timeline of a launch; does nothing when the
+    /// emulator cannot.
+    ///
+    /// # Errors
+    ///
+    /// [`EmulatorError`] if the picture cannot be taken or saved.
+    fn glimpse(&mut self, _dest: &Path) -> Result<(), EmulatorError> {
+        Ok(())
+    }
+
     /// Returns the emulator's memory and processor readings since the current or last launch started; empty when it
     /// does not tell them.
     fn launch_resources(&self) -> Vec<ResourceSample> {
@@ -270,6 +284,8 @@ pub struct Runner<'a> {
     pressed: Vec<SwitchButton>,
     stage: Stage,
     on_stage: Option<Box<dyn FnMut(Stage) + 'a>>,
+    launch_started: Duration,
+    last_glimpse: Duration,
 }
 
 impl<'a> Runner<'a> {
@@ -299,7 +315,27 @@ impl<'a> Runner<'a> {
             stop: None,
             stage: Stage::NotStarted,
             on_stage: None,
+            launch_started: started,
+            last_glimpse: started,
         }
+    }
+
+    fn glimpse(&mut self) {
+        let now = self.clock.now();
+        if !self.launch_open || !self.running || now - self.last_glimpse < GLIMPSE_EVERY {
+            return;
+        }
+        self.last_glimpse = now;
+        let Some(record) = self.launches.last() else {
+            return;
+        };
+        let seconds = (now - self.launch_started).as_secs();
+        let file = self
+            .dir
+            .join(&record.logs)
+            .join(TIMELINE_DIR)
+            .join(format!("{seconds:04}s.jpg"));
+        let _ = self.emulator.glimpse(&file);
     }
 
     /// Returns the runner telling `on_stage` every start-up stage a launch reaches while a step waits for it.
@@ -412,7 +448,9 @@ impl<'a> Runner<'a> {
                             None,
                         );
                     }
-                    self.clock.sleep(POLL.min(until - self.clock.now()));
+                    self.glimpse();
+                    self.clock
+                        .sleep(POLL.min(until.saturating_sub(self.clock.now())));
                 }
                 self.result(step, Outcome::Pass, format!("waited {seconds} s"), None)
             }
@@ -559,6 +597,8 @@ impl<'a> Runner<'a> {
             frames: None,
         });
         self.launch_open = true;
+        self.launch_started = self.clock.now();
+        self.last_glimpse = self.launch_started;
         self.pressed.clear();
         match self.emulator.launch(&self.nsp) {
             Ok(()) => {
@@ -636,6 +676,7 @@ impl<'a> Runner<'a> {
                 }
                 return self.result(step, Outcome::Fail, detail, None);
             }
+            self.glimpse();
             self.clock.sleep(POLL);
         }
     }
