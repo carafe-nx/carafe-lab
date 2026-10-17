@@ -44,7 +44,9 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    through Eden's control channel (`patches/eden/0046`): a one-line `command` file — `boot <file>`, `stop`,
    `screenshot <file>`, `quit` — and a numbered `replies` file in `<work>/eden/user/control/`. An Eden that crashed or
    stopped answering is replaced at the next launch, and the reason with the last lines of the container goes into
-   the launch's `container-end.log`. `false` starts a container for every launch, as before.
+   the launch's `container-end.log`. Before each boot Lab reads the container's memory and starts a new Eden when
+   less than 4.5 GB of its 6 GB is left; the launch's `session.log` has the reading and the choice. `false` starts a
+   container for every launch, as before.
 
 From `app/`: `npm run dev` opens the window — the library, sets to run, the run going on, past runs and what the
 emulator needs to start. `cargo run --release -p lab-cli -- run [set]` runs the enabled games of `lab.json` or the

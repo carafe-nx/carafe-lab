@@ -37,10 +37,12 @@ const CPU_LIMIT: &str = "4";
 const NAND_VOLUME: &str = "carafe-lab-eden-nand";
 const SCREEN_FILE: &str = "lab-screen.png";
 const CONTAINER_END_FILE: &str = "container-end.log";
+const SESSION_FILE: &str = "session.log";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_GRACE: Duration = Duration::from_secs(15);
 const PERF_MARGIN_MS: u64 = 2000;
+const GAME_MEMORY: u64 = 4608 * 1024 * 1024;
 const ZERO_USER: &str = "00000000000000000000000000000000";
 const KEEP_FILE: &str = ".carafe-lab";
 const SHARED_DIRS: [&str; 7] = [
@@ -375,6 +377,28 @@ impl Eden {
     }
 }
 
+/// Returns whether a container with the cgroup readings `readings` has `needed` bytes left.
+///
+/// # Arguments
+///
+/// * `readings` — `memory.current` and `memory.max` one after the other, as `cat` prints them; `max` means no limit.
+/// * `needed` — the bytes a game may take.
+///
+/// # Returns
+///
+/// `true` also when the readings cannot be understood, so a wrong reading never forces a new emulator.
+#[must_use]
+pub fn room_left(readings: &str, needed: u64) -> bool {
+    let mut words = readings.split_whitespace();
+    let (Some(Ok(current)), Some(Ok(max))) = (
+        words.next().map(str::parse::<u64>),
+        words.next().map(str::parse::<u64>),
+    ) else {
+        return true;
+    };
+    max.saturating_sub(current) >= needed
+}
+
 /// Returns why the emulator process ended, from the container's exit code.
 #[must_use]
 pub fn describe_end(code: i32, out_of_memory: bool) -> String {
@@ -421,7 +445,23 @@ impl Eden {
             .as_ref()
             .is_some_and(|session| session.nsp_dir == dir)
             && self.container_running();
-        if !alive {
+        let readings = if alive {
+            self.memory_readings()
+        } else {
+            String::new()
+        };
+        let roomy = alive && room_left(&readings, GAME_MEMORY);
+        let note = format!(
+            "before boot: memory {} (current, max); a game needs {GAME_MEMORY}; {}
+",
+            readings.split_whitespace().collect::<Vec<_>>().join(", "),
+            if roomy { "same Eden" } else { "new Eden" }
+        );
+        let _ = fs::write(self.user_dir.join("log").join(SESSION_FILE), note);
+        if alive && !roomy {
+            self.end_session();
+        }
+        if !roomy {
             self.start_session(dir)?;
         }
         let seen = self.session.as_ref().map_or(0, |session| session.seen);
@@ -479,6 +519,12 @@ impl Eden {
             log_from: 0,
         });
         Ok(())
+    }
+
+    fn memory_readings(&self) -> String {
+        self.exec("cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max")
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+            .unwrap_or_default()
     }
 
     fn control_dir(&self) -> PathBuf {
@@ -749,6 +795,12 @@ impl Emulator for Eden {
             fs::create_dir_all(dest).map_err(io)?;
             fs::copy(&container_end, dest.join(CONTAINER_END_FILE)).map_err(io)?;
             let _ = fs::remove_file(&container_end);
+        }
+        let session = self.user_dir.join("log").join(SESSION_FILE);
+        if session.is_file() {
+            fs::create_dir_all(dest).map_err(io)?;
+            fs::copy(&session, dest.join(SESSION_FILE)).map_err(io)?;
+            let _ = fs::remove_file(&session);
         }
         let source = self.logs_dir(title);
         if !source.exists() {
@@ -1116,6 +1168,15 @@ mod tests {
                 .contains("[Cpu]\ncpu_backend\\default=false\ncpu_backend=0\n")
         );
         assert!(qt_config(Gpu::Wsl, EdenCpu::Nce, &BTreeMap::new()).contains("\ncpu_backend=1\n"));
+    }
+
+    #[test]
+    fn a_game_needs_its_memory_left_under_the_limit() {
+        let gib = 1024 * 1024 * 1024;
+        assert!(room_left("1073741824\n6442450944\n", 4 * gib));
+        assert!(!room_left("2684354560\n6442450944\n", 4 * gib));
+        assert!(room_left("2684354560\nmax\n", 4 * gib));
+        assert!(room_left("", 4 * gib));
     }
 
     #[test]

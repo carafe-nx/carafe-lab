@@ -1,0 +1,58 @@
+Carafe Lab: when a game stops, Eden hands memory back to the system: the pages of the emulated Switch's memory that
+the stopped game touched, and the heap that Eden's own threads freed. The Switch's memory stays reserved for the next
+game, so one Eden can run game after game without running out of memory. Linux only.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/core/core.cpp b/src/core/core.cpp
+index e730b80..5175a8a 100644
+--- a/src/core/core.cpp
++++ b/src/core/core.cpp
+@@ -6,6 +6,11 @@
+ #include <memory>
+ #include <utility>
+ 
++#ifdef __linux__
++#include <malloc.h>
++#include <sys/mman.h>
++#endif
++
+ #include "game_settings.h"
+ #include "audio_core/audio_core.h"
+ #include "common/fs/fs.h"
+@@ -34,6 +39,7 @@
+ #include "core/hle/kernel/k_resource_limit.h"
+ #include "core/hle/kernel/k_scheduler.h"
+ #include "core/hle/kernel/kernel.h"
++#include "core/hle/kernel/board/nintendo/nx/k_system_control.h"
+ #include "core/hle/kernel/physical_core.h"
+ #include "core/hle/service/acc/profile_manager.h"
+ #include "core/hle/service/am/applet_manager.h"
+@@ -115,6 +121,7 @@ struct System::Impl {
+ 
+     void Initialize(System& system) {
+         device_memory.emplace();
++        device_memory_size = Kernel::Board::Nintendo::Nx::KSystemControl::Init::GetIntendedMemorySize();
+ 
+         is_multicore = Settings::values.use_multi_core.GetValue();
+         extended_memory_layout = Settings::values.memory_layout_mode.GetValue() != Settings::MemoryLayout::Memory_4Gb;
+@@ -415,6 +422,12 @@ struct System::Impl {
+         cpu_manager.Shutdown();
+         debugger.reset();
+         kernel.Shutdown();
++#ifdef __linux__
++        if (device_memory.has_value()) {
++            madvise(device_memory->buffer.BackingBasePointer(), device_memory_size, MADV_REMOVE);
++        }
++        malloc_trim(0);
++#endif
+         stop_event = {};
+         Network::RestartSocketOperations();
+ 
+@@ -474,6 +487,7 @@ struct System::Impl {
+     std::optional<Core::PerfStats> perf_stats;
+     std::optional<Tegra::Host1x::Host1x> host1x_core;
+     std::optional<Core::DeviceMemory> device_memory;
++    size_t device_memory_size{};
+     std::optional<AudioCore::AudioCore> audio_core;
+     std::optional<Memory::CheatEngine> cheat_engine;
+     std::optional<Tools::Freezer> memory_freezer;

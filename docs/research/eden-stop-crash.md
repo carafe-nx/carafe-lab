@@ -22,16 +22,25 @@ Found on 2026-10-17 while bringing up one Eden for a whole run (`patches/eden/00
 - The disassembly loads a pointer from the sub-query (`ldr x24, [x2, #64]`, line 533) and then reads `[x24, #168]`,
   inlined from `d3d12_resource.h:92`: the sub-query's result buffer is null when the query is ended.
 
-## Not verified
+## Cause and fix
 
-- Which caller ends the query: the frame-pointer chain could not be read inside the signal handler. A query deleted
-  while active during GL context teardown is a guess.
-- Whether `mesa-d3d12-query-recursion.patch` takes part: it changes `begin_subquery` and the accumulation path of the
-  same file.
-- Mesa's source was not at hand; reading `d3d12_query.cpp` needs the source download `docker/mesa-d3d12/build.sh`
-  makes (about 47 MB).
+With Mesa's source in `external/mesa` ([decision 4](../decisions/0004-mesa-from-a-submodule.md)):
+
+- `d3d12_release_query` (`d3d12_query.cpp`) frees a query without unlinking it from `ctx->active_queries`.
+  `d3d12_destroy_query` nulls the sub-queries' buffers and frees the query; the next suspend or end of the active
+  queries walks into it and `end_subquery` reads the null buffer.
+- `patches/mesa/0002` ends a still-active query and unlinks it before it is freed.
+- Verified on 2026-10-17 with OpenTTD on the WSL GPU: every stop answered `stopped exited`, and the next launch booted
+  in the same Eden.
 
 ## Effect on Lab
 
-One Eden is replaced after every game on the WSL GPU; the run's results are the same as with a container per launch,
-and each launch's `container-end.log` keeps the crash.
+One Eden now serves a whole run on the WSL GPU. Before the fix, it was replaced after every game; each launch's
+`container-end.log` kept the crash.
+
+Keeping Eden alive across games showed the next limit: the emulated Switch's memory (a shared-memory file of about
+4 GB) kept the pages the stopped game had touched, so the second launch of OpenTTD ran the 6 GB container out of
+memory. `patches/eden/0048` hands those pages back when software stops, and trims the heap Eden's threads freed. Eden
+still keeps about 0.5 GB more after each game, so before booting a game Lab checks the container's memory and starts a
+new Eden when less than 4.5 GB is left; each launch's `session.log` says which it chose. OpenTTD ×3 (six launches) passed
+with four launches in the first Eden.
