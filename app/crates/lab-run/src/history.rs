@@ -6,7 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::report::RunReport;
+use crate::report::{BuildOutcome, GameReport, RunReport};
 use crate::run::Outcome;
 
 /// The summary every run keeps next to its report and rewrites after every game.
@@ -40,7 +40,7 @@ pub struct RunSummary {
 }
 
 /// A game of a run in short.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GameSummary {
@@ -52,6 +52,9 @@ pub struct GameSummary {
     pub settings: String,
     /// Its worst outcome.
     pub outcome: Outcome,
+    /// Seconds it took: the build and the scenario; zero in summaries from before it was kept.
+    #[serde(default)]
+    pub seconds: f64,
 }
 
 impl RunSummary {
@@ -74,6 +77,7 @@ impl RunSummary {
                     title_id: game.title_id.clone(),
                     settings: game.settings.clone(),
                     outcome: game.outcome(),
+                    seconds: game_seconds(game),
                 })
                 .collect(),
         }
@@ -94,6 +98,19 @@ impl RunSummary {
         }
         counts
     }
+}
+
+fn game_seconds(game: &GameReport) -> f64 {
+    let build = match game.build {
+        BuildOutcome::Built { seconds, .. } => seconds,
+        BuildOutcome::Failed { .. } => 0.0,
+    };
+    let scenario = game
+        .scenario
+        .as_ref()
+        .and_then(|scenario| scenario.steps.last())
+        .map_or(0.0, |step| step.at);
+    build + scenario
 }
 
 /// Returns the runs in `runs` that have a summary, newest first.
@@ -142,6 +159,7 @@ mod tests {
                     title_id: String::new(),
                     settings: String::new(),
                     outcome: *outcome,
+                    seconds: 0.0,
                 })
                 .collect(),
         }

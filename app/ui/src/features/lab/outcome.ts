@@ -29,11 +29,24 @@ export function runCounts(run: RunSummary): { passed: number; warned: number; co
   return counts;
 }
 
-export function lastResult(runs: RunSummary[], game: string): { run: RunSummary; outcome: Outcome } | null {
+export function lastResult(
+  runs: RunSummary[],
+  game: string,
+): { run: RunSummary; outcome: Outcome; seconds: number } | null {
   for (const run of runs) {
     const found = run.games.find((entry) => entry.name.toLowerCase() === game.toLowerCase());
     if (found) {
-      return { run, outcome: found.outcome };
+      return { run, outcome: found.outcome, seconds: found.seconds };
+    }
+  }
+  return null;
+}
+
+export function lastSeconds(runs: RunSummary[], game: string): number | null {
+  for (const run of runs) {
+    const found = run.games.find((entry) => entry.name.toLowerCase() === game.toLowerCase() && entry.seconds > 0);
+    if (found) {
+      return found.seconds;
     }
   }
   return null;

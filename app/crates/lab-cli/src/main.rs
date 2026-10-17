@@ -294,8 +294,12 @@ fn git_commit(checkout: &Path) -> Option<String> {
 
 impl Lab {
     fn run_games(mut self, config: &Config, set: Option<&str>) -> Result<ExitCode, String> {
-        let games: Vec<&Game> = config
-            .select(set)
+        let chosen = if self.args.games.is_empty() {
+            config.select(set)
+        } else {
+            config.pick(&self.args.games)
+        };
+        let games: Vec<&Game> = chosen
             .map_err(|error| error.to_string())?
             .into_iter()
             .filter(|game| self.wanted(&game.name))
@@ -304,8 +308,10 @@ impl Lab {
             return Err("no games to run: enable some in lab.json or name a set".to_owned());
         }
         let inspector = DiskFolderInspector;
+        let repeat = self.args.repeat as usize;
         let planned = games
             .iter()
+            .flat_map(|game| std::iter::repeat_n(*game, repeat))
             .map(|game| {
                 let request = inspector
                     .inspect(&game.folder.to_string_lossy())
@@ -325,11 +331,15 @@ impl Lab {
                 }
             })
             .collect();
-        let what = match (set, &self.args.only) {
+        let mut what = match (set, &self.args.only) {
             (_, Some(only)) => only.clone(),
+            _ if !self.args.games.is_empty() => self.args.games.join(", "),
             (Some(set), None) => set.to_owned(),
             (None, None) => "enabled games".to_owned(),
         };
+        if repeat > 1 {
+            what = format!("{what} ×{repeat}");
+        }
         self.execute(planned, &what)
     }
 

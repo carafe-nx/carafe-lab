@@ -53,6 +53,9 @@ pub enum ConfigError {
     /// A set asked for on the command line is not in `sets`.
     #[error("{CONFIG_FILE}: there is no set {0}")]
     UnknownSet(String),
+    /// A game asked for by name is not in `games`.
+    #[error("{CONFIG_FILE}: there is no game {0}")]
+    UnknownGame(String),
     /// A game's settings, merged over the defaults, are not valid.
     #[error("{CONFIG_FILE}: {0}: settings: {1}")]
     Settings(String, String),
@@ -334,6 +337,23 @@ impl Config {
                     .find(|game| game.name.eq_ignore_ascii_case(name))
             })
             .collect())
+    }
+
+    /// Returns the games named in `names`, in that order, enabled or not; names are matched ignoring case.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::UnknownGame`] for the first name that is not in `games`.
+    pub fn pick(&self, names: &[String]) -> Result<Vec<&Game>, ConfigError> {
+        names
+            .iter()
+            .map(|name| {
+                self.games
+                    .iter()
+                    .find(|game| game.name.eq_ignore_ascii_case(name))
+                    .ok_or_else(|| ConfigError::UnknownGame(name.clone()))
+            })
+            .collect()
     }
 
     /// Returns the Carafe checkout the lab packs with: `carafe` as it is when absolute, relative to `repository`
@@ -650,6 +670,21 @@ mod tests {
             config(scenario, ""),
             Err(ConfigError::Scenario(..))
         ));
+    }
+
+    #[test]
+    fn games_are_picked_by_name_in_the_order_asked() {
+        let config = Config::parse(
+            r#"{"work": "x", "games": [{"name": "A", "folder": "a"}, {"name": "B", "folder": "b", "enabled": false}]}"#,
+        )
+        .unwrap();
+        let picked = config.pick(&["b".to_owned(), "A".to_owned()]).unwrap();
+        let names: Vec<&str> = picked.iter().map(|game| game.name.as_str()).collect();
+        assert_eq!(names, ["B", "A"]);
+        assert_eq!(
+            config.pick(&["C".to_owned()]),
+            Err(ConfigError::UnknownGame("C".to_owned()))
+        );
     }
 
     #[test]

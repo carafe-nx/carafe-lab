@@ -95,7 +95,13 @@
     "enabled": "All enabled games",
     "games_one": "{{count}} game",
     "games_other": "{{count}} games",
-    "start": "Run the set"
+    "start": "Run the set",
+    "own": "Your own plan",
+    "repeat": "Repeats",
+    "pickGames": "Tick the games to run",
+    "estimate": "Launches: {{launches}} · about {{minutes}} min from past runs",
+    "unknown": "without past runs: {{count}}",
+    "launches": "Launches: {{launches}}"
   },
   "run": {
     "exited": "The run ended with an error (code {{code}})",

@@ -111,7 +111,13 @@
     "games_few": "{{count}} игры",
     "games_many": "{{count}} игр",
     "games_other": "{{count}} игры",
-    "start": "Запустить набор"
+    "start": "Запустить набор",
+    "own": "Свой план",
+    "repeat": "Повторов",
+    "pickGames": "Отметьте игры для прогона",
+    "estimate": "Запусков: {{launches}} · около {{minutes}} мин по прошлым прогонам",
+    "unknown": "без прошлых прогонов: {{count}}",
+    "launches": "Запусков: {{launches}}"
   },
   "run": {
     "exited": "Прогон завершился с ошибкой (код {{code}})",

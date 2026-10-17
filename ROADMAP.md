@@ -19,7 +19,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 - [ ] `feature` Loader: start-up stages on the Run screen, a fix for each failing stage
 - [ ] `feature` Library: tags, notes, link to a ROADMAP item
-- [ ] `feature` Plans: games × scenario × repeats, with launch count and time
+- [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
 - [ ] `feature` Run screen: lit buttons on the Switch frame, milestones, FPS
 - [ ] `feature` Exact uncompressed screenshots for checks from Eden through the control channel
 - [ ] `feature` Video turned down or off during performance runs
@@ -103,6 +103,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Plans: games ticked by hand × repeats, with launch count and time from past runs; `--games` and `--repeat` on the command line
 - [x] `feature` Library: a game is added by dropping its folder or with a button; each game shows its last result
 - [x] `feature` Live picture of the game in the Switch frame of the Run screen, view only or with keys sent to the game
 - [x] `feature` Run screen: queue with stop, the run's games, the current game's steps, the event log; title bar shows who holds the emulator

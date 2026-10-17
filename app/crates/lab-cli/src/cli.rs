@@ -28,6 +28,8 @@ Options:
   --lang ru|en        overrides lab.json
   --timeout <s>       seconds to wait for a first frame; overrides lab.json
   --only <name>       only the game or probe with this name
+  --games <a,b,…>     run these games of lab.json, in this order, instead of a set
+  --repeat <n>        run every game n times in a row; default 1
   --build-only        build the NSPs and stop
   --no-open           do not open the live page in the browser
   --json              print the run as JSON lines, one event each, without the live page;
@@ -82,6 +84,10 @@ pub struct Args {
     pub timeout: Option<u32>,
     /// `--only`.
     pub only: Option<String>,
+    /// `--games`, split at commas.
+    pub games: Vec<String>,
+    /// `--repeat`.
+    pub repeat: u32,
     /// `--build-only`.
     pub build_only: bool,
     /// `--json`.
@@ -138,6 +144,8 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         lang: None,
         timeout: None,
         only: None,
+        games: Vec::new(),
+        repeat: 1,
         build_only: false,
         json: false,
         who: None,
@@ -176,6 +184,21 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 parsed.timeout = Some(seconds);
             }
             "--only" => parsed.only = Some(value("a name")?),
+            "--games" => {
+                parsed.games = value("game names")?
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+            }
+            "--repeat" => {
+                let times: u32 = number(arg, value("a count")?, "a count from 1 to 100")?;
+                if !(1..=100).contains(&times) {
+                    return Err(ArgsError::Value(arg.clone(), "a count from 1 to 100"));
+                }
+                parsed.repeat = times;
+            }
             "--who" => parsed.who = Some(value("a name")?),
             "--random" => parsed.random = number(arg, value("a count")?, "a count")?,
             "--seed" => parsed.seed = Some(number(arg, value("a number")?, "a number")?),
@@ -252,6 +275,18 @@ mod tests {
             }
         );
         assert_eq!(parse(&args("runs --json")).unwrap().command, Command::Runs);
+    }
+
+    #[test]
+    fn a_plan_names_its_games_and_repeats() {
+        let parsed = parse(&args("run --games OpenTTD,NFSU_menu --repeat 3")).unwrap();
+        assert_eq!(parsed.games, ["OpenTTD", "NFSU_menu"]);
+        assert_eq!(parsed.repeat, 3);
+        assert_eq!(parse(&args("run")).unwrap().repeat, 1);
+        assert!(matches!(
+            parse(&args("run --repeat 0")),
+            Err(ArgsError::Value(..))
+        ));
     }
 
     #[test]

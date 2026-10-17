@@ -235,7 +235,11 @@ impl Engine<'_> {
         clock: &dyn Clock,
         on_event: &mut dyn FnMut(&Event),
     ) -> GameReport {
-        let dir_name = safe_name(&game.name);
+        let base = safe_name(&game.name);
+        let dir_name = std::iter::once(base.clone())
+            .chain((2..).map(|number| format!("{base}-{number}")))
+            .find(|name| !run_dir.join(name).exists())
+            .unwrap_or(base);
         let game_dir = run_dir.join(&dir_name);
         let _ = fs::create_dir_all(&game_dir);
         let title = game.request.as_ref().map_or_else(

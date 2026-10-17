@@ -20,4 +20,8 @@ settings: string,
 /**
  * Its worst outcome.
  */
-outcome: Outcome, };
+outcome: Outcome, 
+/**
+ * Seconds it took: the build and the scenario; zero in summaries from before it was kept.
+ */
+seconds: number, };

@@ -155,7 +155,8 @@ pub async fn run_events(
     .await
 }
 
-/// Starts `carafe-lab run` in its own process, so closing the window does not stop it.
+/// Starts `carafe-lab run` in its own process, so closing the window does not stop it: the set `set`, or the games
+/// named in `games`, each `repeat` times; `only` narrows it to one game.
 ///
 /// # Errors
 ///
@@ -166,6 +167,8 @@ pub async fn start_run(
     lab: State<'_, Arc<Lab>>,
     set: Option<String>,
     only: Option<String>,
+    games: Option<Vec<String>>,
+    repeat: Option<u32>,
 ) -> Result<(), CommandError> {
     let lab = Arc::clone(&lab);
     blocking(move || {
@@ -178,6 +181,12 @@ pub async fn start_run(
         args.extend(set);
         if let Some(only) = only {
             args.extend(["--only".to_owned(), only]);
+        }
+        if let Some(games) = games.filter(|games| !games.is_empty()) {
+            args.extend(["--games".to_owned(), games.join(",")]);
+        }
+        if let Some(repeat) = repeat.filter(|repeat| *repeat > 1) {
+            args.extend(["--repeat".to_owned(), repeat.to_string()]);
         }
         args.extend(["--json", "--who", "window"].map(str::to_owned));
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;
