@@ -13,6 +13,7 @@ const main: { to: string; icon: IconName; label: string }[] = [
   { to: "/plans", icon: "list", label: "nav.plans" },
   { to: "/run", icon: "play", label: "nav.run" },
   { to: "/history", icon: "clock", label: "nav.history" },
+  { to: "/versions", icon: "rebuild", label: "nav.versions" },
 ];
 
 const tools: { to: string; icon: IconName; label: string }[] = [

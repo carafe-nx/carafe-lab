@@ -42,7 +42,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 - [ ] `feature` "Repeat exactly": a past run again with its own runtime and Eden image, not the current ones
 - [ ] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
-- [ ] `feature` Compatibility by version: which games pass in each version and where something broke
 - [ ] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats
 - [ ] `feature` Only changes larger than the spread between repeats are flagged
 - [ ] `feature` Thresholds: a game slower beyond its threshold (20 % by default) fails
@@ -100,6 +99,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Compatibility by version: games × Carafe commits with the last result, failures and FPS; where a game broke is marked
 - [x] `feature` FPS from Eden (`0047`): a live chart on the Run screen, median and worst-tenth FPS of each launch in the report and history
 - [x] `feature` A/B of a game setting: variants alternate, the run ends with a verdict on the first frame that counts only differences beyond the spread
 - [x] `feature` Loader: each launch's start-up stages live on the Run screen, and what to look at when a launch stops at one

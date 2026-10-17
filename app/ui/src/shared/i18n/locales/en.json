@@ -5,6 +5,7 @@
     "plans": "Plans",
     "run": "Run",
     "history": "History",
+    "versions": "Versions",
     "emulator": "Emulator",
     "scenarios": "Scenarios"
   },
@@ -275,6 +276,14 @@
     "now": "{{fps}} fps · speed {{speed}}%",
     "mark": "dashed line: 30 fps",
     "summary": "{{median}} fps, worst {{low}}"
+  },
+  "versions": {
+    "title": "Compatibility by version",
+    "hint": "The last result of every game on every Carafe commit, oldest first. Red marks where a game stopped passing.",
+    "empty": "No stamped runs yet",
+    "game": "Game",
+    "runs": "runs: {{count}}",
+    "broke": "broke here"
   },
   "who": {
     "window": "the window",

@@ -73,6 +73,21 @@ pub fn summarize(samples: &[PerfSample]) -> Option<PerfSummary> {
     })
 }
 
+/// Returns the readings from `seconds` after the first reading on: the game's own frames when `seconds` is the
+/// time from the launch to its first frame, without the loading screen's.
+#[must_use]
+pub fn after(samples: &[PerfSample], seconds: u32) -> Vec<PerfSample> {
+    let Some(first) = samples.first() else {
+        return Vec::new();
+    };
+    let from = first.at + u64::from(seconds) * 1000;
+    samples
+        .iter()
+        .filter(|sample| sample.at >= from)
+        .copied()
+        .collect()
+}
+
 fn median(sorted: &[f64]) -> f64 {
     let middle = sorted.len() / 2;
     if sorted.len() % 2 == 1 {
@@ -94,6 +109,16 @@ mod tests {
         assert_eq!(samples[1].at, 1500);
         assert_eq!(samples[1].shaders, 2);
         assert!((samples[0].fps - 29.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn readings_after_the_first_frame_leave_the_loading_screen_out() {
+        let samples =
+            parse_stats("1000 10 1 16 0\n2000 10 1 16 0\n3000 55 1 16 0\n3500 57 1 16 0\n");
+        let game = after(&samples, 2);
+        assert_eq!(game.len(), 2);
+        assert_eq!(game[0].at, 3000);
+        assert!(after(&[], 2).is_empty());
     }
 
     #[test]

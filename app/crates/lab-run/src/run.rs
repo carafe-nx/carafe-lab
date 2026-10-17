@@ -750,7 +750,12 @@ impl<'a> Runner<'a> {
         };
         let logs = self.emulator.logs(self.title);
         record.launch = Launch::read(&logs.overlay, &logs.runtime);
-        record.perf = perf::summarize(&self.emulator.launch_perf());
+        record.perf = match &record.launch.loading_hidden {
+            Some((at, reason)) if reason.is_success() => {
+                perf::summarize(&perf::after(&self.emulator.launch_perf(), *at))
+            }
+            _ => None,
+        };
         let dest = self.dir.join(&record.logs);
         let _ = self.emulator.take_logs(self.title, &dest);
     }
