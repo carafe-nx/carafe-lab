@@ -648,6 +648,41 @@ pub async fn run_screenshots(
     .await
 }
 
+/// Copies the screenshot `shot` of the game in the folder `game` of the run `dir` into the `references` folder next to
+/// `lab.json`, as `<game>/<shot>.png`, for the scenarios' `expectScreen` steps.
+///
+/// # Returns
+///
+/// The reference's path inside the `references` folder, as a step names it.
+///
+/// # Errors
+///
+/// [`CommandError`] when a name is not a plain name, the screenshot is missing or the copy fails.
+#[tauri::command]
+pub async fn make_reference(
+    lab: State<'_, Arc<Lab>>,
+    dir: String,
+    game: String,
+    shot: String,
+) -> Result<String, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        if !plain_name(&game) || !plain_name(&shot) {
+            return Err("not a screenshot of the run".into());
+        }
+        let source = run_dir(&lab, &dir)?.join(&game).join(format!("{shot}.png"));
+        let folder = lab
+            .config_path()
+            .parent()
+            .map(|parent| parent.join("references").join(&game))
+            .ok_or_else(|| CommandError::from("lab.json has no folder"))?;
+        fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+        fs::copy(&source, folder.join(format!("{shot}.png"))).map_err(|error| error.to_string())?;
+        Ok(format!("{game}/{shot}.png"))
+    })
+    .await
+}
+
 /// Adds the game in `folder` to `lab.json` under a name made from the folder's.
 ///
 /// # Returns

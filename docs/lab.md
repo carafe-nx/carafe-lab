@@ -118,7 +118,8 @@ save data is still there, close it.
 - `expectScreen` — `name`, `reference`, `tolerance`: takes the screenshot `name` and compares it with the reference
   picture `reference`, a path in the `references` folder next to `lab.json`, by the mean brightness difference of
   64×36 cells; more than `tolerance` (12 by default, of 255) fails. Without the reference picture yet it warns. A
-  screenshot in History becomes a reference with "Make it a reference".
+  screenshot in History becomes a reference with "Make it a reference"; git ignores `references/`, as game pictures
+  stay out of the repository.
 - `randomPresses` — `seconds`, `seed`: presses random buttons for that long, each held 50–500 ms with 0.1–1 s
   between; fails when the game crashes or ends. The same seed presses the same buttons again.
 - `close` — asks the game to close and waits `timeout` seconds; then stops it. Lab sends Eden SIGUSR1, and

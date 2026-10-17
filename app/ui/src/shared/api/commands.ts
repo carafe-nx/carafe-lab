@@ -88,6 +88,7 @@ export const api = {
     const request: RunRequest = { ...noRun, games, buildOnly: true };
     return invoke<void>("start_run", { request });
   },
+  makeReference: (dir: string, game: string, shot: string) => invoke<string>("make_reference", { dir, game, shot }),
   recordConsoleVerdict: (dir: string, game: string, works: boolean, note: string) =>
     invoke<void>("record_console_verdict", { dir, game, works, note }),
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),

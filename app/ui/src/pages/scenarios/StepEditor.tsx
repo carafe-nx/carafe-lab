@@ -15,7 +15,8 @@ const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"
 
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "expectChange",
-  "expectPattern", "expectInput", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses", "close",
+  "expectPattern", "expectScreen", "expectInput", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
+  "close",
 ];
 
 export function newStep(kind: Step["step"], steps: Step[]): Step {
@@ -35,6 +36,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "expectChange", from: shots[shots.length - 2] ?? "", to: shots[shots.length - 1] ?? "", soft: true };
     case "expectPattern":
       return { step: "expectPattern", name: shots[shots.length - 1] ?? "" };
+    case "expectScreen":
+      return { step: "expectScreen", name: `screen-${shots.length + 1}`, reference: "", tolerance: 12 };
     case "expectInput":
       return { step: "expectInput" };
     case "expectSave":
@@ -208,6 +211,28 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
           value={step.name}
           onChange={(event) => onChange({ ...step, name: event.target.value.replace(/\s+/g, "-") })}
         />
+      );
+    case "expectScreen":
+      return (
+        <>
+          <input
+            id={`${id}-name`}
+            className={styles.text}
+            aria-label={t("steps.shotName")}
+            value={step.name}
+            onChange={(event) => onChange({ ...step, name: event.target.value.replace(/\s+/g, "-") })}
+          />
+          <label htmlFor={`${id}-reference`}>{t("steps.reference")}</label>
+          <input
+            id={`${id}-reference`}
+            className={styles.text}
+            placeholder="openttd/menu.png"
+            value={step.reference}
+            onChange={(event) => onChange({ ...step, reference: event.target.value.trim() })}
+          />
+          <label htmlFor={`${id}-tolerance`}>{t("steps.tolerance")}</label>
+          <NumberInput id={`${id}-tolerance`} value={step.tolerance} onChange={(tolerance) => onChange({ ...step, tolerance })} />
+        </>
       );
     case "expectChange":
       return (

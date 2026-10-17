@@ -15,6 +15,7 @@ import styles from "@/shared/ui/lab.module.css";
 import { ConsoleBlock, waitsForConsole } from "./ConsoleBlock";
 import history from "./HistoryPage.module.css";
 import { ProblemsBlock } from "./ProblemsBlock";
+import { ShotsBlock } from "./ShotsBlock";
 import { VerdictBlock } from "./VerdictBlock";
 
 export function HistoryPage() {
@@ -270,6 +271,7 @@ function RunCard({ run }: { run: RunSummary }) {
             </div>
             {game.problems && game.dir ? <ProblemsBlock dir={run.dir} game={game.dir} /> : null}
             <ConsoleBlock run={run} game={game} onOpen={open} onSaved={runs.refresh} />
+            {game.dir ? <ShotsBlock dir={run.dir} game={game.dir} /> : null}
           </div>
         ))}
       </div>

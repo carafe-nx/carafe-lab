@@ -18,7 +18,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 ### 4. Scenarios and A/B
 
 - [ ] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
-- [ ] `feature` Reference screenshots for "the screen shows …" checks
 - [ ] `feature` Scouting: play by hand, the lab records presses and milestones into a scenario
 
 ### Research and later ideas (not the app)
@@ -55,6 +54,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
 
 ## Done
+
+- [x] `feature` Reference screenshots for "the screen shows …" checks
 
 - [x] `feature` "Take control": play by hand during a run and hand the game back
 - [x] `feature` Random presses for a set time, to catch crashes and hangs without a scenario

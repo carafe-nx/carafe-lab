@@ -42,6 +42,7 @@ pub fn run() {
             commands::list_releases,
             commands::start_bisect,
             commands::hold_game,
+            commands::make_reference,
             commands::record_console_verdict,
             commands::forget_firmware,
             commands::open_path,

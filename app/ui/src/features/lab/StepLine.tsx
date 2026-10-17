@@ -47,6 +47,10 @@ function StepParams({ step }: { step: Step }) {
     case "expectPattern":
       params.push(step.name);
       break;
+    case "expectScreen":
+      params.push(step.reference || "—");
+      if (step.tolerance !== 12) params.push(`± ${step.tolerance}`);
+      break;
     case "expectChange":
       params.push(`${step.from} → ${step.to}`);
       if (step.quiet?.length) params.push(t("steps.quietCount", { count: step.quiet.length }));
