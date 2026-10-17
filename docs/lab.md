@@ -188,11 +188,25 @@ emulator.
   and half the spread of its repeats for the time to the first frame, the median FPS, the worst hundredth of frames
   and the peak memory. A measure is marked better or worse than the commit before only when the difference is
   larger than the spread of both; with a single repeat the spread is unknown and nothing is marked.
-- A game that fails runs once more right after, as `<name> · detailed`, with detailed logs chosen by how it failed:
-  the runtime's verbose traces always (they add `stdout.txt`, `stderr.txt` and `stdin.txt` to the launch's logs),
-  its profiler (`[PROF]` lines) when the game never reached its first frame, the full DXVK HUD when a picture check
-  failed. `--no-retry` turns it off; A/B runs and probes never retry. The detailed run is left out of performance by
-  version.
+- Diagnostics are named, not temporary patches: `--diag verbose,profiler,hud,stacks,eden-debug`, or the
+  Diagnostics choices of the Plans screen. `verbose` turns on the runtime's verbose traces (they add `stdout.txt`,
+  `stderr.txt` and `stdin.txt` to the launch's logs), `profiler` its profiler (`[PROF]` lines), `hud` DXVK's full
+  HUD; these three change the NSP, so a ready NSP run as it is takes only the other two. `stacks` starts Eden with
+  its gdb stub and a gdb inside the container that lets the game run on: when a launch misses its milestone, gdb
+  stops the game for a moment and `backtraces.txt` gets the module map, every thread with its state and every
+  thread's stack, each unnamed frame marked with its module and offset. `eden-debug` sets Eden's log to the debug
+  level. Eden's diagnostics need an Eden started with them, so changing them starts a new one.
+- A game that fails runs once more right after, as `<name> · detailed`, with the diagnostics that suit how it
+  failed: `verbose` always, with `profiler` and `stacks` when it never reached its first frame and `hud` when a
+  picture check failed. `--no-retry` turns it off; A/B runs and probes never retry. The detailed run is left out of
+  performance by version.
+- When the game crashes, Eden logs the fault, the registers and the stack with the module of every frame; the
+  launch's `crash.txt` keeps that part of the log, and the game's failure names the fault and its innermost frame,
+  such as `Unhandled read of unmapped memory at 0x3fff8dcd00 in wine-nx-runtime+0xEF8B52D0`.
+- Every launch's `timeline.txt` puts all its sources on one clock, seconds since the lab launched the game: the
+  lab's steps, Eden's log (from its `Control: booting` line), the overlay and the runtime (from Eden's
+  `Booting game` line, their own clock's zero) and the container's memory and processor every 5 s. A line without a
+  time keeps the time of the line before it.
 - `--video low` sends the live picture at about five frames a second, `--video off` sends none (`CARAFE_VIDEO` in
   the container), so the video takes little or nothing from the game while it is measured; A/B runs from the window
   use `low`.

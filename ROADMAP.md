@@ -11,17 +11,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Planned
 
-### 1. The window and a run of many games
-
-- [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
-
-### 2. Logs
-
-- [ ] `feature` On a hang: backtraces of all the game's threads through the gdb stub before the watchdog stops it
-- [ ] `feature` On a crash: registers, stack and module map, without Eden's full crash dump
-- [ ] `feature` One timeline of all log sources with one clock
-- [ ] `feature` Diagnostics as named flags instead of temporary patches
-
 ### 3. Versions and history
 
 - [ ] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
@@ -71,15 +60,16 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `feature` Diagnostics as named flags instead of temporary patches
+- [x] `feature` One timeline of all log sources with one clock
+- [x] `feature` On a crash: registers, stack and module map, without Eden's full crash dump
+- [x] `feature` On a hang: backtraces of all the game's threads through the gdb stub before the watchdog stops it
+- [x] `research` Software or WSL GPU for the one emulator: the WSL GPU stays, software confirms (decision 6)
 - [x] `feature` Live video of the game in the window: the noVNC client library embedded as a canvas, not a separate page
-
 - [x] `feature` The lab builds NSPs and a "check on the console" list; console verdicts go into the same history
-
 - [x] `feature` A ready NSP runs as it is, with the runtime version and settings read from inside
 - [x] `feature` "Rebuild with the current runtime" for a ready NSP whose game folder is in the library
-
 - [x] `feature` Clean-up: Eden crash dumps, stopped containers, old NSPs; a warning when space runs low
-
 - [x] `feature` After a failure the game runs again with detailed logs chosen by the symptom (`· detailed`)
 - [x] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats
 - [x] `feature` Only changes larger than the spread between repeats are flagged

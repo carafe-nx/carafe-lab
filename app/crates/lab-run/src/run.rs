@@ -10,21 +10,30 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use ts_rs::TS;
 
+use lab_core::crash;
+use lab_core::diagnostics::Diagnostic;
 use lab_core::frames::{self, FrameSummary};
 use lab_core::input_check::{self, PressCheck};
+use lab_core::lang::Lang;
 use lab_core::milestones::{Exit, Launch, Stage};
 use lab_core::perf::{self, PerfSample, PerfSummary};
 use lab_core::picture::{self, Change, PatternCheck, Thumbnail};
 use lab_core::problems::{self, Problem, ProblemCounts};
 use lab_core::resources::{self, ResourceSample, ResourceSummary};
 use lab_core::scenario::{Milestone, Scenario, Step};
+use lab_core::timeline;
 use lab_core::versions::{self, VersionPerf};
+
+use crate::report;
 
 const POLL: Duration = Duration::from_millis(500);
 const GLIMPSE_EVERY: Duration = Duration::from_secs(10);
 
 /// Name of the folder in a launch's log folder with a small picture of the screen every ten seconds.
 pub const TIMELINE_DIR: &str = "timeline";
+
+/// The file in a launch's folder with the stacks of the game's threads at the moment it was found hung.
+pub const BACKTRACES_FILE: &str = "backtraces.txt";
 
 /// Lines of an emulator log, in lower case, that report something missing on purpose: the loader asks for
 /// Atmosphère's `svcGetInfo` 65000 only to learn whether the kernel is Mesosphère and goes on without it.
@@ -170,6 +179,16 @@ pub trait Emulator {
     fn launch_resources(&self) -> Vec<ResourceSample> {
         Vec::new()
     }
+
+    /// Turns on the emulator's diagnostics in `diagnostics` for the next launches and turns off the others; those
+    /// that are not the emulator's, or that it does not have, are left alone.
+    fn diagnose(&mut self, _diagnostics: &[Diagnostic]) {}
+
+    /// Returns the stacks of every thread of the running game and the modules it has loaded, read without stopping
+    /// it for good; `None` when [`Diagnostic::Stacks`] is off or the stacks cannot be read.
+    fn backtraces(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// Time for the runner: real in a run, simulated in tests.
@@ -239,6 +258,9 @@ pub struct LaunchRecord {
     /// The times of the launch's frames in short, from its `frametimes.csv`; `None` when the emulator recorded none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frames: Option<FrameSummary>,
+    /// The crash Eden logged during the launch in one line, kept whole in its `crash.txt`; `None` when none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crash: Option<String>,
 }
 
 /// Everything a scenario found for one game.
@@ -286,6 +308,8 @@ pub struct Runner<'a> {
     stage: Stage,
     on_stage: Option<Box<dyn FnMut(Stage) + 'a>>,
     launch_started: Duration,
+    launched_ms: Option<u64>,
+    lab_lines: Vec<(Duration, String)>,
     last_glimpse: Duration,
     baseline: Option<VersionPerf>,
     threshold: u32,
@@ -319,6 +343,8 @@ impl<'a> Runner<'a> {
             stage: Stage::NotStarted,
             on_stage: None,
             launch_started: started,
+            launched_ms: None,
+            lab_lines: Vec::new(),
             last_glimpse: started,
             baseline: None,
             threshold: versions::DEFAULT_THRESHOLD,
@@ -332,6 +358,19 @@ impl<'a> Runner<'a> {
         self.baseline = baseline;
         self.threshold = threshold;
         self
+    }
+
+    fn save_backtraces(&mut self) -> bool {
+        let Some(record) = self.launches.last() else {
+            return false;
+        };
+        let file = self.dir.join(&record.logs).join(BACKTRACES_FILE);
+        let Some(text) = self.emulator.backtraces() else {
+            return false;
+        };
+        file.parent()
+            .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+            && std::fs::write(&file, text).is_ok()
     }
 
     fn glimpse(&mut self) {
@@ -425,6 +464,15 @@ impl<'a> Runner<'a> {
             if result.outcome == Outcome::Fail {
                 broken = true;
             }
+            self.lab_lines.push((
+                self.started + Duration::from_secs_f64(result.at),
+                format!(
+                    "{}: {:?}, {}",
+                    report::step_title(&result, Lang::En),
+                    result.outcome,
+                    result.detail
+                ),
+            ));
             on_step(&result);
             steps.push(result);
         }
@@ -617,9 +665,14 @@ impl<'a> Runner<'a> {
             resources: None,
             problems: None,
             frames: None,
+            crash: None,
         });
         self.launch_open = true;
         self.launch_started = self.clock.now();
+        self.launched_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|since| u64::try_from(since.as_millis()).ok());
         self.last_glimpse = self.launch_started;
         self.pressed.clear();
         match self.emulator.launch(&self.nsp) {
@@ -681,6 +734,8 @@ impl<'a> Runner<'a> {
                     self.emulator
                         .end_reason()
                         .unwrap_or_else(|| "the game ended before it".to_owned())
+                } else if self.save_backtraces() {
+                    format!("not reached in {timeout} s, thread stacks in {BACKTRACES_FILE}")
                 } else {
                     format!("not reached in {timeout} s")
                 };
@@ -936,10 +991,43 @@ impl<'a> Runner<'a> {
             }
             _ => None,
         };
-        record.resources = resources::summarize(&self.emulator.launch_resources());
+        let samples = self.emulator.launch_resources();
+        record.resources = resources::summarize(&samples);
         let dest = self.dir.join(&record.logs);
         let _ = self.emulator.take_logs(self.title, &dest);
         record.problems = write_problems(&dest);
+        let eden_log = std::fs::read(dest.join("eden_log.txt"))
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
+        record.crash = crash::find(&eden_log).map(|found| {
+            let _ = std::fs::write(dest.join(crash::FILE), &found.text);
+            found.summary()
+        });
+        let read = |path: PathBuf| {
+            std::fs::read(path)
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .unwrap_or_default()
+        };
+        let overlay = read(dest.join("carafe-overlay.log"));
+        let runtime = read(dest.join("logs").join("autorun_runtime.log"));
+        let lab = self
+            .lab_lines
+            .iter()
+            .filter(|(at, _)| *at >= self.launch_started)
+            .map(|(at, text)| ((*at - self.launch_started).as_secs_f64(), text.clone()))
+            .collect();
+        let sources = timeline::Sources {
+            lab,
+            eden: &eden_log,
+            overlay: &overlay,
+            runtime: &runtime,
+            resources: &samples,
+            launched_ms: self.launched_ms,
+        };
+        let _ = std::fs::write(
+            dest.join(timeline::FILE),
+            timeline::render(&timeline::merge(&sources)),
+        );
         record.frames = std::fs::read_to_string(dest.join(frames::FILE))
             .ok()
             .and_then(|text| frames::summarize(&frames::parse(&text)));

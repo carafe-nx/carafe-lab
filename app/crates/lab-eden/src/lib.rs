@@ -25,12 +25,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use carafe_core::TitleId;
 use carafe_core::settings::SwitchButton;
+use lab_core::diagnostics::Diagnostic;
 use lab_core::emulator::{EdenCpu, Gpu, Video};
 use lab_core::firmware;
 use lab_core::frames;
 use lab_core::perf::{self, PerfSample};
 pub use lab_core::redact::redact;
 use lab_core::resources::{self, ResourceSample};
+use lab_core::stacks;
 use sha2::{Digest, Sha256};
 
 use lab_run::run::{Closed, Emulator, EmulatorError, GameLogs, SaveFile};
@@ -53,6 +55,13 @@ const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_GRACE: Duration = Duration::from_secs(15);
 const PRESS_GRACE: Duration = Duration::from_secs(5);
 const HANG_AFTER_MS: u64 = 45_000;
+const GDB_PORT: u16 = 6543;
+const GDB_INPUT: &str = "/tmp/lab-gdb.in";
+const GDB_OUTPUT: &str = "/tmp/lab-gdb.out";
+const GDB_END: &str = "--- carafe-lab end ---";
+const GDB_SERVER_WAIT: Duration = Duration::from_secs(30);
+const GDB_INTERRUPT_WAIT: Duration = Duration::from_secs(3);
+const GDB_ANSWER_WAIT: Duration = Duration::from_secs(90);
 const PERF_MARGIN_MS: u64 = 2000;
 const GAME_MEMORY: u64 = 5 * 1024 * 1024 * 1024;
 const PULLED_NAND: [&str; 2] = ["user", "system/save"];
@@ -99,6 +108,7 @@ pub struct Eden {
     perf_from: Option<u64>,
     firmware: Option<PathBuf>,
     video: Video,
+    diagnostics: Vec<Diagnostic>,
 }
 
 struct Session {
@@ -106,6 +116,7 @@ struct Session {
     seen: u64,
     booted_at: u64,
     log_from: usize,
+    diagnostics: Vec<Diagnostic>,
 }
 
 /// A numbered answer of Eden's control channel (`patches/eden/0046`).
@@ -186,6 +197,7 @@ impl Eden {
             perf_from: None,
             firmware: None,
             video: Video::Full,
+            diagnostics: Vec::new(),
         }
     }
 
@@ -276,6 +288,7 @@ impl Eden {
             seen: last.number,
             booted_at: last.number,
             log_from: log.rfind("Control: booting").unwrap_or(0),
+            diagnostics: Vec::new(),
         });
         true
     }
@@ -337,7 +350,7 @@ impl Eden {
         }
         fs::write(
             self.user_dir.join("config").join("qt-config.ini"),
-            qt_config(self.gpu, self.cpu, &self.settings),
+            qt_config(self.gpu, self.cpu, &self.effective_settings()),
         )
         .map_err(io)?;
         if !self.keys.is_file() {
@@ -573,7 +586,8 @@ impl Eden {
             .file_stem()
             .and_then(|stem| TitleId::parse(&stem.to_string_lossy()).ok());
         if self.one_eden {
-            return self.boot_in_session(dir, &name);
+            self.boot_in_session(dir, &name)?;
+            return self.attach_debugger();
         }
         self.prepare()?;
         self.remove_container();
@@ -584,15 +598,82 @@ impl Eden {
         args.push(format!("/nsp/{name}"));
         docker_owned(&args)?;
         self.perf_from = Some(unix_millis());
-        self.wait_for_window()
+        self.wait_for_window()?;
+        self.attach_debugger()
+    }
+
+    fn effective_settings(&self) -> BTreeMap<String, String> {
+        let mut settings = self.settings.clone();
+        if self.watches_stacks() {
+            settings.insert("Debugging/use_gdbstub".to_owned(), "true".to_owned());
+            settings.insert("Debugging/gdbstub_port".to_owned(), GDB_PORT.to_string());
+        }
+        if self.diagnostics.contains(&Diagnostic::EdenDebug) {
+            settings.insert("Miscellaneous/log_filter".to_owned(), "*:Debug".to_owned());
+        }
+        settings
+    }
+
+    fn watches_stacks(&self) -> bool {
+        self.diagnostics.contains(&Diagnostic::Stacks)
+    }
+
+    fn attach_debugger(&mut self) -> Result<(), EmulatorError> {
+        if !self.watches_stacks() {
+            return Ok(());
+        }
+        let log_from = self.session.as_ref().map_or(0, |session| session.log_from);
+        let deadline = Instant::now() + GDB_SERVER_WAIT;
+        while Instant::now() < deadline {
+            let log = read_text(&self.user_dir.join("log").join("eden_log.txt"));
+            if log
+                .get(log_from..)
+                .is_some_and(|tail| tail.contains("Starting server on port"))
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+        let script = format!(
+            "rm -f {GDB_INPUT} {GDB_OUTPUT}; touch {GDB_INPUT}; \
+             tail -f {GDB_INPUT} | gdb -q -nx -ex 'set pagination off' -ex 'set confirm off' -ex 'set width 0' \
+             -ex 'target remote 127.0.0.1:{GDB_PORT}' -ex 'continue' > {GDB_OUTPUT} 2>&1"
+        );
+        docker(&["exec", "-d", CONTAINER, "sh", "-c", &script])?;
+        Ok(())
+    }
+
+    fn read_backtraces(&mut self) -> Option<String> {
+        if !self.watches_stacks() || !self.container_running() {
+            return None;
+        }
+        let mark = format!("--- carafe-lab {} ---", unix_millis());
+        self.exec("kill -INT $(pgrep -x gdb)").ok()?;
+        thread::sleep(GDB_INTERRUPT_WAIT);
+        let commands = format!(
+            "cat >> {GDB_INPUT} <<'EOF'\necho {mark}\\n\nmonitor get info\ninfo threads\n\
+             thread apply all bt 40\necho {GDB_END}\\n\ncontinue\nEOF"
+        );
+        self.exec(&commands).ok()?;
+        let deadline = Instant::now() + GDB_ANSWER_WAIT;
+        while Instant::now() < deadline {
+            let output = self.exec(&format!("cat {GDB_OUTPUT}")).ok()?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Some(start) = text.rfind(&mark)
+                && let Some(length) = text[start..].find(GDB_END)
+            {
+                let body = &text[start + mark.len()..start + length];
+                return Some(stacks::annotate(body.trim()));
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+        None
     }
 
     fn boot_in_session(&mut self, dir: &Path, name: &str) -> Result<(), EmulatorError> {
-        let alive = self
-            .session
-            .as_ref()
-            .is_some_and(|session| session.nsp_dir == dir)
-            && self.container_running();
+        let alive = self.session.as_ref().is_some_and(|session| {
+            session.nsp_dir == dir && session.diagnostics == self.diagnostics
+        }) && self.container_running();
         let readings = if alive {
             self.memory_readings()
         } else {
@@ -669,6 +750,7 @@ impl Eden {
             seen: replies.last().map_or(0, |reply| reply.number),
             booted_at: 0,
             log_from: 0,
+            diagnostics: self.diagnostics.clone(),
         });
         Ok(())
     }
@@ -880,6 +962,18 @@ impl Eden {
 }
 
 impl Emulator for Eden {
+    fn diagnose(&mut self, diagnostics: &[Diagnostic]) {
+        self.diagnostics = diagnostics
+            .iter()
+            .filter(|diagnostic| !diagnostic.in_the_nsp())
+            .copied()
+            .collect();
+    }
+
+    fn backtraces(&mut self) -> Option<String> {
+        self.read_backtraces()
+    }
+
     fn launch(&mut self, nsp: &Path) -> Result<(), EmulatorError> {
         let started = self.start(nsp);
         started.map_err(|error| self.hide_keys(error))

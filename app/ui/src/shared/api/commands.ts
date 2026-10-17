@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CommandError } from "./bindings/CommandError";
+import type { Diagnostic } from "./bindings/Diagnostic";
 import type { Event } from "./bindings/Event";
 import type { FirmwareState } from "./bindings/FirmwareState";
 import type { GameProblems } from "./bindings/GameProblems";
@@ -27,6 +28,7 @@ const noRun: RunRequest = {
   nsp: null,
   rebuild: null,
   buildOnly: null,
+  diagnostics: null,
 };
 
 export const api = {
@@ -46,12 +48,19 @@ export const api = {
     scenario: string | null = null,
     video: "full" | "low" | "off" | null = null,
     like: string | null = null,
+    diagnostics: Diagnostic[] | null = null,
   ) => {
-    const request: RunRequest = { ...noRun, set, only, games, repeat, ab, clean, scenario, video, like };
+    const request: RunRequest = { ...noRun, set, only, games, repeat, ab, clean, scenario, video, like, diagnostics };
     return invoke<void>("start_run", { request });
   },
-  runReady: (nsp: string, rebuild: boolean, clean: boolean, scenario: string | null) => {
-    const request: RunRequest = { ...noRun, nsp, rebuild, clean, scenario };
+  runReady: (
+    nsp: string,
+    rebuild: boolean,
+    clean: boolean,
+    scenario: string | null,
+    diagnostics: Diagnostic[] | null = null,
+  ) => {
+    const request: RunRequest = { ...noRun, nsp, rebuild, clean, scenario, diagnostics };
     return invoke<void>("start_run", { request });
   },
   readNsp: (path: string) => invoke<NspInfo>("read_nsp", { path }),

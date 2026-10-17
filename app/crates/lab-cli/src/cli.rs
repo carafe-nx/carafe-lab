@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use lab_core::diagnostics::{self, Diagnostic};
 use lab_core::emulator::{Gpu, Video};
 use lab_core::lang::Lang;
 
@@ -47,6 +48,9 @@ Options:
   --build-only        build the NSPs and stop
   --clean             a new Eden for every launch instead of one for the whole run
   --no-retry          do not run a failed game again with detailed logs (A/B runs and probes never do)
+  --diag <a,b,…>      run with these diagnostics: verbose (runtime traces with Wine's output), profiler, hud (DXVK's
+                      full HUD), stacks (thread stacks of a hung game in backtraces.txt), eden-debug (Eden's log at
+                      the debug level); a retry after a failure picks its own
   --scenario <s>      every game runs this scenario: standard, or a file relative to lab.json
   --like <run>        run the games of this past run again with the runtime and Eden image it ran with;
                       every run keeps them from now on
@@ -154,6 +158,8 @@ pub struct Args {
     pub apply: bool,
     /// `--no-retry`.
     pub no_retry: bool,
+    /// `--diag`.
+    pub diagnostics: Vec<Diagnostic>,
     /// `--like`: the folder of a past run to repeat with its own parts.
     pub like: Option<String>,
     /// `--nsp`, once for every ready NSP to run.
@@ -234,6 +240,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         clean: false,
         apply: false,
         no_retry: false,
+        diagnostics: Vec::new(),
         like: None,
         nsp: Vec::new(),
         rebuild: false,
@@ -320,6 +327,10 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             "--clean" => parsed.clean = true,
             "--apply" => parsed.apply = true,
             "--no-retry" => parsed.no_retry = true,
+            "--diag" => {
+                parsed.diagnostics = diagnostics::parse_list(&value("diagnostics")?)
+                    .map_err(|_| ArgsError::Value(arg.clone(), "names such as verbose,stacks"))?;
+            }
             "--no-open" => parsed.no_open = true,
             "--json" => parsed.json = true,
             other if other.starts_with("--") => return Err(ArgsError::Option(other.to_owned())),

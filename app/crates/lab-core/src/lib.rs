@@ -5,6 +5,8 @@
 //! crates around it.
 
 pub mod config;
+pub mod crash;
+pub mod diagnostics;
 pub mod emulator;
 pub mod firmware;
 pub mod frames;
@@ -21,6 +23,8 @@ pub mod redact;
 pub mod resources;
 pub mod roadmap;
 pub mod scenario;
+pub mod stacks;
 pub mod time;
+pub mod timeline;
 pub mod versions;
 pub mod view;

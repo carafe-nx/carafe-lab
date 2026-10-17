@@ -10,8 +10,8 @@ use std::time::{Instant, UNIX_EPOCH};
 use carafe_core::BuildRecord;
 use carafe_core::cancel::CancelToken;
 use carafe_core::ports::{BuildProgress, PackTarget, Packer};
-use carafe_core::settings::DxvkHud;
 use carafe_core::wizard::{self, BuildRequest};
+use lab_core::diagnostics::{self, Diagnostic};
 use lab_core::lang::Lang;
 use lab_core::milestones::Stage;
 use lab_core::redact::redact;
@@ -43,6 +43,8 @@ pub struct Planned {
     pub threshold: u32,
     /// Where its NSP comes from.
     pub nsp: NspSource,
+    /// The diagnostics its launches run with.
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Where a planned game's NSP comes from.
@@ -225,41 +227,59 @@ impl Symptom {
         })
     }
 
-    fn label(self) -> &'static str {
+    /// Returns the diagnostics that tell most about this kind of failure.
+    #[must_use]
+    pub fn diagnostics(self) -> Vec<Diagnostic> {
         match self {
-            Self::NoFirstFrame => "verbose traces and the profiler",
-            Self::Crashed | Self::Other => "verbose traces",
-            Self::Picture => "verbose traces and the full DXVK HUD",
+            Self::NoFirstFrame => vec![
+                Diagnostic::Verbose,
+                Diagnostic::Profiler,
+                Diagnostic::Stacks,
+            ],
+            Self::Crashed | Self::Other => vec![Diagnostic::Verbose],
+            Self::Picture => vec![Diagnostic::Verbose, Diagnostic::Hud],
         }
     }
 }
 
-/// Returns `game` once more with detailed logs chosen by how `report` says it failed: the runtime's verbose traces
-/// always, its profiler for a game that never reached its first frame, the full DXVK HUD for a failed picture check;
-/// `None` when the game did not fail, could not be built or is a ready NSP run as it is.
+/// Returns `game` with `diagnostics` turned on as well: those of the NSP in its build request, all of them in the
+/// list the engine hands the emulator, their names in its label.
+#[must_use]
+pub fn with_diagnostics(mut game: Planned, diagnostics: &[Diagnostic]) -> Planned {
+    if let Ok(request) = game.request.as_mut() {
+        for diagnostic in diagnostics {
+            diagnostic.apply(&mut request.settings);
+        }
+    }
+    let mut all: Vec<Diagnostic> = game
+        .diagnostics
+        .iter()
+        .chain(diagnostics)
+        .copied()
+        .collect();
+    all.sort_unstable();
+    all.dedup();
+    if !diagnostics.is_empty() {
+        game.label = format!("{} · {}", game.label, diagnostics::label(diagnostics));
+    }
+    game.diagnostics = all;
+    game
+}
+
+/// Returns `game` once more with the diagnostics chosen by how `report` says it failed; `None` when the game did not
+/// fail, could not be built or is a ready NSP run as it is.
 #[must_use]
 pub fn detailed(game: &Planned, report: &GameReport) -> Option<Planned> {
     if matches!(game.nsp, NspSource::Ready(_)) {
         return None;
     }
     let symptom = Symptom::of(report)?;
-    let mut request = game.request.as_ref().ok()?.clone();
-    request.settings.debug.verbose = true;
-    match symptom {
-        Symptom::NoFirstFrame => request.settings.debug.profile = true,
-        Symptom::Picture => request.settings.graphics.hud = DxvkHud::Full,
-        Symptom::Crashed | Symptom::Other => {}
-    }
-    Some(Planned {
+    game.request.as_ref().ok()?;
+    let again = Planned {
         name: format!("{}{DETAILED}", game.name),
-        folder: game.folder.clone(),
-        request: Ok(request),
-        entropy: game.entropy,
-        label: format!("{} · {}", game.label, symptom.label()),
-        scenario: game.scenario.clone(),
-        threshold: game.threshold,
-        nsp: game.nsp.clone(),
-    })
+        ..game.clone()
+    };
+    Some(with_diagnostics(again, &symptom.diagnostics()))
 }
 
 impl Engine<'_> {
@@ -444,6 +464,7 @@ impl Engine<'_> {
             &game.name,
             self.stamp.carafe_commit.as_deref(),
         );
+        self.emulator.diagnose(&game.diagnostics);
         let runner = Runner::new(&mut *self.emulator, clock, record.title_id, nsp, &game_dir)
             .with_baseline(baseline, game.threshold)
             .with_input(record.settings.input.clone())
@@ -682,11 +703,21 @@ mod tests {
             scenario: Scenario::standard(120),
             threshold: 20,
             nsp: NspSource::Build,
+            diagnostics: Vec::new(),
         };
         let stalled = detailed(&planned, &failed_at(wait.clone(), "not reached in 120 s")).unwrap();
         assert_eq!(stalled.name, "G · detailed");
         let settings = &stalled.request.as_ref().unwrap().settings;
         assert!(settings.debug.verbose && settings.debug.profile);
+        assert_eq!(
+            stalled.diagnostics,
+            [
+                Diagnostic::Verbose,
+                Diagnostic::Profiler,
+                Diagnostic::Stacks
+            ]
+        );
+        assert_eq!(stalled.label, "dxvk · verbose, profiler, stacks");
         let crashed = detailed(
             &planned,
             &failed_at(wait, "the game crashed (exit code 0xc0000005)"),
@@ -705,7 +736,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             black.request.as_ref().unwrap().settings.graphics.hud,
-            DxvkHud::Full
+            carafe_core::settings::DxvkHud::Full
         );
         let mut passed = failed_at(Step::Launch, "");
         if let Some(scenario) = passed.scenario.as_mut() {

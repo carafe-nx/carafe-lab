@@ -84,7 +84,16 @@ impl GameReport {
             .steps
             .iter()
             .find(|step| step.outcome == Outcome::Fail)?;
-        Some(format!("{}: {}", step_title(step, Lang::En), step.detail))
+        let crash = self
+            .scenario
+            .as_ref()?
+            .launches
+            .iter()
+            .find_map(|launch| launch.crash.as_deref());
+        Some(match crash {
+            Some(crash) => format!("{}: {} ({crash})", step_title(step, Lang::En), step.detail),
+            None => format!("{}: {}", step_title(step, Lang::En), step.detail),
+        })
     }
 
     /// Returns the outcome of the game: a failed build fails it, otherwise the worst step decides.
@@ -683,6 +692,7 @@ mod tests {
                     resources: None,
                     problems: None,
                     frames: None,
+                    crash: None,
                 }],
                 save: Vec::new(),
                 emulator_gaps: Vec::new(),

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { useLab } from "@/features/lab/LabProvider";
 import { lastSeconds } from "@/features/lab/outcome";
+import type { Diagnostic } from "@/shared/api/bindings/Diagnostic";
 import type { GameView } from "@/shared/api/bindings/GameView";
 import type { RunSummary } from "@/shared/api/bindings/RunSummary";
 import { api, errorText } from "@/shared/api/commands";
@@ -17,6 +18,8 @@ import styles from "@/shared/ui/lab.module.css";
 import { AbPlan } from "./AbPlan";
 import plans from "./PlansPage.module.css";
 import { ReadyPlan } from "./ReadyPlan";
+
+const DIAGNOSTICS: Diagnostic[] = ["verbose", "profiler", "hud", "stacks", "eden-debug"];
 
 type Estimate = { launches: number; seconds: number; unknown: number };
 
@@ -43,6 +46,7 @@ export function PlansPage() {
   const [error, setError] = useState<string | null>(null);
   const [clean, setClean] = useState(false);
   const [scenario, setScenario] = useState("");
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const games = lab.data?.games ?? [];
   const scenarioFiles = [...new Set(games.flatMap((game) => (game.scenarioFile ? [game.scenarioFile] : [])))];
   const sets = Object.entries(lab.data?.sets ?? {});
@@ -50,7 +54,7 @@ export function PlansPage() {
   const start = (set: string | null, chosen: string[] | null = null, repeat = 1, ab: string | null = null) => {
     setError(null);
     api
-      .startRun(set, null, chosen, repeat, ab, clean, scenario || null, ab ? "low" : null)
+      .startRun(set, null, chosen, repeat, ab, clean, scenario || null, ab ? "low" : null, null, diagnostics)
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -70,7 +74,7 @@ export function PlansPage() {
   const startReady = (nsp: string, rebuild: boolean) => {
     setError(null);
     api
-      .runReady(nsp, rebuild, clean, scenario || null)
+      .runReady(nsp, rebuild, clean, scenario || null, diagnostics)
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -96,6 +100,27 @@ export function PlansPage() {
             ))}
           </select>
         </label>
+      </div>
+      <div className={controls.field}>
+        <span className={controls.fieldLabel}>{t("diagnostics.title")}</span>
+        <div className={plans.choices}>
+          {DIAGNOSTICS.map((name) => (
+            <label key={name} className={plans.choice} htmlFor={`diag-${name}`} title={t(`diagnostics.${name}Hint`)}>
+              <input
+                id={`diag-${name}`}
+                type="checkbox"
+                checked={diagnostics.includes(name)}
+                onChange={() =>
+                  setDiagnostics((current) =>
+                    current.includes(name) ? current.filter((entry) => entry !== name) : [...current, name],
+                  )
+                }
+              />
+              <span>{t(`diagnostics.${name}`)}</span>
+            </label>
+          ))}
+        </div>
+        <span className={styles.muted}>{t("diagnostics.hint")}</span>
       </div>
       <OwnPlan
         games={games}

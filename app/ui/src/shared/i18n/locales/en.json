@@ -130,6 +130,20 @@
     "build": "Only build for the console",
     "buildHint": "Builds the NSPs without running them; History lists them to check on the Switch"
   },
+  "diagnostics": {
+    "title": "Diagnostics",
+    "hint": "Each costs some speed; a failed game runs again with the ones that suit its failure by itself.",
+    "verbose": "runtime traces",
+    "verboseHint": "The runtime's verbose traces with Wine's output and errors: stdout.txt, stderr.txt",
+    "profiler": "profiler",
+    "profilerHint": "The runtime's profiler",
+    "hud": "DXVK HUD",
+    "hudHint": "DXVK's full HUD on the picture",
+    "stacks": "thread stacks",
+    "stacksHint": "Eden's gdb stub: a game that misses its milestone leaves the stacks of all its threads in backtraces.txt",
+    "eden-debug": "Eden debug log",
+    "eden-debugHint": "Eden's log at the debug level"
+  },
   "console": {
     "title": "On the console",
     "works": "Works on the console",

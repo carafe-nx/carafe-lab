@@ -19,6 +19,7 @@ use carafe_core::wizard::BuildRequest;
 use carafe_folder::DiskFolderInspector;
 use carafe_pack::HacBrewPacker;
 use lab_core::config::{self, Config, Game};
+use lab_core::diagnostics::Diagnostic;
 use lab_core::emulator::{EdenCpu, Gpu};
 use lab_core::lang::Lang;
 use lab_core::local::{self, LocalSettings};
@@ -32,7 +33,7 @@ use lab_core::time::Utc;
 use lab_core::versions;
 use lab_core::view::LabView;
 use lab_eden::Eden;
-use lab_run::engine::{Engine, Event, NspSource, Planned, READY};
+use lab_run::engine::{Engine, Event, NspSource, Planned, READY, with_diagnostics};
 use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
 use lab_run::ready::{self, ReadyNsp};
@@ -664,7 +665,7 @@ impl Lab {
         let threshold = game.map_or(versions::DEFAULT_THRESHOLD, |game| game.threshold);
         let folder = PathBuf::from(&record.source.folder);
         if self.args.rebuild {
-            return Planned {
+            let planned = Planned {
                 entropy: 0,
                 name,
                 folder,
@@ -673,9 +674,18 @@ impl Lab {
                 scenario,
                 threshold,
                 nsp: NspSource::Rebuild(Box::new(record)),
+                diagnostics: Vec::new(),
             };
+            return with_diagnostics(planned, &self.args.diagnostics);
         }
-        Planned {
+        let of_emulator: Vec<Diagnostic> = self
+            .args
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| !diagnostic.in_the_nsp())
+            .copied()
+            .collect();
+        let planned = Planned {
             entropy: 0,
             name: format!("{name}{READY}"),
             folder,
@@ -688,7 +698,9 @@ impl Lab {
             scenario,
             threshold,
             nsp: NspSource::Ready(Box::new(nsp)),
-        }
+            diagnostics: Vec::new(),
+        };
+        with_diagnostics(planned, &of_emulator)
     }
 
     fn run_games(mut self, config: &Config, set: Option<&str>) -> Result<ExitCode, String> {
@@ -760,7 +772,7 @@ impl Lab {
                 request.settings = settings.clone();
                 request
             });
-        Planned {
+        let planned = Planned {
             entropy: config::name_entropy(&name),
             name,
             folder: game.folder.clone(),
@@ -772,7 +784,9 @@ impl Lab {
                 .unwrap_or_else(|| game.scenario(self.timeout)),
             threshold: game.threshold,
             nsp: NspSource::Build,
-        }
+            diagnostics: Vec::new(),
+        };
+        with_diagnostics(planned, &self.args.diagnostics)
     }
 
     fn play(mut self, config: &Config, name: &str) -> Result<ExitCode, String> {
@@ -1165,6 +1179,7 @@ fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> 
         scenario: run.scenario.clone(),
         threshold: versions::DEFAULT_THRESHOLD,
         nsp: NspSource::Build,
+        diagnostics: Vec::new(),
     }
 }
 

@@ -12,6 +12,7 @@ use carafe_core::ports::{FolderInspector, KeysChecker, KeysReport};
 use carafe_folder::DiskFolderInspector;
 use carafe_keys::FileKeysChecker;
 use lab_core::config;
+use lab_core::diagnostics::{self, Diagnostic};
 use lab_core::emulator::Video;
 use lab_core::firmware;
 use lab_core::local::{self, KeysSource, LocalSettings};
@@ -246,6 +247,8 @@ pub struct RunRequest {
     pub rebuild: Option<bool>,
     /// Only build the NSPs, for the console.
     pub build_only: Option<bool>,
+    /// The diagnostics the games run with.
+    pub diagnostics: Option<Vec<Diagnostic>>,
 }
 
 /// What a ready NSP was built from.
@@ -348,6 +351,7 @@ pub async fn start_run(
         nsp,
         rebuild,
         build_only,
+        diagnostics,
     } = request;
     blocking(move || {
         let work = lab.config()?.work;
@@ -391,6 +395,12 @@ pub async fn start_run(
             if rebuild == Some(true) {
                 args.push("--rebuild".to_owned());
             }
+        }
+        if let Some(list) = diagnostics.filter(|list| !list.is_empty()) {
+            args.extend([
+                "--diag".to_owned(),
+                diagnostics::label(&list).replace(", ", ","),
+            ]);
         }
         if build_only == Some(true) {
             args.push("--build-only".to_owned());
