@@ -199,6 +199,8 @@ pub struct RunRequest {
     pub scenario: Option<String>,
     /// The live video: `full`, `low` or `off`; `None` means full.
     pub video: Option<String>,
+    /// The folder of a past run to repeat with the runtime and Eden image it ran with.
+    pub like: Option<String>,
 }
 
 /// Starts `carafe-lab run` in its own process, so closing the window does not stop it, as `request` asks.
@@ -222,6 +224,7 @@ pub async fn start_run(
         clean,
         scenario,
         video,
+        like,
     } = request;
     blocking(move || {
         let work = lab.config()?.work;
@@ -253,6 +256,12 @@ pub async fn start_run(
         }
         if let Some(video) = video.filter(|video| Video::parse(video).is_some()) {
             args.extend(["--video".to_owned(), video]);
+        }
+        if let Some(like) = like {
+            if !plain_name(&like) {
+                return Err("not a run folder".into());
+            }
+            args.extend(["--like".to_owned(), like]);
         }
         args.extend(["--json", "--who", "window"].map(str::to_owned));
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;

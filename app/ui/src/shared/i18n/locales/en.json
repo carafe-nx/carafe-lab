@@ -171,6 +171,7 @@
     "lab": "Lab commit",
     "edenImage": "Eden image",
     "repeat": "Run these games again",
+    "repeatExactly": "Repeat exactly: the same runtime and Eden",
     "mark": "Mark for comparing",
     "compare": "Compare ({{count}} of 2)"
   },

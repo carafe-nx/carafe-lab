@@ -46,6 +46,7 @@ const PAGE_LONGEST: Duration = Duration::from_secs(30 * 60);
 const QUEUE_POLL: Duration = Duration::from_secs(2);
 const PERF_WINDOW_MS: u64 = 10_000;
 const LOG_PROBLEMS_SHOWN: usize = 15;
+const KEPT_IMAGES: &str = "carafe-lab-eden-kept";
 const RUNTIME_VERSION: &str = match option_env!("CARAFE_RUNTIME_VERSION") {
     Some(version) => version,
     None => "dev",
@@ -74,9 +75,16 @@ struct Lab {
     carafe: PathBuf,
     image: String,
     desktop: PathBuf,
+    runtime: PathBuf,
     packer: HacBrewPacker,
     eden: Eden,
     scenario: Option<Scenario>,
+}
+
+struct KeptParts {
+    runtime: PathBuf,
+    image: String,
+    games: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -119,8 +127,17 @@ fn start(args: Args) -> Result<ExitCode, String> {
     let keys = console_files(args.keys.as_deref(), &config_path)?;
     let gpu = args.gpu.unwrap_or(config.gpu);
     let desktop = carafe_checkout(&config).join(DESKTOP);
+    let like = args
+        .like
+        .as_deref()
+        .map(|dir| kept_parts(&config, dir))
+        .transpose()?;
+    let runtime = like.as_ref().map_or_else(
+        || desktop.join("resources").join("carafe-runtime.bin"),
+        |kept| kept.runtime.clone(),
+    );
     let packer = HacBrewPacker::new(
-        desktop.join("resources").join("carafe-runtime.bin"),
+        runtime.clone(),
         desktop.join("binaries").join(hacbrewpack_name()),
     );
     let mut eden = Eden::new(
@@ -134,8 +151,17 @@ fn start(args: Args) -> Result<ExitCode, String> {
     .with_fresh_eden(args.clean)
     .with_video(args.video)
     .with_firmware(local_settings(&config_path)?.firmware);
-    if let Some(image) = &config.eden_image {
-        eden = eden.with_image(image.clone());
+    let image = match &like {
+        Some(kept) => kept.image.clone(),
+        None => config
+            .eden_image
+            .clone()
+            .unwrap_or_else(|| lab_eden::IMAGE.to_owned()),
+    };
+    eden = eden.with_image(image.clone());
+    let mut args = args;
+    if let Some(kept) = &like {
+        args.games.clone_from(&kept.games);
     }
     let timeout = args.timeout.unwrap_or(config.timeout);
     let scenario = args
@@ -153,11 +179,9 @@ fn start(args: Args) -> Result<ExitCode, String> {
         args,
         keys,
         carafe: carafe_checkout(&config),
-        image: config
-            .eden_image
-            .clone()
-            .unwrap_or_else(|| lab_eden::IMAGE.to_owned()),
+        image,
         desktop,
+        runtime,
         packer,
         eden,
     };
@@ -428,6 +452,73 @@ fn file_hash(path: &Path) -> Option<String> {
     }
     let digest = format!("{:x}", hasher.finalize());
     Some(digest[..12].to_owned())
+}
+
+fn kept_runtime(work: &Path, hash: &str) -> PathBuf {
+    work.join("runtimes").join(format!("{hash}.bin"))
+}
+
+fn kept_image(id: &str) -> String {
+    format!("{KEPT_IMAGES}:{id}")
+}
+
+fn keep_parts(work: &Path, runtime: &Path, image: &str, stamp: &RunStamp) {
+    if let Some(hash) = &stamp.runtime_hash {
+        let kept = kept_runtime(work, hash);
+        if !kept.is_file()
+            && kept
+                .parent()
+                .is_some_and(|parent| fs::create_dir_all(parent).is_ok())
+        {
+            let staged = kept.with_extension("part");
+            if fs::copy(runtime, &staged).is_ok() {
+                let _ = fs::rename(&staged, &kept);
+            }
+        }
+    }
+    if let Some(id) = &stamp.eden_image {
+        let tag = kept_image(id);
+        if tag != image {
+            let _ = std::process::Command::new("docker")
+                .args(["tag", image, &tag])
+                .output();
+        }
+    }
+}
+
+fn kept_parts(config: &Config, dir: &str) -> Result<KeptParts, String> {
+    let run = history::read(&config.work.join("runs"), dir)
+        .ok_or_else(|| format!("{dir}: no such run"))?;
+    if run.verdict.is_some() || run.planned.iter().any(|name| name.ends_with(VARIANT_A)) {
+        return Err(format!(
+            "{dir} is an A/B run; start it again from the Plans screen"
+        ));
+    }
+    let hash = run
+        .stamp
+        .runtime_hash
+        .ok_or_else(|| format!("{dir} does not say which runtime it packed with"))?;
+    let runtime = kept_runtime(&config.work, &hash);
+    if !runtime.is_file() {
+        return Err(format!(
+            "{dir} packed with runtime {hash}, which was not kept; only runs from now on keep theirs"
+        ));
+    }
+    let id = run
+        .stamp
+        .eden_image
+        .ok_or_else(|| format!("{dir} does not say which Eden image it ran"))?;
+    let image = kept_image(&id);
+    if image_id(&image).is_none() {
+        return Err(format!(
+            "{dir} ran Eden image {id}, which was not kept; only runs from now on keep theirs"
+        ));
+    }
+    Ok(KeptParts {
+        runtime,
+        image,
+        games: run.planned,
+    })
 }
 
 fn image_id(image: &str) -> Option<String> {
@@ -723,7 +814,7 @@ impl Lab {
         }
         let stamp = RunStamp {
             carafe_commit: git_commit_with_changes(&self.carafe),
-            runtime_hash: file_hash(&self.desktop.join("resources").join("carafe-runtime.bin")),
+            runtime_hash: file_hash(&self.runtime),
             lab_commit: git_commit_with_changes(&repository()),
             eden_image: if self.args.build_only {
                 None
@@ -731,12 +822,13 @@ impl Lab {
                 image_id(&self.image)
             },
         };
+        keep_parts(&self.work, &self.runtime, &self.image, &stamp);
         let mut engine = Engine {
             emulator: &mut self.eden,
             packer: &self.packer,
             keys: &self.keys,
             build_inputs: vec![
-                self.desktop.join("resources").join("carafe-runtime.bin"),
+                self.runtime.clone(),
                 self.desktop.join("binaries").join(hacbrewpack_name()),
             ],
             work: &self.work,

@@ -152,10 +152,10 @@ function RunCard({ run }: { run: RunSummary }) {
     setError(null);
     api.openPath(runPath(work, run.dir, ...rest)).catch((reason: unknown) => setError(errorText(reason)));
   };
-  const repeatRun = () => {
+  const repeatRun = (exactly: boolean) => {
     setError(null);
     api
-      .startRun(null, null, run.planned, 1)
+      .startRun(null, null, run.planned, 1, null, false, null, null, exactly ? run.dir : null)
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -243,9 +243,12 @@ function RunCard({ run }: { run: RunSummary }) {
           <Icon name="folder" size={14} />
           {t("history.openFolder")}
         </Button>
-        <Button variant="ghost" disabled={run.planned.length === 0 || run.verdict !== null} onClick={repeatRun}>
+        <Button variant="ghost" disabled={run.planned.length === 0 || run.verdict !== null} onClick={() => repeatRun(false)}>
           <Icon name="restart" size={14} />
           {t("history.repeat")}
+        </Button>
+        <Button variant="ghost" disabled={run.planned.length === 0 || run.verdict !== null} onClick={() => repeatRun(true)}>
+          {t("history.repeatExactly")}
         </Button>
       </div>
     </aside>

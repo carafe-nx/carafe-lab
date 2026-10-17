@@ -27,8 +27,9 @@ export const api = {
     clean = false,
     scenario: string | null = null,
     video: "full" | "low" | "off" | null = null,
+    like: string | null = null,
   ) => {
-    const request: RunRequest = { set, only, games, repeat, ab, clean, scenario, video };
+    const request: RunRequest = { set, only, games, repeat, ab, clean, scenario, video, like };
     return invoke<void>("start_run", { request });
   },
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),

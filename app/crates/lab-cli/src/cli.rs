@@ -45,6 +45,8 @@ Options:
   --build-only        build the NSPs and stop
   --clean             a new Eden for every launch instead of one for the whole run
   --scenario <s>      every game runs this scenario: standard, or a file relative to lab.json
+  --like <run>        run the games of this past run again with the runtime and Eden image it ran with;
+                      every run keeps them from now on
   --video <v>         full, low (about five pictures a second, for measuring) or off; default full
   --no-open           do not open the live page in the browser
   --json              print the run as JSON lines, one event each, without the live page;
@@ -138,6 +140,8 @@ pub struct Args {
     pub clean: bool,
     /// `--apply`.
     pub apply: bool,
+    /// `--like`: the folder of a past run to repeat with its own parts.
+    pub like: Option<String>,
     /// `--scenario`: `standard` or a scenario file relative to `lab.json`.
     pub scenario: Option<String>,
     /// `--video`.
@@ -210,6 +214,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         build_only: false,
         clean: false,
         apply: false,
+        like: None,
         scenario: None,
         video: Video::Full,
         json: false,
@@ -264,6 +269,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             }
             "--ab" => parsed.ab = Some(value("settings as JSON")?),
             "--scenario" => parsed.scenario = Some(value("standard or a scenario file")?),
+            "--like" => parsed.like = Some(value("a run folder")?),
             "--minutes" => parsed.minutes = number(arg, value("minutes")?, "minutes")?,
             "--hold" => {
                 let seconds: f64 = number(arg, value("seconds")?, "seconds")?;

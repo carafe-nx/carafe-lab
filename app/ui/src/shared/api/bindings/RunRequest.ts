@@ -35,4 +35,8 @@ scenario: string | null,
 /**
  * The live video: `full`, `low` or `off`; `None` means full.
  */
-video: string | null, };
+video: string | null, 
+/**
+ * The folder of a past run to repeat with the runtime and Eden image it ran with.
+ */
+like: string | null, };

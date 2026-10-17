@@ -161,6 +161,9 @@ emulator.
   n times in a row. A game that fails only sometimes shows its rate in the window's library ("failed 2 of 10").
 - `--scenario standard` or `--scenario scenarios/<file>.json` runs every game of the plan with that scenario instead
   of its own; the Plans screen has the same choice.
+- Every run keeps what it ran with: the runtime archive as `<work>/runtimes/<hash>.bin`, once for each hash, and the
+  Eden image under the tag `carafe-lab-eden-kept:<id>`. `run --like <run folder>`, or History's "Repeat exactly",
+  runs that run's games again with them instead of the current ones; the games' settings come from `lab.json`.
 - `--video low` sends the live picture at about five frames a second, `--video off` sends none (`CARAFE_VIDEO` in
   the container), so the video takes little or nothing from the game while it is measured; A/B runs from the window
   use `low`.

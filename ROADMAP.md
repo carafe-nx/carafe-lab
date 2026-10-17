@@ -26,7 +26,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 3. Versions and history
 
-- [ ] `feature` "Repeat exactly": a past run again with its own runtime and Eden image, not the current ones
 - [ ] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
 - [ ] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats
 - [ ] `feature` Only changes larger than the spread between repeats are flagged
@@ -73,10 +72,8 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `game` Need for Speed Underground sometimes stops right after its swapchain is made: no present for 150–300 s
 - [ ] `game` Once in 2 launches DXVK's `dxvk-cs` thread crashed with 0xc0000005 in `d3d9.dll` (before `0027`–`0030`)
 - [ ] `bug` Eden: DXVK's HUD text stays invisible with DXVK's descriptor buffer in the cloud's synthetic test (`d3d9clear`)
-- [ ] `bug` Closing as from the HOME menu does not end OpenTTD within 60 s, so it writes no save data. The bench now sends SIGUSR1 instead of F5, which Qt never matches under Xvfb; Eden closes like HOME on it (`0025`) and no longer hangs at exit after a debug string (`0026`); a test NRO closes in 3 of 3. With OpenTTD on the WSL GPU (2 runs) Eden logs the request, the overlay unlocks the exit at once, but Eden still runs at 60 s; the Info lines after it never reach the log, so where it stops is unknown — next: `flush_line`, a host backtrace, and a run with `--gpu software` against the shader compiler's exit hang
 - [ ] `feature` Eden: lay out a 39-bit process with ASLR as the console's loader does, instead of code at 64 GiB (`0008`)
 - [ ] `bug` "Save data survived the restart" fails when the game itself deletes a file (OpenTTD's `hwaccel.dat`); compare the save at the close with the save at the next start; a draft with tests is in `carafe-bench-fixes.zip` (`save_kept.rs`), it needs a save snapshot taken before Wine rewrites the registry
-- [ ] `feature` Live page: the emulator's screen in a Switch frame, buttons light up when pressed
 - [ ] `bug` Eden's RenameFile fails when the target exists; Wine's registry save retries every 3 s
 - [ ] `bug` WSL GPU: Eden crashes with SIGSEGV after Need for Speed Underground ends itself; with software rendering it just stops
 - [ ] `bug` WSL GPU: Qualcomm's shader compiler hangs when a program exits (`llvm_shutdown` in its `fini` waits on a mutex), so `carafe-bench gpu` never returns
@@ -85,6 +82,9 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` "Repeat exactly": a past run again with its own runtime and Eden image, not the current ones
+- [x] `bug` Closing as from the HOME menu ends OpenTTD and it writes its save: the hang was Mesa's stop crash (`patches/mesa/0002`)
+- [x] `feature` Live page: the emulator's screen in a Switch frame, buttons light up when pressed (the Run screen)
 - [x] `feature` Full logs compressed for failures and recent runs; a summary for older passing runs (`tidy`)
 - [x] `feature` `report.json` with milestones, step times, frame times and the reason for a failure
 - [x] `feature` A screenshot every few seconds of a launch: a small picture every 10 s in `timeline/`
