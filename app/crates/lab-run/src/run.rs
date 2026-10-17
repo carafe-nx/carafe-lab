@@ -12,6 +12,7 @@ use ts_rs::TS;
 
 use lab_core::input_check::{self, PressCheck};
 use lab_core::milestones::{Exit, Launch, Stage};
+use lab_core::perf::{self, PerfSample, PerfSummary};
 use lab_core::picture::{PatternCheck, Thumbnail};
 use lab_core::scenario::{Milestone, Scenario, Step};
 
@@ -139,6 +140,12 @@ pub trait Emulator {
 
     /// Ends whatever the emulator keeps running between games, once the run has no more games for it.
     fn finish(&mut self) {}
+
+    /// Returns the emulator's performance readings since the current or last launch started; empty when it does
+    /// not tell them.
+    fn launch_perf(&self) -> Vec<PerfSample> {
+        Vec::new()
+    }
 }
 
 /// Time for the runner: real in a run, simulated in tests.
@@ -196,6 +203,9 @@ pub struct LaunchRecord {
     pub launch: Launch,
     /// Folder with its logs, relative to the game's folder of the run.
     pub logs: String,
+    /// The emulator's performance while the game drew; `None` when the emulator does not tell it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub perf: Option<PerfSummary>,
 }
 
 /// Everything a scenario found for one game.
@@ -520,6 +530,7 @@ impl<'a> Runner<'a> {
             number,
             launch: Launch::default(),
             logs: format!("launch-{number}"),
+            perf: None,
         });
         self.launch_open = true;
         self.pressed.clear();
@@ -739,6 +750,7 @@ impl<'a> Runner<'a> {
         };
         let logs = self.emulator.logs(self.title);
         record.launch = Launch::read(&logs.overlay, &logs.runtime);
+        record.perf = perf::summarize(&self.emulator.launch_perf());
         let dest = self.dir.join(&record.logs);
         let _ = self.emulator.take_logs(self.title, &dest);
     }

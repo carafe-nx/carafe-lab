@@ -13,6 +13,7 @@ use carafe_folder::DiskFolderInspector;
 use carafe_keys::FileKeysChecker;
 use lab_core::config;
 use lab_core::local::{self, KeysSource, LocalSettings};
+use lab_core::perf::{self, PerfSample};
 use lab_core::scenario::Scenario;
 use lab_core::view::LabView;
 use lab_run::history::{self, EVENTS_FILE, RunSummary};
@@ -415,6 +416,38 @@ pub async fn open_path(lab: State<'_, Arc<Lab>>, path: String) -> Result<(), Com
             .spawn()
             .map(|_| ())
             .map_err(|error| CommandError::from(error.to_string()))
+    })
+    .await
+}
+
+/// Returns the emulator's performance readings of the last `seconds` seconds, oldest first; empty when the one Eden
+/// is not running or tells nothing.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.json` is broken.
+#[tauri::command]
+pub async fn live_perf(
+    lab: State<'_, Arc<Lab>>,
+    seconds: u64,
+) -> Result<Vec<PerfSample>, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let file = lab
+            .config()?
+            .work
+            .join("eden")
+            .join("user")
+            .join("control")
+            .join("stats");
+        let text = fs::read_to_string(file).unwrap_or_default();
+        let samples = perf::parse_stats(&text);
+        let newest = samples.last().map_or(0, |sample| sample.at);
+        let from = newest.saturating_sub(seconds * 1000);
+        Ok(samples
+            .into_iter()
+            .filter(|sample| sample.at >= from)
+            .collect())
     })
     .await
 }

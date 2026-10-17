@@ -19,7 +19,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 - [ ] `feature` Library: tags, notes, link to a ROADMAP item
 - [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
-- [ ] `feature` Run screen: lit buttons on the Switch frame, milestones, FPS
+- [ ] `feature` Run screen: lit buttons on the Switch frame
 - [ ] `feature` Exact uncompressed screenshots for checks from Eden through the control channel
 - [ ] `feature` Video turned down or off during performance runs
 - [ ] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)
@@ -100,6 +100,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` FPS from Eden (`0047`): a live chart on the Run screen, median and worst-tenth FPS of each launch in the report and history
 - [x] `feature` A/B of a game setting: variants alternate, the run ends with a verdict on the first frame that counts only differences beyond the spread
 - [x] `feature` Loader: each launch's start-up stages live on the Run screen, and what to look at when a launch stops at one
 - [x] `feature` Scenario editor in the window: every step with its settings, reorder, add, remove; saved to the game's file in `scenarios/`

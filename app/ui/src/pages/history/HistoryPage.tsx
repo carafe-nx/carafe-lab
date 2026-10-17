@@ -196,6 +196,11 @@ function RunCard({ run }: { run: RunSummary }) {
               <span className={`${styles.muted} ${styles.oneLine}`} title={game.settings}>
                 {game.settings}
               </span>
+              {game.perf ? (
+                <span className={styles.muted}>
+                  {t("fps.summary", { median: Math.round(game.perf.medianFps), low: Math.round(game.perf.lowFps) })}
+                </span>
+              ) : null}
             </span>
             <Chip tone={outcomeTone(game.outcome)}>{t(`outcome.${game.outcome}`)}</Chip>
           </div>

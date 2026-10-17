@@ -266,6 +266,12 @@
     "faster": "B is {{percent}}% faster than A",
     "noise": "The difference is within the spread of the repeats, so it does not count"
   },
+  "fps": {
+    "title": "Frames per second",
+    "now": "{{fps}} fps · speed {{speed}}%",
+    "mark": "dashed line: 30 fps",
+    "summary": "{{median}} fps, worst {{low}}"
+  },
   "who": {
     "window": "the window",
     "command line": "the command line"

@@ -4,6 +4,7 @@ import type { Event } from "./bindings/Event";
 import type { KeysState } from "./bindings/KeysState";
 import type { LabStatus } from "./bindings/LabStatus";
 import type { LabView } from "./bindings/LabView";
+import type { PerfSample } from "./bindings/PerfSample";
 import type { RunSummary } from "./bindings/RunSummary";
 import type { Scenario } from "./bindings/Scenario";
 import type { Screen } from "./bindings/Screen";
@@ -22,6 +23,7 @@ export const api = {
   forgetKeys: () => invoke<KeysState>("forget_keys"),
   openPath: (path: string) => invoke<void>("open_path", { path }),
   readScreen: () => invoke<Screen | null>("read_screen"),
+  livePerf: (seconds: number) => invoke<PerfSample[]>("live_perf", { seconds }),
   readImage: (path: string) => invoke<string>("read_image", { path }),
   saveScenario: (game: string, scenario: Scenario) => invoke<string>("save_scenario", { game, scenario }),
 };

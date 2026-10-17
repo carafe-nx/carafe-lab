@@ -18,11 +18,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use carafe_core::TitleId;
 use carafe_core::settings::SwitchButton;
 use lab_core::emulator::{EdenCpu, Gpu};
+use lab_core::perf::{self, PerfSample};
 pub use lab_core::redact::redact;
 use sha2::{Digest, Sha256};
 
@@ -39,6 +40,7 @@ const CONTAINER_END_FILE: &str = "container-end.log";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_GRACE: Duration = Duration::from_secs(15);
+const PERF_MARGIN_MS: u64 = 2000;
 const ZERO_USER: &str = "00000000000000000000000000000000";
 const KEEP_FILE: &str = ".carafe-lab";
 const SHARED_DIRS: [&str; 7] = [
@@ -64,6 +66,7 @@ pub struct Eden {
     presses: PressLog,
     one_eden: bool,
     session: Option<Session>,
+    perf_from: Option<u64>,
 }
 
 struct Session {
@@ -147,6 +150,7 @@ impl Eden {
             presses: PressLog::default(),
             one_eden: false,
             session: None,
+            perf_from: None,
         }
     }
 
@@ -441,6 +445,7 @@ impl Eden {
         if let (Some(session), Some(reply)) = (self.session.as_mut(), replies.last()) {
             session.booted_at = reply.number;
         }
+        self.perf_from = Some(unix_millis().saturating_sub(PERF_MARGIN_MS));
         let _ = self.exec("xdotool mousemove 640 360");
         Ok(())
     }
@@ -797,6 +802,16 @@ impl Emulator for Eden {
         }
     }
 
+    fn launch_perf(&self) -> Vec<PerfSample> {
+        let Some(from) = self.perf_from else {
+            return Vec::new();
+        };
+        perf::parse_stats(&read_text(&self.control_dir().join("stats")))
+            .into_iter()
+            .filter(|sample| sample.at >= from)
+            .collect()
+    }
+
     fn finish(&mut self) {
         if self.one_eden {
             self.end_session();
@@ -811,6 +826,14 @@ impl Emulator for Eden {
             .find_map(|dir| find_named(dir, name))
             .map(|path| read_text(&path))
     }
+}
+
+fn unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn split_nsp(nsp: &Path) -> Result<(&Path, String), EmulatorError> {

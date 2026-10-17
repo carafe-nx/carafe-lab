@@ -11,6 +11,7 @@ pub mod lang;
 pub mod local;
 pub mod matrix;
 pub mod milestones;
+pub mod perf;
 pub mod picture;
 pub mod probes;
 pub mod redact;

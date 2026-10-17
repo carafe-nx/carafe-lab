@@ -28,6 +28,7 @@ pub fn run() {
             commands::forget_keys,
             commands::open_path,
             commands::read_screen,
+            commands::live_perf,
             commands::read_image,
         ])
         .run(tauri::generate_context!());

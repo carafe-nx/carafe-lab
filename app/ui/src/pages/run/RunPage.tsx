@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { useLab } from "@/features/lab/LabProvider";
 import { outcomeTone, runPath } from "@/features/lab/outcome";
+import { FpsChart } from "@/features/lab/FpsChart";
 import { StepLine } from "@/features/lab/StepLine";
 import { folderName, useRunEvents } from "@/features/lab/useRunEvents";
 import type { Event } from "@/shared/api/bindings/Event";
@@ -118,6 +119,7 @@ export function RunPage() {
   const summary = runs.data?.find((entry) => entry.dir === shownDir) ?? null;
   const derived = derive(events, summary?.planned ?? []);
   const screen = usePolling(api.readScreen, 0);
+  const perf = usePolling(() => api.livePerf(90), live ? 2000 : 0);
   const [control, setControl] = useState(false);
   const [reloads, setReloads] = useState(0);
   const launches = events.filter(
@@ -235,6 +237,7 @@ export function RunPage() {
           ) : null}
         </div>
         <div className={run.column}>
+          {showLive && (perf.data?.length ?? 0) > 0 ? <FpsChart samples={perf.data ?? []} /> : null}
           <span className={styles.label}>{t("run.log")}</span>
           {events.length > 0 ? (
             <div className={run.log}>

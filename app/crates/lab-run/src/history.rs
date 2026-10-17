@@ -8,6 +8,7 @@ use ts_rs::TS;
 
 use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::Outcome;
+use lab_core::perf::PerfSummary;
 
 /// The summary every run keeps next to its report and rewrites after every game.
 pub const SUMMARY_FILE: &str = "summary.json";
@@ -67,6 +68,9 @@ pub struct GameSummary {
     /// Seconds from its first launch to its first frame; `None` when it never got there.
     #[serde(default)]
     pub first_frame: Option<f64>,
+    /// The emulator's performance during its first launch; `None` when the emulator did not tell it.
+    #[serde(default)]
+    pub perf: Option<PerfSummary>,
 }
 
 /// What each variant of an A/B run gave and whether they differ.
@@ -178,6 +182,11 @@ impl RunSummary {
                 seconds: game_seconds(game),
                 dir: game.dir.clone(),
                 first_frame: first_frame(game),
+                perf: game
+                    .scenario
+                    .as_ref()
+                    .and_then(|scenario| scenario.launches.first())
+                    .and_then(|launch| launch.perf),
             })
             .collect();
         Self {
@@ -289,6 +298,7 @@ mod tests {
             seconds: 0.0,
             dir: String::new(),
             first_frame,
+            perf: None,
         }
     }
 

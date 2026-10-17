@@ -652,6 +652,7 @@ mod tests {
                     number: 1,
                     launch: Launch::default(),
                     logs: "launch-1".to_owned(),
+                    perf: None,
                 }],
                 save: Vec::new(),
                 emulator_gaps: Vec::new(),
