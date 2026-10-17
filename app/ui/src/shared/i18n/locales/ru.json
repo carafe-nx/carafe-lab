@@ -1,0 +1,211 @@
+{
+  "nav": {
+    "label": "Разделы",
+    "library": "Библиотека",
+    "plans": "Планы",
+    "run": "Прогон",
+    "history": "История",
+    "emulator": "Эмулятор",
+    "scenarios": "Сценарии"
+  },
+  "common": {
+    "dismiss": "Скрыть"
+  },
+  "lab": {
+    "broken": "lab.json не читается",
+    "noKeys": "Нет файлов консоли"
+  },
+  "emulator": {
+    "checking": "Проверяю эмулятор…",
+    "busy": "Занят: {{who}} · {{what}}",
+    "free": "Эмулятор свободен",
+    "waiting_one": "{{count}} в очереди",
+    "waiting_few": "{{count}} в очереди",
+    "waiting_many": "{{count}} в очереди",
+    "waiting_other": "{{count}} в очереди",
+    "queued": "Ждёт: {{who}} · {{what}}",
+    "work": "Рабочая папка"
+  },
+  "docker": {
+    "missing": "Docker не установлен",
+    "stopped": "Docker не запущен",
+    "noImage": "Нет образа эмулятора",
+    "ready": "Образ эмулятора готов"
+  },
+  "library": {
+    "count_one": "{{count}} игра",
+    "count_few": "{{count}} игры",
+    "count_many": "{{count}} игр",
+    "count_other": "{{count}} игры",
+    "empty": "В lab.json пока нет игр",
+    "off": "выключена",
+    "steps_one": "{{count}} шаг",
+    "steps_few": "{{count}} шага",
+    "steps_many": "{{count}} шагов",
+    "steps_other": "{{count}} шага",
+    "neverRun": "ещё не запускалась",
+    "titleId": "Title ID",
+    "folder": "Папка",
+    "executable": "Программа",
+    "settings": "Настройки",
+    "scenario": "Сценарий",
+    "ownScenario_one": "свой, {{count}} шаг",
+    "ownScenario_few": "свой, {{count}} шага",
+    "ownScenario_many": "свой, {{count}} шагов",
+    "ownScenario_other": "свой, {{count}} шага",
+    "standardScenario": "стандартный",
+    "last": "Последний итог",
+    "run": "Запустить",
+    "openFolder": "Папка игры",
+    "openRun": "К прогону",
+    "moreSteps_one": "и ещё {{count}} шаг",
+    "moreSteps_few": "и ещё {{count}} шага",
+    "moreSteps_many": "и ещё {{count}} шагов",
+    "moreSteps_other": "и ещё {{count}} шага"
+  },
+  "outcome": {
+    "pass": "прошла",
+    "skip": "пропущено",
+    "console": "на консоли",
+    "warn": "с замечаниями",
+    "fail": "не прошла"
+  },
+  "steps": {
+    "launch": "Запуск",
+    "waitFor": "Ждать",
+    "wait": "Пауза",
+    "press": "Нажать",
+    "screenshot": "Снимок",
+    "expectChange": "Экран изменился",
+    "expectPattern": "Картинка пробы",
+    "expectInput": "Кнопки дошли",
+    "expectSave": "Есть сохранение",
+    "expectSaveKept": "Сохранение на месте",
+    "close": "Закрыть",
+    "soft": "только предупредить"
+  },
+  "milestones": {
+    "wine": "Wine готов",
+    "loadingScreen": "экран загрузки",
+    "firstFrame": "первый кадр",
+    "commit": "запись сохранения"
+  },
+  "units": {
+    "seconds_one": "{{count}} с",
+    "seconds_few": "{{count}} с",
+    "seconds_many": "{{count}} с",
+    "seconds_other": "{{count}} с",
+    "minutes_one": "{{count}} мин",
+    "minutes_few": "{{count}} мин",
+    "minutes_many": "{{count}} мин",
+    "minutes_other": "{{count}} мин",
+    "at": "на {{seconds}} с"
+  },
+  "plans": {
+    "hint": "Набор — список игр из lab.json. Прогон идёт в своём процессе: окно можно закрыть, прогон продолжится.",
+    "enabled": "Все включённые игры",
+    "games_one": "{{count}} игра",
+    "games_few": "{{count}} игры",
+    "games_many": "{{count}} игр",
+    "games_other": "{{count}} игры",
+    "start": "Запустить набор"
+  },
+  "run": {
+    "exited": "Прогон завершился с ошибкой (код {{code}})",
+    "live": "Идёт · {{who}}",
+    "last": "Последний прогон · {{started}}",
+    "nothing": "Прогонов ещё не было. Выберите набор в «Планах» или игру в «Библиотеке».",
+    "toPlans": "К планам",
+    "queue": "Очередь",
+    "free": "Эмулятор свободен",
+    "games": "Игры",
+    "screen": "Экран эмулятора",
+    "noScreen": "Снимка экрана пока нет",
+    "preparing": "Прогон готовится: эмулятор и сборка",
+    "build": "Сборка: {{stage}}",
+    "report": "Открыть отчёт",
+    "toHistory": "В историю",
+    "log": "События",
+    "noEvents": "Событий пока нет",
+    "by": "запустил: {{who}}",
+    "stop": "Остановить",
+    "leave": "Убрать из очереди"
+  },
+  "history": {
+    "count_one": "{{count}} прогон",
+    "count_few": "{{count}} прогона",
+    "count_many": "{{count}} прогонов",
+    "count_other": "{{count}} прогона",
+    "empty": "Прогонов ещё не было",
+    "notFinished": "не закончен",
+    "counts": "{{passed}} ✓ · {{warned}} ! · {{console}} ? · {{failed}} ✗",
+    "folder": "Папка",
+    "emulator": "Эмулятор",
+    "runtime": "Рантайм",
+    "took": "Длился",
+    "planned": "Игр",
+    "done": "{{done}} из {{planned}}",
+    "openFolder": "Папка прогона"
+  },
+  "stages": {
+    "lab": "Файл lab.json",
+    "labFix": "Скопируйте lab.example.json в lab.json и впишите свои пути",
+    "keys": "Файлы консоли",
+    "keysMissing": "не выбраны ни здесь, ни в Carafe",
+    "keysFrom": {
+      "argument": "переданы в командной строке",
+      "lab": "выбраны здесь",
+      "carafe": "выбраны в Carafe"
+    },
+    "keysUnreadable": "{{where}}, но файл не читается",
+    "keysIncomplete": "{{where}}, но в файле нет нужного для сборки",
+    "keysReady": "{{where}} · {{file}}",
+    "keysFix": "Выберите файл с консоли — тот же, что в настройках Carafe. Он остаётся на этом ПК и в отчёты не попадает",
+    "keysPick": "Файлы консоли",
+    "keysChoose": "Выбрать файл",
+    "keysForget": "Брать из Carafe",
+    "carafe": "Код Carafe",
+    "carafeFix": "git submodule update --init external/carafe",
+    "runtime": "Рантайм Carafe",
+    "runtimeReady": "собран",
+    "runtimeMissing": "не собран",
+    "runtimeFix": "В app/ Carafe: npm run runtime и npm run hacbrewpack",
+    "docker": "Docker",
+    "dockerRunning": "запущен",
+    "dockerFix": "Запустите Docker Desktop",
+    "image": "Образ эмулятора",
+    "imageFix": "docker compose --profile build build eden"
+  },
+  "log": {
+    "waiting": "ждёт эмулятор: держит {{holder}}, впереди {{ahead}}",
+    "runStarted": "прогон начался: игр {{games}}",
+    "gameStarted": "[{{index}}] {{name}}",
+    "buildStage": "сборка: {{stage}}",
+    "reused": "NSP {{titleId}} уже собран",
+    "built": "NSP {{titleId}} собран за {{seconds}} с",
+    "buildFailed": "сборка не удалась: {{error}}",
+    "launch": "игра запускается",
+    "gameFinished": "{{name}}: {{outcome}}",
+    "stopped": "остановлен, не дошли {{left}}",
+    "runFinished": "конец: {{passed}} прошли, {{warned}} с замечаниями, {{console}} на консоли, {{failed}} не прошли"
+  },
+  "buildStages": {
+    "Runtime": "рантайм",
+    "Game": "файлы игры",
+    "Metadata": "название и значок",
+    "Pack": "упаковка NSP",
+    "Finish": "завершение",
+    "reused": "NSP уже собран",
+    "built": "NSP собран",
+    "failed": "не собрался"
+  },
+  "who": {
+    "window": "окно",
+    "command line": "командная строка"
+  },
+  "scenarios": {
+    "hint": "Сценарии пока правятся в lab.json и scenarios/. Здесь — что лаборатория делает в каждой игре.",
+    "own": "свой",
+    "standard": "стандартный"
+  }
+}

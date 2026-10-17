@@ -5,6 +5,7 @@ node_modules/
 /app/crates/lab-desktop/gen/
 /tools/probes/build/
 /lab.json
+/lab.local.json
 /.idea/
 *.keys
 *.nsp

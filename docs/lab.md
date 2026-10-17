@@ -39,10 +39,14 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    `{ "Renderer/gpu_accuracy": "0", "Renderer/debug": "true" }`. `Renderer/debug` makes Eden log the compile and
    link errors of its OpenGL shaders, which it keeps quiet otherwise.
 
-From `app/`: `cargo run --release -p lab-cli -- run [set]` runs the enabled games of `lab.json` or the games of a set;
-`cargo run --release -p lab-cli -- help` lists the rest.
+From `app/`: `npm run dev` opens the window — the library, sets to run, the run going on, past runs and what the
+emulator needs to start. `cargo run --release -p lab-cli -- run [set]` runs the enabled games of `lab.json` or the
+games of a set from a terminal; `cargo run --release -p lab-cli -- help` lists the rest. Both go through the same
+queue, so a run started in one is seen in the other.
 
-Lab packs and runs games with the console files chosen in Carafe's settings. Eden gets them read-only in a folder that
+Lab packs and runs games with the console files chosen in the window's Emulator screen, kept in `lab.local.json` next
+to `lab.json` (git ignores both), or with the ones chosen in Carafe's settings when none are chosen there; `--keys`
+overrides both. Eden gets them read-only in a folder that
 exists only inside the container and goes away with it: nothing of them lands in the work folder, and their location
 is cut out of every message, log and report Lab writes.
 

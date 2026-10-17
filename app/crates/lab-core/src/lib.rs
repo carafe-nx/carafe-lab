@@ -8,6 +8,7 @@ pub mod config;
 pub mod emulator;
 pub mod input_check;
 pub mod lang;
+pub mod local;
 pub mod matrix;
 pub mod milestones;
 pub mod picture;

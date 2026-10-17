@@ -21,6 +21,7 @@ use carafe_pack::HacBrewPacker;
 use lab_core::config::{self, Config, Game};
 use lab_core::emulator::{EdenCpu, Gpu};
 use lab_core::lang::Lang;
+use lab_core::local::{self, LocalSettings};
 use lab_core::matrix;
 use lab_core::probes::{self, ProbeRun};
 use lab_core::time::Utc;
@@ -35,7 +36,6 @@ use serde::Serialize;
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
 const DESKTOP: &str = "app/crates/carafe-desktop";
-const PREFERENCES: &str = "app.carafe.builder/preferences.json";
 const PAGE_IDLE: Duration = Duration::from_secs(60);
 const PAGE_LONGEST: Duration = Duration::from_secs(30 * 60);
 const QUEUE_POLL: Duration = Duration::from_secs(2);
@@ -104,10 +104,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         Command::Stop { id } => return stop_run(&config, id.as_deref()),
         _ => {}
     }
-    let keys = match &args.keys {
-        Some(keys) => keys.clone(),
-        None => keys_from_carafe()?,
-    };
+    let keys = console_files(args.keys.as_deref(), &config_path)?;
     let gpu = args.gpu.unwrap_or(config.gpu);
     let desktop = carafe_checkout(&config).join(DESKTOP);
     let packer = HacBrewPacker::new(
@@ -633,18 +630,19 @@ fn print_step(step: &StepResult) {
     );
 }
 
-fn keys_from_carafe() -> Result<PathBuf, String> {
-    let appdata = std::env::var_os("APPDATA").ok_or("no APPDATA; pass --keys")?;
-    let file = PathBuf::from(appdata).join(PREFERENCES);
-    let text = fs::read_to_string(&file)
-        .map_err(|_| "Carafe's settings were not found; pass --keys".to_owned())?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    value
-        .get("keysPath")
-        .and_then(serde_json::Value::as_str)
-        .map(PathBuf::from)
-        .ok_or_else(|| "Carafe's settings name no file to pack with; pass --keys".to_owned())
+fn console_files(argument: Option<&Path>, config_path: &Path) -> Result<PathBuf, String> {
+    let local_file = config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(local::LOCAL_FILE);
+    let settings = LocalSettings::load(&local_file)?;
+    let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
+    local::find_keys(argument, &settings, appdata.as_deref())
+        .map(|(path, _)| path)
+        .ok_or_else(|| {
+            "no console files to pack with: choose them in the window's Emulator screen or in Carafe, or pass --keys"
+                .to_owned()
+        })
 }
 
 fn open_in_browser(url: &str) {

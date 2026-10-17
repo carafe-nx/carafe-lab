@@ -1,0 +1,193 @@
+{
+  "nav": {
+    "label": "Sections",
+    "library": "Library",
+    "plans": "Plans",
+    "run": "Run",
+    "history": "History",
+    "emulator": "Emulator",
+    "scenarios": "Scenarios"
+  },
+  "common": {
+    "dismiss": "Dismiss"
+  },
+  "lab": {
+    "broken": "lab.json does not read",
+    "noKeys": "No console files"
+  },
+  "emulator": {
+    "checking": "Checking the emulator…",
+    "busy": "Busy: {{who}} · {{what}}",
+    "free": "Emulator free",
+    "waiting_one": "{{count}} waiting",
+    "waiting_other": "{{count}} waiting",
+    "queued": "Waiting: {{who}} · {{what}}",
+    "work": "Work folder"
+  },
+  "docker": {
+    "missing": "Docker is not installed",
+    "stopped": "Docker is not running",
+    "noImage": "No emulator image",
+    "ready": "Emulator image ready"
+  },
+  "library": {
+    "count_one": "{{count}} game",
+    "count_other": "{{count}} games",
+    "empty": "lab.json has no games yet",
+    "off": "off",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "neverRun": "never run",
+    "titleId": "Title ID",
+    "folder": "Folder",
+    "executable": "Program",
+    "settings": "Settings",
+    "scenario": "Scenario",
+    "ownScenario_one": "its own, {{count}} step",
+    "ownScenario_other": "its own, {{count}} steps",
+    "standardScenario": "standard",
+    "last": "Last result",
+    "run": "Run",
+    "openFolder": "Game folder",
+    "openRun": "To the run",
+    "moreSteps_one": "and {{count}} more step",
+    "moreSteps_other": "and {{count}} more steps"
+  },
+  "outcome": {
+    "pass": "passed",
+    "skip": "skipped",
+    "console": "on the console",
+    "warn": "with warnings",
+    "fail": "failed"
+  },
+  "steps": {
+    "launch": "Launch",
+    "waitFor": "Wait for",
+    "wait": "Pause",
+    "press": "Press",
+    "screenshot": "Screenshot",
+    "expectChange": "Screen changed",
+    "expectPattern": "Probe picture",
+    "expectInput": "Buttons arrived",
+    "expectSave": "Save data written",
+    "expectSaveKept": "Save data kept",
+    "close": "Close",
+    "soft": "warn only"
+  },
+  "milestones": {
+    "wine": "Wine ready",
+    "loadingScreen": "loading screen",
+    "firstFrame": "first frame",
+    "commit": "save committed"
+  },
+  "units": {
+    "seconds_one": "{{count}} s",
+    "seconds_other": "{{count}} s",
+    "minutes_one": "{{count}} min",
+    "minutes_other": "{{count}} min",
+    "at": "at {{seconds}} s"
+  },
+  "plans": {
+    "hint": "A set is a list of games from lab.json. A run goes in its own process: close the window and it goes on.",
+    "enabled": "All enabled games",
+    "games_one": "{{count}} game",
+    "games_other": "{{count}} games",
+    "start": "Run the set"
+  },
+  "run": {
+    "exited": "The run ended with an error (code {{code}})",
+    "live": "Running · {{who}}",
+    "last": "Last run · {{started}}",
+    "nothing": "No runs yet. Pick a set in Plans or a game in the Library.",
+    "toPlans": "To Plans",
+    "queue": "Queue",
+    "free": "Emulator free",
+    "games": "Games",
+    "screen": "Emulator screen",
+    "noScreen": "No screenshot yet",
+    "preparing": "The run is getting ready: emulator and build",
+    "build": "Build: {{stage}}",
+    "report": "Open the report",
+    "toHistory": "To History",
+    "log": "Events",
+    "noEvents": "No events yet",
+    "by": "started by {{who}}",
+    "stop": "Stop",
+    "leave": "Leave the queue"
+  },
+  "history": {
+    "count_one": "{{count}} run",
+    "count_other": "{{count}} runs",
+    "empty": "No runs yet",
+    "notFinished": "not finished",
+    "counts": "{{passed}} ✓ · {{warned}} ! · {{console}} ? · {{failed}} ✗",
+    "folder": "Folder",
+    "emulator": "Emulator",
+    "runtime": "Runtime",
+    "took": "Took",
+    "planned": "Games",
+    "done": "{{done}} of {{planned}}",
+    "openFolder": "Run folder"
+  },
+  "stages": {
+    "lab": "lab.json",
+    "labFix": "Copy lab.example.json to lab.json and put your paths in",
+    "keys": "Console files",
+    "keysMissing": "chosen neither here nor in Carafe",
+    "keysFrom": {
+      "argument": "given on the command line",
+      "lab": "chosen here",
+      "carafe": "chosen in Carafe"
+    },
+    "keysUnreadable": "{{where}}, but the file does not read",
+    "keysIncomplete": "{{where}}, but the file lacks what packing needs",
+    "keysReady": "{{where}} · {{file}}",
+    "keysFix": "Choose the file from your console, the same as in Carafe's settings. It stays on this PC and never goes into reports",
+    "keysPick": "Console files",
+    "keysChoose": "Choose a file",
+    "keysForget": "Take from Carafe",
+    "carafe": "Carafe's code",
+    "carafeFix": "git submodule update --init external/carafe",
+    "runtime": "Carafe's runtime",
+    "runtimeReady": "built",
+    "runtimeMissing": "not built",
+    "runtimeFix": "In Carafe's app/: npm run runtime and npm run hacbrewpack",
+    "docker": "Docker",
+    "dockerRunning": "running",
+    "dockerFix": "Start Docker Desktop",
+    "image": "Emulator image",
+    "imageFix": "docker compose --profile build build eden"
+  },
+  "log": {
+    "waiting": "waiting for the emulator: {{holder}} holds it, {{ahead}} ahead",
+    "runStarted": "the run started: {{games}} games",
+    "gameStarted": "[{{index}}] {{name}}",
+    "buildStage": "build: {{stage}}",
+    "reused": "NSP {{titleId}} already built",
+    "built": "NSP {{titleId}} built in {{seconds}} s",
+    "buildFailed": "build failed: {{error}}",
+    "launch": "the game launches",
+    "gameFinished": "{{name}}: {{outcome}}",
+    "stopped": "stopped, {{left}} left out",
+    "runFinished": "done: {{passed}} passed, {{warned}} with warnings, {{console}} on the console, {{failed}} failed"
+  },
+  "buildStages": {
+    "Runtime": "runtime",
+    "Game": "game files",
+    "Metadata": "title and icon",
+    "Pack": "packing the NSP",
+    "Finish": "finishing",
+    "reused": "NSP already built",
+    "built": "NSP built",
+    "failed": "not built"
+  },
+  "who": {
+    "window": "the window",
+    "command line": "the command line"
+  },
+  "scenarios": {
+    "hint": "Scenarios are edited in lab.json and scenarios/ for now. Here is what the lab does in each game.",
+    "own": "its own",
+    "standard": "standard"
+  }
+}

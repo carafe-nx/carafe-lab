@@ -6,12 +6,17 @@ up is [docs/lab.md](docs/lab.md).
 
 ## Layout
 
-- `app/` — Cargo workspace (`crates/*`), later npm workspaces with the window in `ui/`, as in Carafe's `app/`.
-  - `lab-core` — pure: `lab.json`, scenarios, log milestones, picture comparison, settings sets, probe runs. No files,
-    processes, Docker or clocks except through arguments; every rule has a unit test.
-  - `lab-run` — a run: the steps of a scenario against the `Emulator` trait, and the report.
+- `app/` — Cargo workspace (`crates/*`) and npm workspace with the window in `ui/`, as in Carafe's `app/`.
+  - `lab-core` — pure: `lab.json`, `lab.local.json`, scenarios, log milestones, picture comparison, settings sets,
+    probe runs. No processes, Docker or clocks except through arguments; every rule has a unit test.
+  - `lab-run` — a run: the steps of a scenario against the `Emulator` trait, the report, the history of runs and the
+    queue for the emulator.
   - `lab-eden` — the `Emulator` for Eden in Docker.
-  - `lab-cli` — the command line `carafe-lab` and the live page; the composition root.
+  - `lab-cli` — the command line `carafe-lab` and the live page; the composition root of a run.
+  - `lab-desktop` — the Tauri window. It reads the lab through the crates and starts runs as `carafe-lab run --json`
+    in their own process, so a run outlives the window.
+  - `ui/` — React in Carafe's style: `app/` (shell, routes), `pages/`, `features/lab/`, `shared/` (api with ts-rs
+    bindings, i18n, theme, controls). Types come from Rust through ts-rs: `npm run bindings`.
 - `scenarios/` — scenario files a game in `lab.json` names with `"scenario": "scenarios/…"`.
 - `patches/eden/` — Lab's changes to Eden, applied in name order when Eden is built.
 - `external/eden`, `external/carafe` — git submodules pinned to exact commits. They are never edited: Eden's changes
@@ -23,7 +28,8 @@ up is [docs/lab.md](docs/lab.md).
 
 ## Building
 
-- From `app/`: `cargo build --release`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`.
+- From `app/`: `npm run dev` opens the window (it builds `carafe-lab` first); `npm run check` runs formatting, clippy,
+  Rust tests and the TypeScript check; `npm run cdp -- screenshot <file>` captures the window in development.
 - Eden and its images build only in containers: `docker compose --profile build …` (see `docs/lab.md`). Git for
   Windows must not fetch Carafe's own submodules: it rewrites line endings.
 - Build containers default to 2 CPUs, 2 jobs and 4 GB (`LAB_BUILD_*`); runs to 4 CPUs and 6 GB.
