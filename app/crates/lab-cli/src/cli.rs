@@ -28,6 +28,11 @@ Usage:
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
   carafe-lab nsp <file> [--json]   what a ready NSP was built from: runtime version, settings, game folder
+  carafe-lab bisect <game> --good <rev> --bad <rev>
+                                   finds the Carafe commit that broke the game: builds the runtime of the
+                                   commits between, runs the game --repeat times with each, halves the range
+  carafe-lab release <tag>         builds the runtime of a Carafe release once from its tag and keeps it;
+                                   latest is the newest release
   carafe-lab tidy [--apply]        what keeping the runs folder small would do; --apply does it: the 10 newest runs
                                    stay whole, older failed runs get their logs compressed, older passing runs
                                    lose their raw logs and timeline pictures; NSPs the newest runs do not use,
@@ -56,6 +61,11 @@ Options:
                       every run keeps them from now on
   --nsp <file>        run: a ready NSP made by Carafe instead of the games of lab.json, as it is, with the
                       runtime and settings inside it; give it once for every NSP
+  --runtime <file>    run: pack with this runtime archive instead of the Carafe checkout's
+  --good <rev>        bisect: a Carafe commit or tag where the game worked
+  --bad <rev>         bisect: a later one where it fails
+  --ab-runtime <r>    A/B between runtimes: run the one game with the lab's runtime (A) and with r (B), alternating,
+                      --repeat times each; r is release:<tag>, release:latest or a runtime archive
   --rebuild           with --nsp: build each NSP again from its game folder with the lab's runtime and the
                       NSP's own settings
   --video <v>         full, low (about five pictures a second, for measuring) or off; default full
@@ -112,6 +122,16 @@ pub enum Command {
     Perf,
     /// Show the running game's stages and the problems of its logs.
     Logs,
+    /// Find the Carafe commit that broke a game.
+    Bisect {
+        /// The game's name in `lab.json`.
+        game: Option<String>,
+    },
+    /// Build and keep the runtime of a Carafe release.
+    Release {
+        /// The release tag, or `latest`.
+        tag: Option<String>,
+    },
     /// Show what a ready NSP was built from.
     Nsp {
         /// The NSP file.
@@ -144,6 +164,14 @@ pub struct Args {
     pub games: Vec<String>,
     /// `--repeat`.
     pub repeat: u32,
+    /// `--runtime`.
+    pub runtime: Option<PathBuf>,
+    /// `--good`.
+    pub good: Option<String>,
+    /// `--bad`.
+    pub bad: Option<String>,
+    /// `--ab-runtime`: the runtime of variant B.
+    pub ab_runtime: Option<String>,
     /// `--ab`: the settings of variant B, as JSON.
     pub ab: Option<String>,
     /// `--minutes`.
@@ -221,6 +249,8 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("logs") => Command::Logs,
         Some("tidy") => Command::Tidy,
         Some("nsp") => Command::Nsp { file: None },
+        Some("release") => Command::Release { tag: None },
+        Some("bisect") => Command::Bisect { game: None },
         Some(other) => return Err(ArgsError::Command(other.to_owned())),
     };
     let mut parsed = Args {
@@ -234,6 +264,10 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         games: Vec::new(),
         repeat: 1,
         ab: None,
+        ab_runtime: None,
+        runtime: None,
+        good: None,
+        bad: None,
         minutes: 30,
         hold_ms: 150,
         build_only: false,
@@ -297,6 +331,12 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                     .collect();
             }
             "--ab" => parsed.ab = Some(value("settings as JSON")?),
+            "--runtime" => parsed.runtime = Some(PathBuf::from(value("a runtime archive")?)),
+            "--good" => parsed.good = Some(value("a commit or tag")?),
+            "--bad" => parsed.bad = Some(value("a commit or tag")?),
+            "--ab-runtime" => {
+                parsed.ab_runtime = Some(value("release:<tag> or a runtime archive")?)
+            }
             "--scenario" => parsed.scenario = Some(value("standard or a scenario file")?),
             "--like" => parsed.like = Some(value("a run folder")?),
             "--nsp" => parsed.nsp.push(PathBuf::from(value("an NSP file")?)),
@@ -336,8 +376,12 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             other if other.starts_with("--") => return Err(ArgsError::Option(other.to_owned())),
             other => match &mut parsed.command {
                 Command::Run { set } if set.is_none() => *set = Some(other.to_owned()),
-                Command::Stop { id } if id.is_none() => *id = Some(other.to_owned()),
-                Command::Play { game } if game.is_none() => *game = Some(other.to_owned()),
+                Command::Stop { id } | Command::Release { tag: id } if id.is_none() => {
+                    *id = Some(other.to_owned())
+                }
+                Command::Play { game } | Command::Bisect { game } if game.is_none() => {
+                    *game = Some(other.to_owned())
+                }
                 Command::Press { buttons } if buttons.is_none() => {
                     *buttons = Some(other.to_owned())
                 }

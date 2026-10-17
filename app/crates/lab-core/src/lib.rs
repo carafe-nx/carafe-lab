@@ -4,6 +4,7 @@
 //! Everything here is pure and covered by unit tests; the emulator and the files of a run are reached by the
 //! crates around it.
 
+pub mod bisect;
 pub mod config;
 pub mod crash;
 pub mod diagnostics;

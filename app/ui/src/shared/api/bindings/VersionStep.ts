@@ -7,6 +7,10 @@ import type { VersionPerf } from "./VersionPerf";
  */
 export type VersionStep = { 
 /**
+ * The game's commit before, the one this step is compared with; `None` at its first commit.
+ */
+previous: string | null, 
+/**
  * The performance at this commit.
  */
 perf: VersionPerf, 

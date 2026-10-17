@@ -15,7 +15,7 @@ const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"
 
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "expectChange",
-  "expectPattern", "expectInput", "expectSave", "expectSaveKept", "expectPerformance", "close",
+  "expectPattern", "expectInput", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses", "close",
 ];
 
 export function newStep(kind: Step["step"], steps: Step[]): Step {
@@ -43,6 +43,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "expectSaveKept" };
     case "expectPerformance":
       return { step: "expectPerformance" };
+    case "randomPresses":
+      return { step: "randomPresses", seconds: 60, seed: 1 };
     case "close":
       return { step: "close", timeout: 60 };
   }
@@ -245,6 +247,16 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
             onChange={(threshold) => onChange({ ...step, threshold })}
           />
           <span>%</span>
+        </>
+      );
+    case "randomPresses":
+      return (
+        <>
+          <label htmlFor={`${id}-seconds`}>{t("scenarios.for")}</label>
+          <NumberInput id={`${id}-seconds`} value={step.seconds} onChange={(seconds) => onChange({ ...step, seconds })} />
+          <span>{t("scenarios.sec")}</span>
+          <label htmlFor={`${id}-seed`}>{t("steps.seed")}</label>
+          <NumberInput id={`${id}-seed`} value={step.seed} onChange={(seed) => onChange({ ...step, seed })} />
         </>
       );
     default:

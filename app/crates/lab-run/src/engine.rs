@@ -22,7 +22,7 @@ use ts_rs::TS;
 use crate::history::{self, EVENTS_FILE, RunSummary, SUMMARY_FILE};
 use crate::ready::{self, ReadyNsp};
 use crate::report::{self, BuildOutcome, GameReport, RunReport, RunStamp};
-use crate::run::{Clock, Emulator, LaunchRecord, Outcome, Runner, StepResult};
+use crate::run::{Clock, Emulator, HOLD_FILE, LaunchRecord, Outcome, Runner, StepResult};
 
 /// A game the run is going to build and check.
 #[derive(Debug, Clone)]
@@ -57,7 +57,22 @@ pub enum NspSource {
     Ready(Box<ReadyNsp>),
     /// Built again with the lab's runtime from the request made of this ready NSP's record, keeping its Title ID.
     Rebuild(Box<BuildRecord>),
+    /// Built from the request with the other runtime of an A/B run between runtimes, into `nsp/alternate`.
+    Alternate,
 }
+
+/// The other runtime an A/B run between runtimes compares the lab's with.
+pub struct Alternate<'a> {
+    /// The packer that builds with it.
+    pub packer: &'a dyn Packer,
+    /// Files whose change makes its NSPs stale: its archive and hacBrewPack.
+    pub build_inputs: Vec<PathBuf>,
+    /// The runtime version its build records carry, such as the release tag.
+    pub runtime_version: String,
+}
+
+/// The folder inside the NSP folder for the NSPs built with the other runtime of an A/B run.
+pub const ALTERNATE_DIR: &str = "alternate";
 
 struct Built {
     record: BuildRecord,
@@ -181,8 +196,12 @@ pub struct Engine<'a> {
     pub stamp: RunStamp,
     /// Only build the NSPs.
     pub build_only: bool,
+    /// The other runtime of an A/B run between runtimes; `None` for any other run.
+    pub alternate: Option<Alternate<'a>>,
     /// Runs a game that failed once more, with detailed logs chosen by how it failed.
     pub retry_failed: bool,
+    /// The folder of the reference pictures scenarios compare the screen with.
+    pub references: PathBuf,
     /// Stops the run between games and the current scenario between steps.
     pub stop: CancelToken,
 }
@@ -301,6 +320,7 @@ impl Engine<'_> {
         let nsp_dir = self.work.join("nsp");
         fs::create_dir_all(&run_dir).map_err(|error| format!("{}: {error}", run_dir.display()))?;
         fs::create_dir_all(&nsp_dir).map_err(|error| format!("{}: {error}", nsp_dir.display()))?;
+        let _ = fs::remove_file(self.work.join("queue").join(HOLD_FILE));
         let mut report = RunReport {
             started: started.to_owned(),
             runtime_version: self.runtime_version.to_owned(),
@@ -469,6 +489,8 @@ impl Engine<'_> {
             .with_baseline(baseline, game.threshold)
             .with_input(record.settings.input.clone())
             .with_stop(self.stop.clone())
+            .with_hold(self.work.join("queue").join(HOLD_FILE))
+            .with_references(self.references.clone())
             .with_stages(|stage| (shared.borrow_mut())(&Event::Reached { stage }));
         let result = runner.run(&game.scenario, |step| {
             (shared.borrow_mut())(&Event::Step { step: step.clone() });
@@ -486,7 +508,7 @@ impl Engine<'_> {
         on_event: &mut dyn FnMut(&Event),
     ) -> Result<Built, String> {
         let previous = match &game.nsp {
-            NspSource::Build => None,
+            NspSource::Build | NspSource::Alternate => None,
             NspSource::Ready(ready) => {
                 let staged = ready::stage(ready, nsp_dir)
                     .map_err(|error| format!("{}: {error}", ready.path.display()))?;
@@ -500,10 +522,32 @@ impl Engine<'_> {
             }
             NspSource::Rebuild(record) => Some(record.as_ref()),
         };
+        let (packer, build_inputs, runtime_version, nsp_dir) = match (&game.nsp, &self.alternate) {
+            (NspSource::Alternate, Some(alternate)) => {
+                let dir = nsp_dir.join(ALTERNATE_DIR);
+                fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+                (
+                    alternate.packer,
+                    &alternate.build_inputs,
+                    alternate.runtime_version.as_str(),
+                    dir,
+                )
+            }
+            (NspSource::Alternate, None) => {
+                return Err("the run has no other runtime to build with".to_owned());
+            }
+            _ => (
+                self.packer,
+                &self.build_inputs,
+                self.runtime_version,
+                nsp_dir.to_path_buf(),
+            ),
+        };
+        let nsp_dir = nsp_dir.as_path();
         let request = game.request.clone()?;
-        let record = wizard::plan(request, previous, game.entropy, self.runtime_version)
+        let record = wizard::plan(request, previous, game.entropy, runtime_version)
             .map_err(|error| error.to_string())?;
-        let key = build_key(&self.build_inputs, &record, &game.folder);
+        let key = build_key(build_inputs, &record, &game.folder);
         let key_path = nsp_dir.join(format!("{}.build-key", record.title_id));
         let nsp_path = nsp_dir.join(format!("{}.nsp", record.title_id));
         if let (Some(key), Ok(kept), Ok(nsp)) =
@@ -533,8 +577,7 @@ impl Engine<'_> {
                 });
             }
         };
-        let stored = self
-            .packer
+        let stored = packer
             .pack(&record, None, &target, &CancelToken::new(), &mut progress)
             .map_err(|error| redact(&format!("{error} ({})", game.folder.display()), self.keys))?;
         if let Some(key) = key {

@@ -115,6 +115,12 @@ save data is still there, close it.
   other Carafe commit in History: fails when either is worse by more than `threshold` percent, or by the game's
   `threshold` in `lab.json` (20 by default). Passes with a note when there is no other commit to compare with. The
   standard scenario has it after the first close.
+- `expectScreen` — `name`, `reference`, `tolerance`: takes the screenshot `name` and compares it with the reference
+  picture `reference`, a path in the `references` folder next to `lab.json`, by the mean brightness difference of
+  64×36 cells; more than `tolerance` (12 by default, of 255) fails. Without the reference picture yet it warns. A
+  screenshot in History becomes a reference with "Make it a reference".
+- `randomPresses` — `seconds`, `seed`: presses random buttons for that long, each held 50–500 ms with 0.1–1 s
+  between; fails when the game crashes or ends. The same seed presses the same buttons again.
 - `close` — asks the game to close and waits `timeout` seconds; then stops it. Lab sends Eden SIGUSR1, and
   Eden closes the software the way the HOME Menu does, without asking (`patches/eden/0025`): a hotkey cannot do
   this, because without a window manager Qt matches no shortcut.
@@ -213,12 +219,31 @@ emulator.
 - The Run screen draws the live picture itself, on a canvas in the Switch frame, with the noVNC client connected to
   the container's websockify on port 6080. The window serves the client under its own `novnc` scheme from a copy of
   `/usr/share/novnc/core` and `vendor` taken out of the Eden image the first time into `<work>/novnc`, so no package
-  is downloaded and the client is the same version as the server. "Press keys myself" switches the same connection
-  out of view-only.
+  is downloaded and the client is the same version as the server. "Take control" switches the same connection
+  out of view-only and holds the scenario: while a person plays, no step starts and a milestone's wait does not count
+  (`<work>/queue/hold`); "Hand the game back" lets it go on. A new run, or leaving the Run screen, lifts the hold.
 - `run --games G --repeat <n> --ab '<settings>'` is an A/B run: G as it is (`G · A`) and with the settings merged over
   its own (`G · B`, in the shape of `carafe.json`'s `settings`), alternating. Each variant is its own NSP with its own
   Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame
   of each variant; a difference counts only when it is larger than the spread of either variant.
+- `--ab-runtime <r>` instead of `--ab` keeps the settings and changes the runtime: `G · B` is built with `r`, a kept
+  release (`release:v0.2.2`, `release:latest`) or any runtime archive, into `<work>/nsp/alternate`. The Plans
+  screen's A/B card offers it as "another runtime", with the releases whose runtime is kept: main against a release.
+  `run --runtime <file>` packs a whole run with another runtime archive.
+- `carafe-lab release <tag>` builds the runtime of a Carafe release once and keeps it as
+  `<work>/runtimes/release-<tag>.bin`. All of it runs in Linux containers with the build limits (2 CPUs, 2 jobs,
+  4 GB), so Git for Windows never touches line endings: the tag is checked out in one clone of the Carafe checkout,
+  `<work>/releases/carafe`, with the submodules taken from the checkout's own and Autorun's vendored Box64 and
+  FFmpeg copied, so nothing is downloaded. A revision whose submodule commits or build image the checkout does not
+  have stops and says so instead of downloading. The first time, the checkout's `runtime/build` is copied too, every
+  file dated long ago except those the revision changes, so only the changed part is compiled; later revisions build
+  on what the one before left.
+- `carafe-lab bisect <game> --good <rev> --bad <rev> [--repeat n]` finds the Carafe commit that broke a game: it
+  builds the runtime of the middle commit of Carafe's main line between them the same way
+  (`<work>/runtimes/commit-<hash>.bin`), runs the game n times with it through the queue, and halves the range: any
+  failure makes the commit bad. A commit that cannot be built is skipped. `<work>/bisect/<date>-<game>.json` keeps
+  the commits, the verdicts and where the search stands. The Versions screen offers it under a measure that got worse
+  between two commits ("Find the commit that broke it", three runs a commit).
 - Every run's `summary.json` and `report.json` carry a stamp: the Carafe commit (`+changes` when the checkout has
   uncommitted changes), the first 12 hex digits of the runtime archive's SHA-256, the lab's commit and the Eden image.
   The window compares two runs side by side, their screenshots of the same steps included.

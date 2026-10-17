@@ -35,6 +35,9 @@ pub const TIMELINE_DIR: &str = "timeline";
 /// The file in a launch's folder with the stacks of the game's threads at the moment it was found hung.
 pub const BACKTRACES_FILE: &str = "backtraces.txt";
 
+/// The file in the queue folder whose presence holds the running scenario while a person plays.
+pub const HOLD_FILE: &str = "hold";
+
 /// Lines of an emulator log, in lower case, that report something missing on purpose: the loader asks for
 /// Atmosphère's `svcGetInfo` 65000 only to learn whether the kernel is Mesosphère and goes on without it.
 const EXPECTED_GAPS: [&str; 1] = ["unimplemented svcgetinfo id=0x000000000000fde8"];
@@ -310,6 +313,8 @@ pub struct Runner<'a> {
     launch_started: Duration,
     launched_ms: Option<u64>,
     lab_lines: Vec<(Duration, String)>,
+    hold: Option<PathBuf>,
+    references: Option<PathBuf>,
     last_glimpse: Duration,
     baseline: Option<VersionPerf>,
     threshold: u32,
@@ -345,6 +350,8 @@ impl<'a> Runner<'a> {
             launch_started: started,
             launched_ms: None,
             lab_lines: Vec::new(),
+            hold: None,
+            references: None,
             last_glimpse: started,
             baseline: None,
             threshold: versions::DEFAULT_THRESHOLD,
@@ -416,6 +423,43 @@ impl<'a> Runner<'a> {
         self.stop.as_ref().is_some_and(CancelToken::is_cancelled)
     }
 
+    /// Sets the folder the reference pictures of [`Step::ExpectScreen`] are in.
+    #[must_use]
+    pub fn with_references(mut self, references: impl Into<PathBuf>) -> Self {
+        self.references = Some(references.into());
+        self
+    }
+
+    /// Sets the file whose presence holds the scenario: while it is there, no step starts and a milestone's wait does
+    /// not count, so a person can play and hand the game back.
+    #[must_use]
+    pub fn with_hold(mut self, hold: impl Into<PathBuf>) -> Self {
+        self.hold = Some(hold.into());
+        self
+    }
+
+    fn held(&self) -> bool {
+        self.hold.as_ref().is_some_and(|hold| hold.exists())
+    }
+
+    fn wait_while_held(&mut self) {
+        if !self.held() {
+            return;
+        }
+        self.lab_lines.push((
+            self.clock.now(),
+            "taken by hand: the scenario waits".to_owned(),
+        ));
+        while self.held() && !self.stopped() {
+            self.glimpse();
+            self.clock.sleep(POLL);
+        }
+        self.lab_lines.push((
+            self.clock.now(),
+            "handed back: the scenario goes on".to_owned(),
+        ));
+    }
+
     /// Runs `scenario` step by step.
     ///
     /// After a failed step the steps that need the game are skipped until the next launch; the save data checks
@@ -446,6 +490,7 @@ impl<'a> Runner<'a> {
                     | Step::ExpectSaveKept
                     | Step::ExpectPerformance { .. }
             );
+            self.wait_while_held();
             let result = if self.stopped() {
                 self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None)
             } else if broken && !independent {
@@ -539,6 +584,11 @@ impl<'a> Runner<'a> {
                 }
             }
             Step::Screenshot { name } => self.screenshot(step, name),
+            Step::ExpectScreen {
+                name,
+                reference,
+                tolerance,
+            } => self.expect_screen(step, name, reference, *tolerance),
             Step::ExpectChange {
                 from,
                 to,
@@ -568,6 +618,7 @@ impl<'a> Runner<'a> {
             }
             Step::ExpectPattern { name } => self.expect_pattern(step, name),
             Step::ExpectInput => self.expect_input(step),
+            Step::RandomPresses { seconds, seed } => self.random_presses(step, *seconds, *seed),
             Step::Close { timeout } => self.close(step, *timeout),
         }
     }
@@ -690,7 +741,7 @@ impl<'a> Runner<'a> {
     }
 
     fn wait_for(&mut self, step: &Step, milestone: Milestone, timeout: u32) -> StepResult {
-        let deadline = self.clock.now() + Duration::from_secs(u64::from(timeout));
+        let mut deadline = self.clock.now() + Duration::from_secs(u64::from(timeout));
         let waited_from = self.clock.now();
         loop {
             if self.stopped() {
@@ -753,8 +804,80 @@ impl<'a> Runner<'a> {
                 }
                 return self.result(step, Outcome::Fail, detail, None);
             }
+            if self.held() {
+                deadline += POLL;
+            }
             self.glimpse();
             self.clock.sleep(POLL);
+        }
+    }
+
+    fn expect_screen(
+        &mut self,
+        step: &Step,
+        name: &str,
+        reference: &str,
+        tolerance: f32,
+    ) -> StepResult {
+        let shot = self.screenshot(step, name);
+        if shot.outcome == Outcome::Fail {
+            return shot;
+        }
+        let file = format!("{name}.png");
+        let plain = Path::new(reference)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+        let Some(path) = self
+            .references
+            .as_ref()
+            .filter(|_| plain)
+            .map(|dir| dir.join(reference))
+        else {
+            return self.result(
+                step,
+                Outcome::Fail,
+                format!("{reference} is not a path in the references folder"),
+                Some(file),
+            );
+        };
+        let read = |path: &Path| {
+            std::fs::read(path)
+                .ok()
+                .and_then(|png| Thumbnail::from_png(&png).ok())
+        };
+        match (read(&self.dir.join(&file)), read(&path)) {
+            (Some(now), Some(expected)) => {
+                let difference = now.difference(&expected).mean;
+                if difference <= f64::from(tolerance) {
+                    self.result(
+                        step,
+                        Outcome::Pass,
+                        format!("shows {reference} (difference {difference:.1})"),
+                        Some(file),
+                    )
+                } else {
+                    self.result(
+                        step,
+                        Outcome::Fail,
+                        format!("differs from {reference}: {difference:.1}, more than {tolerance}"),
+                        Some(file),
+                    )
+                }
+            }
+            (_, None) => self.result(
+                step,
+                Outcome::Warn,
+                format!(
+                    "no reference picture {reference} yet: make one from this screenshot in History"
+                ),
+                Some(file),
+            ),
+            (None, _) => self.result(
+                step,
+                Outcome::Fail,
+                "the screenshot does not read".to_owned(),
+                Some(file),
+            ),
         }
     }
 
@@ -936,6 +1059,72 @@ impl<'a> Runner<'a> {
             let detail = format!("all {} files kept", remembered.len());
             self.result(step, Outcome::Pass, detail, None)
         }
+    }
+
+    fn random_presses(&mut self, step: &Step, seconds: u32, seed: u64) -> StepResult {
+        const BUTTONS: [SwitchButton; 13] = [
+            SwitchButton::A,
+            SwitchButton::B,
+            SwitchButton::X,
+            SwitchButton::Y,
+            SwitchButton::L,
+            SwitchButton::R,
+            SwitchButton::Zl,
+            SwitchButton::Zr,
+            SwitchButton::Plus,
+            SwitchButton::Up,
+            SwitchButton::Down,
+            SwitchButton::Left,
+            SwitchButton::Right,
+        ];
+        let mut state = seed.max(1);
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let end = self.clock.now() + Duration::from_secs(u64::from(seconds));
+        let mut count = 0u32;
+        while self.clock.now() < end {
+            if self.stopped() {
+                return self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None);
+            }
+            let crashed = matches!(self.current_launch().exit, Some(Exit::Code(_)));
+            if crashed || !self.emulator.running() {
+                self.running = false;
+                let why = if crashed {
+                    format!(
+                        "the game crashed ({})",
+                        describe_exit(self.current_launch().exit)
+                    )
+                } else {
+                    self.emulator
+                        .end_reason()
+                        .unwrap_or_else(|| "the game ended".to_owned())
+                };
+                return self.result(
+                    step,
+                    Outcome::Fail,
+                    format!("{why} after {count} random presses, seed {seed}"),
+                    None,
+                );
+            }
+            let button = BUTTONS[usize::try_from(next() % BUTTONS.len() as u64).unwrap_or(0)];
+            let hold = Duration::from_millis(50 + next() % 450);
+            if let Err(error) = self.emulator.press(&[button], hold) {
+                return self.result(step, Outcome::Fail, error.to_string(), None);
+            }
+            count += 1;
+            self.glimpse();
+            self.clock.sleep(Duration::from_millis(100 + next() % 900));
+        }
+        self.result(
+            step,
+            Outcome::Pass,
+            format!("{count} random presses, seed {seed}, the game still runs"),
+            None,
+        )
     }
 
     fn close(&mut self, step: &Step, timeout: u32) -> StepResult {
@@ -1458,6 +1647,74 @@ mod tests {
         assert_eq!(result.steps[3].outcome, Outcome::Skip);
         assert!(emulator.presses.is_empty());
         assert!(!emulator.running);
+    }
+
+    struct Releasing<'a> {
+        clock: &'a FakeClock,
+        hold: PathBuf,
+        release_at: Duration,
+    }
+
+    impl Clock for Releasing<'_> {
+        fn now(&self) -> Duration {
+            self.clock.now()
+        }
+        fn sleep(&self, duration: Duration) {
+            self.clock.sleep(duration);
+            if self.clock.now() >= self.release_at {
+                let _ = std::fs::remove_file(&self.hold);
+            }
+        }
+    }
+
+    #[test]
+    fn random_presses_with_one_seed_press_the_same_buttons() {
+        let scenario = Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::RandomPresses {
+                    seconds: 10,
+                    seed: 7,
+                },
+                Step::Close { timeout: 10 },
+            ],
+        };
+        let (first, emulator) = run(FakeEmulator::default(), &scenario);
+        let (_, again) = run(FakeEmulator::default(), &scenario);
+        assert_eq!(
+            first.steps[1].outcome,
+            Outcome::Pass,
+            "{}",
+            first.steps[1].detail
+        );
+        assert!(emulator.presses.len() >= 10);
+        assert_eq!(emulator.presses, again.presses);
+    }
+
+    #[test]
+    fn a_held_scenario_starts_no_step_until_the_game_is_handed_back() {
+        let dir = std::env::temp_dir().join(format!("carafe-lab-hold-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hold = dir.join(HOLD_FILE);
+        std::fs::write(&hold, "").unwrap();
+        let clock = FakeClock(Cell::new(Duration::ZERO));
+        let releasing = Releasing {
+            clock: &clock,
+            hold: hold.clone(),
+            release_at: Duration::from_secs(20),
+        };
+        let mut emulator = FakeEmulator::default();
+        let result = Runner::new(&mut emulator, &releasing, title(), "game.nsp", &dir)
+            .with_hold(&hold)
+            .run(&waiting(5), |_| {});
+        assert!(
+            result.steps[0].at >= 20.0,
+            "launched at {}",
+            result.steps[0].at
+        );
+        assert_eq!(result.steps[1].outcome, Outcome::Fail);
+        assert!(!hold.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

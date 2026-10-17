@@ -58,6 +58,10 @@ function StepParams({ step }: { step: Step }) {
     case "expectPerformance":
       params.push(step.threshold === undefined ? t("steps.gameThreshold") : `${step.threshold} %`);
       break;
+    case "randomPresses":
+      params.push(t("units.seconds", { count: step.seconds }));
+      params.push(`${t("steps.seed")} ${step.seed}`);
+      break;
     default:
       break;
   }

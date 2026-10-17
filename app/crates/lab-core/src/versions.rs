@@ -151,6 +151,8 @@ pub fn trend(before: &Spread, after: &Spread, higher_is_better: bool) -> Trend {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct VersionStep {
+    /// The game's commit before, the one this step is compared with; `None` at its first commit.
+    pub previous: Option<String>,
     /// The performance at this commit.
     pub perf: VersionPerf,
     /// How the time to the first frame went; `None` at the game's first commit or when either side lacks it.
@@ -177,6 +179,7 @@ pub fn steps(perf: &[VersionPerf]) -> Vec<VersionStep> {
                 .rev()
                 .find(|earlier| earlier.game == now.game);
             VersionStep {
+                previous: before.map(|before| before.commit.clone()),
                 perf: now.clone(),
                 first_frame: before
                     .and_then(|before| compare(before.first_frame, now.first_frame, false)),

@@ -6,6 +6,7 @@ pub mod engine;
 pub mod history;
 pub mod queue;
 pub mod ready;
+pub mod releases;
 pub mod report;
 pub mod run;
 pub mod tidy;

@@ -124,6 +124,18 @@ export function RunPage() {
   const screen = usePolling(api.readScreen, 0);
   const perf = usePolling(() => api.livePerf(90), live ? 2000 : 0);
   const [control, setControl] = useState(false);
+  const takeControl = (on: boolean) => {
+    api
+      .holdGame(on)
+      .then(() => setControl(on))
+      .catch(() => setControl(false));
+  };
+  useEffect(
+    () => () => {
+      void api.holdGame(false);
+    },
+    [],
+  );
   const [reloads, setReloads] = useState(0);
   const [lit, setLit] = useState<SwitchButton[]>([]);
   const seen = useRef(0);
@@ -204,7 +216,7 @@ export function RunPage() {
           </div>
           {showLive ? (
             <div className={styles.actions}>
-              <Button variant={control ? "primary" : "default"} onClick={() => setControl(!control)}>
+              <Button variant={control ? "primary" : "default"} onClick={() => takeControl(!control)}>
                 {control ? t("run.giveBack") : t("run.takeControl")}
               </Button>
               <Button variant="ghost" onClick={() => setReloads(reloads + 1)}>

@@ -89,6 +89,28 @@ pub enum Step {
         #[ts(optional)]
         threshold: Option<u32>,
     },
+    /// Saves a picture of the screen under `name` and checks that it shows what the reference picture shows: it fails
+    /// when the two differ by more than `tolerance`.
+    #[serde(rename_all = "camelCase")]
+    ExpectScreen {
+        /// Name of the picture, unique in the scenario.
+        name: String,
+        /// The reference picture, a path in the `references` folder next to `lab.json`, such as `openttd/menu.png`.
+        reference: String,
+        /// The mean brightness difference, 0–255, the two pictures may have.
+        #[serde(default = "default_tolerance")]
+        tolerance: f32,
+    },
+    /// Presses random buttons for `seconds`, to catch a crash or a hang without a scenario; fails when the game ends.
+    #[serde(rename_all = "camelCase")]
+    RandomPresses {
+        /// Seconds to press for.
+        seconds: u32,
+        /// The seed of the presses, so a run that broke the game can press the same again.
+        #[serde(default = "default_seed")]
+        #[ts(type = "number")]
+        seed: u64,
+    },
     /// Asks the game to close the way the HOME Menu does, and waits for it to end.
     #[serde(rename_all = "camelCase")]
     Close {
@@ -96,6 +118,17 @@ pub enum Step {
         #[serde(default = "default_close_timeout")]
         timeout: u32,
     },
+}
+
+/// The longest [`Step::RandomPresses`], in seconds.
+pub const MAX_RANDOM_SECONDS: u32 = 3600;
+
+fn default_tolerance() -> f32 {
+    12.0
+}
+
+fn default_seed() -> u64 {
+    1
 }
 
 fn default_hold() -> f32 {
@@ -172,6 +205,8 @@ impl Scenario {
                     | Step::Press { .. }
                     | Step::Screenshot { .. }
                     | Step::Close { .. }
+                    | Step::RandomPresses { .. }
+                    | Step::ExpectScreen { .. }
                     | Step::ExpectInput
             );
             if needs_game && !running {
@@ -186,6 +221,11 @@ impl Scenario {
                 }
                 Step::Close { .. } => running = false,
                 Step::Wait { seconds } => check_time(*seconds, true, number)?,
+                Step::RandomPresses { seconds, .. }
+                    if *seconds == 0 || *seconds > MAX_RANDOM_SECONDS =>
+                {
+                    return Err(ScenarioError::Time(number));
+                }
                 Step::Press { hold, buttons } => {
                     check_time(*hold, false, number)?;
                     if buttons.is_empty() {
@@ -197,7 +237,7 @@ impl Scenario {
                 Step::WaitFor { timeout, .. } if *timeout == 0 => {
                     return Err(ScenarioError::Time(number));
                 }
-                Step::Screenshot { name } => {
+                Step::Screenshot { name } | Step::ExpectScreen { name, .. } => {
                     if screenshots.contains(&name.as_str()) {
                         return Err(ScenarioError::DuplicateScreenshot(number, name.clone()));
                     }

@@ -54,7 +54,27 @@ name: string, } | { "step": "expectInput" } | { "step": "expectSave" } | { "step
 /**
  * The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
  */
-threshold?: number, } | { "step": "close", 
+threshold?: number, } | { "step": "expectScreen", 
+/**
+ * Name of the picture, unique in the scenario.
+ */
+name: string, 
+/**
+ * The reference picture, a path in the `references` folder next to `lab.json`, such as `openttd/menu.png`.
+ */
+reference: string, 
+/**
+ * The mean brightness difference, 0–255, the two pictures may have.
+ */
+tolerance: number, } | { "step": "randomPresses", 
+/**
+ * Seconds to press for.
+ */
+seconds: number, 
+/**
+ * The seed of the presses, so a run that broke the game can press the same again.
+ */
+seed: number, } | { "step": "close", 
 /**
  * Seconds to wait for the game to end before it is stopped by force.
  */

@@ -26,6 +26,8 @@ use lab_run::console::{self, ConsoleVerdict};
 use lab_run::history::{self, EVENTS_FILE, GameProblems, RunSummary};
 use lab_run::queue::{QueueState, unix_now};
 use lab_run::ready;
+use lab_run::releases::{self, Release};
+use lab_run::run::HOLD_FILE;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
@@ -249,6 +251,26 @@ pub struct RunRequest {
     pub build_only: Option<bool>,
     /// The diagnostics the games run with.
     pub diagnostics: Option<Vec<Diagnostic>>,
+    /// A/B between runtimes: the runtime of variant B, such as `release:v0.2.3`.
+    pub ab_runtime: Option<String>,
+}
+
+/// Returns Carafe's releases, newest first, each with whether the lab has built its runtime.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.json` is missing or broken.
+#[tauri::command]
+pub async fn list_releases(lab: State<'_, Arc<Lab>>) -> Result<Vec<Release>, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let config = lab.config()?;
+        Ok(releases::list(
+            &config.carafe_checkout(lab.repository()),
+            &config.work,
+        ))
+    })
+    .await
 }
 
 /// What a ready NSP was built from.
@@ -326,6 +348,49 @@ fn same_folder(one: &Path, other: &Path) -> bool {
     plain(one) == plain(other)
 }
 
+/// Starts `carafe-lab bisect` in its own process: the search for the Carafe commit between `good` and `bad` that
+/// broke `game`, each commit tried `repeat` times.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.json` is broken, the commits are not commit names or the program cannot start.
+#[tauri::command]
+pub async fn start_bisect(
+    app: AppHandle,
+    lab: State<'_, Arc<Lab>>,
+    game: String,
+    good: String,
+    bad: String,
+    repeat: u32,
+) -> Result<(), CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let commit = |name: &str| !name.is_empty() && name.chars().all(|c| c.is_ascii_hexdigit());
+        if !commit(&good) || !commit(&bad) {
+            return Err("not a commit".into());
+        }
+        let work = lab.config()?.work;
+        let logs = work.join("queue").join(RUN_LOGS);
+        fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
+        keep_newest(&logs, KEPT_RUN_LOGS);
+        let log_path = logs.join(format!("{}.log", unix_now()));
+        let args = [
+            "bisect".to_owned(),
+            game,
+            "--good".to_owned(),
+            good,
+            "--bad".to_owned(),
+            bad,
+            "--repeat".to_owned(),
+            repeat.clamp(1, 10).to_string(),
+        ];
+        detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;
+        std::thread::spawn(move || watch_exit(&app, &log_path));
+        Ok(())
+    })
+    .await
+}
+
 /// Starts `carafe-lab run` in its own process, so closing the window does not stop it, as `request` asks.
 ///
 /// # Errors
@@ -352,6 +417,7 @@ pub async fn start_run(
         rebuild,
         build_only,
         diagnostics,
+        ab_runtime,
     } = request;
     blocking(move || {
         let work = lab.config()?.work;
@@ -395,6 +461,9 @@ pub async fn start_run(
             if rebuild == Some(true) {
                 args.push("--rebuild".to_owned());
             }
+        }
+        if let Some(runtime) = ab_runtime.filter(|runtime| !runtime.is_empty()) {
+            args.extend(["--ab-runtime".to_owned(), runtime]);
         }
         if let Some(list) = diagnostics.filter(|list| !list.is_empty()) {
             args.extend([
@@ -702,6 +771,28 @@ pub async fn forget_firmware(lab: State<'_, Arc<Lab>>) -> Result<FirmwareState, 
         settings.firmware = None;
         settings.save(&file)?;
         Ok(firmware_state(&lab))
+    })
+    .await
+}
+
+/// Holds the running scenario while a person plays when `on`, and hands the game back to it otherwise.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.json` is broken or the hold cannot be set or lifted.
+#[tauri::command]
+pub async fn hold_game(lab: State<'_, Arc<Lab>>, on: bool) -> Result<(), CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let queue = lab.config()?.work.join("queue");
+        let hold = queue.join(HOLD_FILE);
+        if on {
+            fs::create_dir_all(&queue).map_err(|error| error.to_string())?;
+            fs::write(&hold, "").map_err(|error| error.to_string())?;
+        } else if hold.exists() {
+            fs::remove_file(&hold).map_err(|error| error.to_string())?;
+        }
+        Ok(())
     })
     .await
 }

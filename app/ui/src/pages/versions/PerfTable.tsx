@@ -1,17 +1,24 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router";
+import { useLab } from "@/features/lab/LabProvider";
 import type { Spread } from "@/shared/api/bindings/Spread";
 import type { Trend } from "@/shared/api/bindings/Trend";
 import type { VersionStep } from "@/shared/api/bindings/VersionStep";
 import { api, errorText } from "@/shared/api/commands";
+import { Button } from "@/shared/ui/Button";
 import { Notice } from "@/shared/ui/Notice";
 import styles from "@/shared/ui/lab.module.css";
 import versions from "./VersionsPage.module.css";
 
 type Measure = { key: string; spread: Spread | null; trend: Trend | null; format: (value: number) => string };
 
+const BISECT_REPEATS = 3;
+
 export function PerfTable({ refreshKey }: { refreshKey: string }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { status } = useLab();
   const [steps, setSteps] = useState<VersionStep[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -23,6 +30,16 @@ export function PerfTable({ refreshKey }: { refreshKey: string }) {
       })
       .catch((reason: unknown) => setError(errorText(reason)));
   }, [refreshKey]);
+  const bisect = (game: string, good: string, bad: string) => {
+    setError(null);
+    api
+      .startBisect(game, good, bad, BISECT_REPEATS)
+      .then(() => {
+        status.refresh();
+        navigate("/run");
+      })
+      .catch((reason: unknown) => setError(errorText(reason)));
+  };
   const commits = [...new Set(steps.map((step) => step.perf.commit))];
   const games = [...new Set(steps.map((step) => step.perf.game))];
   const cell = (game: string, commit: string) =>
@@ -78,6 +95,15 @@ export function PerfTable({ refreshKey }: { refreshKey: string }) {
                             </span>
                           ))}
                         <span className={styles.muted}>{t("versions.repeats", { count: repeats })}</span>
+                        {step.previous && isCommit(step.previous) && isCommit(commit) && worse(step) ? (
+                          <Button
+                            variant="ghost"
+                            title={t("versions.bisectHint", { good: step.previous, bad: commit })}
+                            onClick={() => bisect(game, step.previous ?? "", commit)}
+                          >
+                            {t("versions.bisect")}
+                          </Button>
+                        ) : null}
                       </div>
                     </td>
                   );
@@ -89,6 +115,14 @@ export function PerfTable({ refreshKey }: { refreshKey: string }) {
       </div>
     </>
   );
+}
+
+function isCommit(name: string): boolean {
+  return /^[0-9a-f]+$/i.test(name);
+}
+
+function worse(step: VersionStep): boolean {
+  return [step.firstFrame, step.fps, step.p99Ms].includes("worse");
 }
 
 function trendClass(trend: Trend | null): string | undefined {

@@ -2,6 +2,7 @@
 
 mod cli;
 mod live;
+mod releases;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ use carafe_core::settings::{AutorunSettings, InputMode, SwitchButton};
 use carafe_core::wizard::BuildRequest;
 use carafe_folder::DiskFolderInspector;
 use carafe_pack::HacBrewPacker;
+use lab_core::bisect;
 use lab_core::config::{self, Config, Game};
 use lab_core::diagnostics::Diagnostic;
 use lab_core::emulator::{EdenCpu, Gpu};
@@ -33,7 +35,9 @@ use lab_core::time::Utc;
 use lab_core::versions;
 use lab_core::view::LabView;
 use lab_eden::Eden;
-use lab_run::engine::{Engine, Event, NspSource, Planned, READY, with_diagnostics};
+use lab_run::engine::{
+    Alternate, Engine, Event, NspSource, Planned, READY, safe_name, with_diagnostics,
+};
 use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
 use lab_run::ready::{self, ReadyNsp};
@@ -50,6 +54,7 @@ const QUEUE_POLL: Duration = Duration::from_secs(2);
 const PERF_WINDOW_MS: u64 = 10_000;
 const LOG_PROBLEMS_SHOWN: usize = 15;
 const KEPT_IMAGES: &str = "carafe-lab-eden-kept";
+const REFERENCES_DIR: &str = "references";
 const RUNTIME_VERSION: &str = match option_env!("CARAFE_RUNTIME_VERSION") {
     Some(version) => version,
     None => "dev",
@@ -82,6 +87,8 @@ struct Lab {
     packer: HacBrewPacker,
     eden: Eden,
     scenario: Option<Scenario>,
+    alternate: Option<(HacBrewPacker, PathBuf, String)>,
+    references: PathBuf,
 }
 
 struct KeptParts {
@@ -125,6 +132,18 @@ fn start(args: Args) -> Result<ExitCode, String> {
         Command::Stop { id } => return stop_run(&config, id.as_deref()),
         Command::Perf => return show_perf(&config, args.json),
         Command::Tidy => return tidy_runs(&config, args.apply, args.json),
+        Command::Bisect { game } => {
+            let game = game
+                .as_deref()
+                .ok_or("bisect needs a game's name from lab.json")?;
+            return bisect_game(&config, &args, game);
+        }
+        Command::Release { tag } => {
+            let tag = tag
+                .as_deref()
+                .ok_or("release needs a tag, such as v0.2.3 or latest")?;
+            return build_release(&config, tag);
+        }
         Command::Nsp { file } => {
             let file = file.as_deref().ok_or("nsp needs an NSP file")?;
             return show_nsp(&config, file, args.json);
@@ -139,10 +158,11 @@ fn start(args: Args) -> Result<ExitCode, String> {
         .as_deref()
         .map(|dir| kept_parts(&config, dir))
         .transpose()?;
-    let runtime = like.as_ref().map_or_else(
-        || desktop.join("resources").join("carafe-runtime.bin"),
-        |kept| kept.runtime.clone(),
-    );
+    let runtime = match (&args.runtime, &like) {
+        (Some(file), _) => file.clone(),
+        (None, Some(kept)) => kept.runtime.clone(),
+        (None, None) => desktop.join("resources").join("carafe-runtime.bin"),
+    };
     let packer = HacBrewPacker::new(
         runtime.clone(),
         desktop.join("binaries").join(hacbrewpack_name()),
@@ -176,7 +196,24 @@ fn start(args: Args) -> Result<ExitCode, String> {
         .as_deref()
         .map(|choice| plan_scenario(choice, &config_path, timeout))
         .transpose()?;
+    let alternate = args
+        .ab_runtime
+        .as_deref()
+        .map(|spec| releases::runtime(spec, &config.work, &carafe_checkout(&config)))
+        .transpose()?
+        .map(|(file, label)| {
+            let packer = HacBrewPacker::new(
+                file.clone(),
+                desktop.join("binaries").join(hacbrewpack_name()),
+            );
+            (packer, file, label)
+        });
     let lab = Lab {
+        references: config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(REFERENCES_DIR),
+        alternate,
         work: config.work.clone(),
         gpu,
         cpu: config.emulator_cpu,
@@ -220,8 +257,160 @@ fn start(args: Args) -> Result<ExitCode, String> {
         | Command::Stop { .. }
         | Command::Perf
         | Command::Nsp { .. }
+        | Command::Release { .. }
+        | Command::Bisect { .. }
         | Command::Tidy => Ok(ExitCode::SUCCESS),
     }
+}
+
+fn bisect_game(config: &Config, args: &Args, game: &str) -> Result<ExitCode, String> {
+    config
+        .pick(&[game.to_owned()])
+        .map_err(|error| error.to_string())?;
+    let carafe = carafe_checkout(config);
+    let short = |revision: &str| git_out(&carafe, &["rev-parse", "--short=12", revision]);
+    let good = short(
+        args.good
+            .as_deref()
+            .ok_or("bisect needs --good <commit or tag>")?,
+    )?;
+    let bad = short(
+        args.bad
+            .as_deref()
+            .ok_or("bisect needs --bad <commit or tag>")?,
+    )?;
+    let range = format!("{good}..{bad}");
+    let between = git_out(
+        &carafe,
+        &[
+            "log",
+            "--reverse",
+            "--first-parent",
+            "--format=%h",
+            "--abbrev=12",
+            &range,
+        ],
+    )?;
+    let mut commits = vec![good.clone()];
+    commits.extend(between.lines().map(str::to_owned));
+    if commits.last() != Some(&bad) || commits.len() < 2 {
+        return Err(format!(
+            "{bad} does not come after {good} on Carafe's main line"
+        ));
+    }
+    let log =
+        config
+            .work
+            .join("bisect")
+            .join(format!("{}-{}.json", now().folder(), safe_name(game)));
+    let mut verdicts: Vec<(String, bisect::Verdict)> = Vec::new();
+    loop {
+        let next = bisect::next(&commits, &verdicts);
+        let record = serde_json::json!({
+            "game": game,
+            "good": good,
+            "bad": bad,
+            "commits": commits,
+            "verdicts": verdicts,
+            "next": next,
+        });
+        if let Some(dir) = log.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let _ = fs::write(
+            &log,
+            serde_json::to_string_pretty(&record).unwrap_or_default(),
+        );
+        match next {
+            bisect::Next::Test { commit, left } => {
+                println!("{left} commits in question; trying {commit}");
+                let verdict = try_commit(config, args, game, &carafe, &commit);
+                println!("{commit}: {verdict:?}");
+                verdicts.push((commit, verdict));
+            }
+            bisect::Next::Found { commit } => {
+                let subject = git_out(&carafe, &["log", "-1", "--format=%h %s", &commit])?;
+                println!("first bad commit: {subject}");
+                return Ok(ExitCode::SUCCESS);
+            }
+            bisect::Next::Unsure { commits } => {
+                println!(
+                    "one of these, which could not be tried: {}",
+                    commits.join(", ")
+                );
+                return Ok(ExitCode::from(3));
+            }
+        }
+    }
+}
+
+fn try_commit(
+    config: &Config,
+    args: &Args,
+    game: &str,
+    carafe: &Path,
+    commit: &str,
+) -> bisect::Verdict {
+    let runtime = match releases::build_commit(carafe, &config.work, commit, &mut |line| {
+        println!("  {line}")
+    }) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            println!("  {error}");
+            return bisect::Verdict::Skip;
+        }
+    };
+    let Ok(exe) = std::env::current_exe() else {
+        return bisect::Verdict::Skip;
+    };
+    let mut command = std::process::Command::new(exe);
+    if let Some(file) = &args.config {
+        command.arg("--config").arg(file);
+    }
+    command
+        .args([
+            "run",
+            "--games",
+            game,
+            "--repeat",
+            &args.repeat.to_string(),
+            "--runtime",
+        ])
+        .arg(&runtime)
+        .args(["--no-retry", "--no-open", "--json", "--who", "bisect"]);
+    let Ok(output) = command.output() else {
+        return bisect::Verdict::Skip;
+    };
+    let finished = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["event"] == "runFinished");
+    match finished.and_then(|event| event["failed"].as_u64()) {
+        Some(0) => bisect::Verdict::Good,
+        Some(_) => bisect::Verdict::Bad,
+        None => bisect::Verdict::Skip,
+    }
+}
+
+fn git_out(checkout: &Path, args: &[&str]) -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(checkout)
+        .args(args)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+fn build_release(config: &Config, name: &str) -> Result<ExitCode, String> {
+    let carafe = carafe_checkout(config);
+    let tag = releases::tag(&carafe, name)?;
+    let kept = releases::build(&carafe, &config.work, &tag, &mut |line| println!("{line}"))?;
+    println!("{}", kept.display());
+    Ok(ExitCode::SUCCESS)
 }
 
 fn show_nsp(config: &Config, file: &Path, json: bool) -> Result<ExitCode, String> {
@@ -746,6 +935,28 @@ impl Lab {
                     ]
                 })
                 .collect()
+        } else if let Some((_, _, label)) = &self.alternate {
+            let [game] = games.as_slice() else {
+                return Err(
+                    "an A/B run takes exactly one game: name it with --games or --only".to_owned(),
+                );
+            };
+            what = format!("A/B {} against runtime {label}", game.name);
+            let variant_b = |lab: &Self| {
+                let mut planned =
+                    lab.plan(game, format!("{}{VARIANT_B}", game.name), &game.settings);
+                planned.nsp = NspSource::Alternate;
+                planned.label = format!("runtime {label} · {}", planned.label);
+                planned
+            };
+            (0..repeat)
+                .flat_map(|_| {
+                    [
+                        self.plan(game, format!("{}{VARIANT_A}", game.name), &game.settings),
+                        variant_b(&self),
+                    ]
+                })
+                .collect()
         } else {
             games
                 .iter()
@@ -1015,7 +1226,22 @@ impl Lab {
             emulator_label,
             stamp,
             build_only: self.args.build_only,
-            retry_failed: !self.args.no_retry && self.args.ab.is_none() && what != "probes",
+            alternate: self
+                .alternate
+                .as_ref()
+                .map(|(packer, file, label)| Alternate {
+                    packer,
+                    build_inputs: vec![
+                        file.clone(),
+                        self.desktop.join("binaries").join(hacbrewpack_name()),
+                    ],
+                    runtime_version: label.clone(),
+                }),
+            retry_failed: !self.args.no_retry
+                && self.args.ab.is_none()
+                && self.alternate.is_none()
+                && what != "probes",
+            references: self.references.clone(),
             stop,
         };
         let mut on_event = |event: &Event| {

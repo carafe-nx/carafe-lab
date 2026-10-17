@@ -464,6 +464,10 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
             format!("{} {}", lang.pick("Нажатие", "Press"), names.join("+"))
         }
         Step::Screenshot { name } => format!("{} {name}", lang.pick("Скриншот", "Screenshot")),
+        Step::ExpectScreen { reference, .. } => format!(
+            "{} {reference}",
+            lang.pick("На экране как на эталоне", "The screen shows")
+        ),
         Step::ExpectChange { from, to, .. } => format!(
             "{} {from} → {to}",
             lang.pick("Ввод дошёл до игры", "Input reached the game")
@@ -493,6 +497,11 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "No slower than the last version",
             )
             .to_owned(),
+        Step::RandomPresses { seconds, .. } => format!(
+            "{} {seconds} {}",
+            lang.pick("Случайные нажатия", "Random presses for"),
+            lang.pick("с", "s")
+        ),
         Step::Close { .. } => lang
             .pick("Закрытие, как из меню HOME", "Close, as from the HOME Menu")
             .to_owned(),

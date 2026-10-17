@@ -13,16 +13,12 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ### 3. Versions and history
 
-- [ ] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
-- [ ] `feature` A regression between two versions starts a bisection over Carafe's commits
+- [ ] **`feature` A regression between two versions starts a bisection over Carafe's commits**
 
 ### 4. Scenarios and A/B
 
 - [ ] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
 - [ ] `feature` Reference screenshots for "the screen shows …" checks
-- [ ] `feature` Random presses for a set time, to catch crashes and hangs without a scenario
-- [ ] `feature` A/B between two runtime builds or a runtime flag, not only a game setting
-- [ ] `feature` "Take control": play by hand during a run and hand the game back
 - [ ] `feature` Scouting: play by hand, the lab records presses and milestones into a scenario
 
 ### Research and later ideas (not the app)
@@ -59,6 +55,11 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
 
 ## Done
+
+- [x] `feature` "Take control": play by hand during a run and hand the game back
+- [x] `feature` Random presses for a set time, to catch crashes and hangs without a scenario
+- [x] `feature` A/B between two runtime builds or a runtime flag, not only a game setting
+- [x] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
 
 - [x] `feature` Diagnostics as named flags instead of temporary patches
 - [x] `feature` One timeline of all log sources with one clock

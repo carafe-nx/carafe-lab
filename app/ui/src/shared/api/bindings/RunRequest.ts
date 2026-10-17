@@ -56,4 +56,8 @@ buildOnly: boolean | null,
 /**
  * The diagnostics the games run with.
  */
-diagnostics: Array<Diagnostic> | null, };
+diagnostics: Array<Diagnostic> | null, 
+/**
+ * A/B between runtimes: the runtime of variant B, such as `release:v0.2.3`.
+ */
+abRuntime: string | null, };

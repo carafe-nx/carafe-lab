@@ -9,6 +9,7 @@ import type { LabStatus } from "./bindings/LabStatus";
 import type { LabView } from "./bindings/LabView";
 import type { NspInfo } from "./bindings/NspInfo";
 import type { PerfSample } from "./bindings/PerfSample";
+import type { Release } from "./bindings/Release";
 import type { RunRequest } from "./bindings/RunRequest";
 import type { RunSummary } from "./bindings/RunSummary";
 import type { Scenario } from "./bindings/Scenario";
@@ -29,6 +30,7 @@ const noRun: RunRequest = {
   rebuild: null,
   buildOnly: null,
   diagnostics: null,
+  abRuntime: null,
 };
 
 export const api = {
@@ -49,8 +51,22 @@ export const api = {
     video: "full" | "low" | "off" | null = null,
     like: string | null = null,
     diagnostics: Diagnostic[] | null = null,
+    abRuntime: string | null = null,
   ) => {
-    const request: RunRequest = { ...noRun, set, only, games, repeat, ab, clean, scenario, video, like, diagnostics };
+    const request: RunRequest = {
+      ...noRun,
+      set,
+      only,
+      games,
+      repeat,
+      ab,
+      clean,
+      scenario,
+      video,
+      like,
+      diagnostics,
+      abRuntime,
+    };
     return invoke<void>("start_run", { request });
   },
   runReady: (
@@ -64,6 +80,10 @@ export const api = {
     return invoke<void>("start_run", { request });
   },
   readNsp: (path: string) => invoke<NspInfo>("read_nsp", { path }),
+  listReleases: () => invoke<Release[]>("list_releases"),
+  holdGame: (on: boolean) => invoke<void>("hold_game", { on }),
+  startBisect: (game: string, good: string, bad: string, repeat: number) =>
+    invoke<void>("start_bisect", { game, good, bad, repeat }),
   buildForConsole: (games: string[]) => {
     const request: RunRequest = { ...noRun, games, buildOnly: true };
     return invoke<void>("start_run", { request });

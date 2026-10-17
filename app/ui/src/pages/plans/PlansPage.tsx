@@ -51,10 +51,17 @@ export function PlansPage() {
   const scenarioFiles = [...new Set(games.flatMap((game) => (game.scenarioFile ? [game.scenarioFile] : [])))];
   const sets = Object.entries(lab.data?.sets ?? {});
   const enabled = games.filter((game) => game.enabled).map((game) => game.name);
-  const start = (set: string | null, chosen: string[] | null = null, repeat = 1, ab: string | null = null) => {
+  const start = (
+    set: string | null,
+    chosen: string[] | null = null,
+    repeat = 1,
+    ab: string | null = null,
+    abRuntime: string | null = null,
+  ) => {
     setError(null);
+    const measured = ab !== null || abRuntime !== null;
     api
-      .startRun(set, null, chosen, repeat, ab, clean, scenario || null, ab ? "low" : null, null, diagnostics)
+      .startRun(set, null, chosen, repeat, ab, clean, scenario || null, measured ? "low" : null, null, diagnostics, abRuntime)
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -128,7 +135,14 @@ export function PlansPage() {
         onStart={(chosen, repeat) => start(null, chosen, repeat)}
         onBuild={buildForConsole}
       />
-      <AbPlan games={games} onStart={(game, overrides, repeat) => start(null, [game], repeat, overrides)} />
+      <AbPlan
+        games={games}
+        onStart={(game, variant, repeat) =>
+          "overrides" in variant
+            ? start(null, [game], repeat, variant.overrides)
+            : start(null, [game], repeat, null, variant.runtime)
+        }
+      />
       <ReadyPlan onStart={startReady} />
       <div className={plans.grid}>
         <PlanCard title={t("plans.enabled")} names={enabled} onStart={() => start(null)} />
