@@ -46,9 +46,10 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    `<work>/eden/user/control/`. Button presses go through the channel, inside Eden, instead of `xdotool`. An Eden that
    crashed, stopped answering or wrote no status line for 45 s is replaced at the next launch, and the reason with the
    last lines of the container goes into the launch's `container-end.log`. Before each boot Lab reads the container's
-   memory and starts a new Eden when less than 4.5 GB of its 6 GB is left; the launch's `session.log` has the reading
-   and the choice. `false`, or `--clean` and the Plans screen's "Clean start" for one run, starts a container for
-   every launch.
+   memory and starts a new Eden when less than 5 GB of its 6 GB is left; the launch's `session.log` has the reading
+   and the choice. `--clean`, or the Plans screen's "Clean start", gives every launch of one run a new Eden, still
+   driven through the control channel. `false` starts a container for every launch the old way, closing games through
+   `SIGUSR1` and pressing through `xdotool`.
 
 From `app/`: `npm run dev` opens the window — the library, sets to run, the run going on, past runs and what the
 emulator needs to start. `cargo run --release -p lab-cli -- run [set]` runs the enabled games of `lab.json` or the

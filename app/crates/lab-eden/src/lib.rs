@@ -47,7 +47,7 @@ const STOP_GRACE: Duration = Duration::from_secs(15);
 const PRESS_GRACE: Duration = Duration::from_secs(5);
 const HANG_AFTER_MS: u64 = 45_000;
 const PERF_MARGIN_MS: u64 = 2000;
-const GAME_MEMORY: u64 = 4608 * 1024 * 1024;
+const GAME_MEMORY: u64 = 5 * 1024 * 1024 * 1024;
 const PULLED_NAND: [&str; 2] = ["user", "system/save"];
 const PUSH_NAND: &str = "set -e
 R=/to/system/Contents/registered
@@ -87,6 +87,7 @@ pub struct Eden {
     ended: Option<String>,
     presses: PressLog,
     one_eden: bool,
+    fresh: bool,
     session: Option<Session>,
     perf_from: Option<u64>,
     firmware: Option<PathBuf>,
@@ -172,6 +173,7 @@ impl Eden {
             ended: None,
             presses: PressLog::default(),
             one_eden: false,
+            fresh: false,
             session: None,
             perf_from: None,
             firmware: None,
@@ -185,6 +187,17 @@ impl Eden {
     #[must_use]
     pub fn with_one_eden(mut self, one_eden: bool) -> Self {
         self.one_eden = one_eden;
+        self
+    }
+
+    /// Returns the emulator that starts a new Eden for every launch and still drives it through the control channel,
+    /// so no game can affect the next one; it implies [`Eden::with_one_eden`].
+    #[must_use]
+    pub fn with_fresh_eden(mut self, fresh: bool) -> Self {
+        self.fresh = fresh;
+        if fresh {
+            self.one_eden = true;
+        }
         self
     }
 
@@ -551,12 +564,15 @@ impl Eden {
         } else {
             String::new()
         };
-        let roomy = alive && room_left(&readings, GAME_MEMORY);
+        let roomy = alive && !self.fresh && room_left(&readings, GAME_MEMORY);
+        let choice = match (roomy, self.fresh) {
+            (true, _) => "same Eden",
+            (false, true) => "new Eden: clean start",
+            (false, false) => "new Eden",
+        };
         let note = format!(
-            "before boot: memory {} (current, max); a game needs {GAME_MEMORY}; {}
-",
+            "before boot: memory {} (current, max); a game needs {GAME_MEMORY}; {choice}\n",
             readings.split_whitespace().collect::<Vec<_>>().join(", "),
-            if roomy { "same Eden" } else { "new Eden" }
         );
         let _ = fs::write(self.user_dir.join("log").join(SESSION_FILE), note);
         if alive && !roomy {

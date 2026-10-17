@@ -124,7 +124,8 @@ fn start(args: Args) -> Result<ExitCode, String> {
         config.emulator_cpu,
     )
     .with_settings(config.eden_settings.clone())
-    .with_one_eden(config.one_eden && !args.clean)
+    .with_one_eden(config.one_eden)
+    .with_fresh_eden(args.clean)
     .with_firmware(local_settings(&config_path)?.firmware);
     if let Some(image) = &config.eden_image {
         eden = eden.with_image(image.clone());

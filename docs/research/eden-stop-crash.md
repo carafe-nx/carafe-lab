@@ -41,6 +41,7 @@ One Eden now serves a whole run on the WSL GPU. Before the fix, it was replaced 
 Keeping Eden alive across games showed the next limit: the emulated Switch's memory (a shared-memory file of about
 4 GB) kept the pages the stopped game had touched, so the second launch of OpenTTD ran the 6 GB container out of
 memory. `patches/eden/0048` hands those pages back when software stops, and trims the heap Eden's threads freed. Eden
-still keeps about 0.5 GB more after each game, so before booting a game Lab checks the container's memory and starts a
-new Eden when less than 4.5 GB is left; each launch's `session.log` says which it chose. OpenTTD ×3 (six launches) passed
-with four launches in the first Eden.
+still keeps 0.3–0.5 GB more after each game, so before booting a game Lab checks the container's memory and starts a
+new Eden when less than 5 GB is left; each launch's `session.log` says which it chose. OpenTTD ×3 (six launches) passed
+with four launches in the first Eden. A threshold of 4.5 GB was too low: a fifth boot with 1.6 GB in use and 4.85 GB
+left ran out of memory while loading, so one OpenTTD launch takes about 4.4 GB above what Eden already holds.
