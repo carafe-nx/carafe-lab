@@ -1,3 +1,7 @@
+Carafe Lab: a d3d12 query whose 16 slots run out no longer folds its results in an endless loop: the slot count is
+reset before the compute state is restored, and a subquery that is already active is not begun again (decision 2).
+MIT, as the file it changes.
+
 --- a/src/gallium/drivers/d3d12/d3d12_query.cpp
 +++ b/src/gallium/drivers/d3d12/d3d12_query.cpp
 @@ -394,6 +394,8 @@

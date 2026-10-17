@@ -14,20 +14,22 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
 ## Once
 
 1. Docker Desktop runs. On an ARM64 PC the containers are ARM64 too, and Eden is built for `aarch64`.
-2. The submodules: `git submodule update --init external/eden external/carafe`. Carafe's own submodules are not
-   needed for Lab's crates.
+2. The submodules: `git submodule update --init external/eden external/mesa external/carafe` (Mesa is shallow:
+   only its release tag, about 70 MB). Carafe's own submodules are not needed for Lab's crates.
 3. The runtime and the packer: from the Carafe checkout's `app/`, `npm run runtime` and `npm run hacbrewpack`.
 4. The images, from this folder:
    - `docker compose --profile build build eden-build` — the image Eden is built in;
    - `docker compose --profile build run --rm eden-build` — Eden v0.2.1 with `patches/eden/*.patch` in the volume
      `carafe-lab-eden-src`, the program in `build/eden/qt/` (the first build takes about an hour; `LAB_BUILD_CPUS`,
      `LAB_BUILD_JOBS` and `LAB_BUILD_MEMORY` raise its limits of 2 CPUs, 2 jobs and 4 GB);
-   - `docker compose --profile build build mesa-d3d12` — Mesa 25.2.8 with the patched d3d12 driver and the
-     `carafe-sigchain` shim for the PC's graphics card ([decision 2](decisions/0002-wsl-gpu-patched-mesa.md)); about
-     47 MB of downloads and 5 minutes;
+   - `docker compose --profile build build mesa-build`, then `docker compose --profile build run --rm mesa-build` —
+     Mesa 25.2.8 from `external/mesa` with `patches/mesa/*.patch`, only the d3d12 driver, and the `carafe-sigchain`
+     shim, built in the volume `carafe-lab-mesa-src` into `build/mesa-d3d12/` ([decision 2](decisions/0002-wsl-gpu-patched-mesa.md),
+     [decision 4](decisions/0004-mesa-from-a-submodule.md)); then `docker compose --profile build build mesa-d3d12`
+     makes the image `carafe-lab-mesa-d3d12` of the built files;
    - `docker compose --profile build build eden` — the image `carafe-lab-eden` that runs games;
    - `docker compose --profile build run --rm probes` — the probe programs in `tools/probes/build/`.
-   `external/eden` is never edited: Eden's changes are the patches.
+   `external/eden` and `external/mesa` are never edited: their changes are the patches.
 5. Copy `lab.example.json` to `lab.json` and put your paths in. Keep `work` in a folder Windows Defender skips: the
    runtime's Wine DLLs are unpacked there for every build.
 6. `gpu: wsl` runs Eden on the PC's graphics card: OpenGL on Mesa's d3d12 driver through WSL2. `gpu: software` is the

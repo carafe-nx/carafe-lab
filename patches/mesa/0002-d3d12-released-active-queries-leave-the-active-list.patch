@@ -1,0 +1,29 @@
+Carafe Lab: a query released while it is still active is ended and taken off the context's list of active queries
+first. Releasing an active query is valid GL; the driver kept it on the list, the next flush ended it after its
+buffer was freed, and Eden crashed with a null buffer in end_subquery whenever software stopped
+(docs/research/eden-stop-crash.md).
+MIT, as the file it changes.
+
+diff --git a/src/gallium/drivers/d3d12/d3d12_query.cpp b/src/gallium/drivers/d3d12/d3d12_query.cpp
+index b4bcba8..67c9159 100644
+--- a/src/gallium/drivers/d3d12/d3d12_query.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_query.cpp
+@@ -182,11 +182,18 @@ d3d12_destroy_query(struct d3d12_query *query)
+    FREE(query);
+ }
+ 
++static void
++end_query(struct d3d12_context *ctx, struct d3d12_query *q_parent);
++
+ static void
+ d3d12_release_query(struct pipe_context *pctx,
+                     struct pipe_query *q)
+ {
+    struct d3d12_query *query = (struct d3d12_query *)q;
++   if (list_is_linked(&query->active_list) && !list_is_empty(&query->active_list)) {
++      end_query(d3d12_context(pctx), query);
++      list_delinit(&query->active_list);
++   }
+    if (pipe_reference(&query->reference, nullptr)) {
+       d3d12_destroy_query(query);
+    }

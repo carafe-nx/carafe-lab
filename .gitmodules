@@ -4,3 +4,8 @@
 [submodule "external/carafe"]
 	path = external/carafe
 	url = https://github.com/carafe-nx/carafe.git
+[submodule "external/mesa"]
+	path = external/mesa
+	url = https://gitlab.freedesktop.org/mesa/mesa.git
+	shallow = true
+	branch = mesa-25.2.8

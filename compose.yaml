@@ -18,8 +18,27 @@ services:
     working_dir: /src
     command: sh /tools/build-eden.sh
 
+  mesa-build:
+    build: docker/mesa-build
+    image: carafe-lab-mesa-build
+    profiles: ["build"]
+    cpus: ${LAB_BUILD_CPUS:-2}
+    mem_limit: ${LAB_BUILD_MEMORY:-4g}
+    memswap_limit: ${LAB_BUILD_MEMORY:-4g}
+    environment:
+      CARAFE_JOBS: ${LAB_BUILD_JOBS:-2}
+    volumes:
+      - mesa-src:/src
+      - ./build/mesa-d3d12:/out
+      - ./docker/mesa-d3d12:/tools:ro
+      - .:/lab:ro
+    working_dir: /src
+    command: sh /tools/build-mesa.sh
+
   mesa-d3d12:
-    build: docker/mesa-d3d12
+    build:
+      context: build/mesa-d3d12
+      dockerfile: ../../docker/mesa-d3d12/Dockerfile
     image: carafe-lab-mesa-d3d12
     profiles: ["build"]
 
@@ -43,3 +62,5 @@ services:
 volumes:
   eden-src:
     name: carafe-lab-eden-src
+  mesa-src:
+    name: carafe-lab-mesa-src

@@ -18,10 +18,12 @@ up is [docs/lab.md](docs/lab.md).
   - `ui/` — React in Carafe's style: `app/` (shell, routes), `pages/`, `features/lab/`, `shared/` (api with ts-rs
     bindings, i18n, theme, controls). Types come from Rust through ts-rs: `npm run bindings`.
 - `scenarios/` — scenario files a game in `lab.json` names with `"scenario": "scenarios/…"`.
-- `patches/eden/` — Lab's changes to Eden, applied in name order when Eden is built.
-- `external/eden`, `external/carafe` — git submodules pinned to exact commits. They are never edited: Eden's changes
-  go into `patches/eden/`, Carafe's into Carafe's own repository.
-- `docker/` — `eden-build` (the build image and scripts), `mesa-d3d12` (Mesa for the PC's GPU), `eden` (the run image).
+- `patches/eden/`, `patches/mesa/` — Lab's changes to Eden and to Mesa, applied in name order when each is built.
+- `external/eden`, `external/mesa`, `external/carafe` — git submodules pinned to exact commits (Mesa shallow, at its
+  release tag). They are never edited: Eden's and Mesa's changes go into `patches/`, Carafe's into Carafe's own
+  repository.
+- `docker/` — `eden-build` (Eden's build image and scripts), `mesa-build` and `mesa-d3d12` (Mesa for the PC's GPU:
+  its build image, its build script and the image of the built files), `eden` (the run image).
 - `tools/` — probe programs, `eden-gdb.sh`, Playwright page viewers.
 - `docs/` — decisions and research. Rules for keeping them are in `docs/README.md`.
 - `build/` — everything built and every run; never committed.
