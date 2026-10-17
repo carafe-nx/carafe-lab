@@ -211,6 +211,9 @@ impl Engine<'_> {
             write_report(&run_dir, &report, self.lang)?;
             write_summary(&run_dir, &report, &names, false)?;
         }
+        if !self.build_only {
+            self.emulator.finish();
+        }
         write_report(&run_dir, &report, self.lang)?;
         write_summary(&run_dir, &report, &names, true)?;
         let [passed, warned, console, failed] = report.counts();

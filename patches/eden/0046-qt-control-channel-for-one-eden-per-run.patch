@@ -1,0 +1,152 @@
+Carafe Lab: a control channel for one Eden that runs a whole set. With CARAFE_CONTROL naming a folder, Eden reads
+a one-line `command` file there every 200 ms and removes it: `boot <file>` starts software, `stop` closes it the
+way the HOME menu does and keeps Eden open, `screenshot <file>` saves the exact picture the renderer draws, `quit`
+stops and closes Eden. Every answer is a numbered line appended to `replies`: `ready`, `booting`, `booted`,
+`capturing`, `stopped exited|forced|immediately|self|idle`, or `error …`.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/yuzu/main_window.cpp b/src/yuzu/main_window.cpp
+index 5d60129..55ff4b9 100644
+--- a/src/yuzu/main_window.cpp
++++ b/src/yuzu/main_window.cpp
+@@ -66,6 +66,7 @@
+ #include <QClipboard>
+ #include <QDesktopServices>
+ #include <QDir>
++#include <QFile>
+ #include <QFileDialog>
+ #include <QFileInfo>
+ #include <QGuiApplication>
+@@ -1859,6 +1860,17 @@ void MainWindow::SetupSigInterrupts() {
+     connect(sig_interrupt_notifier, &QSocketNotifier::activated, this,
+             &MainWindow::OnSigInterruptNotifierActivated);
+     connect(this, &MainWindow::SigInterrupt, this, &MainWindow::close);
++
++    const QByteArray control = qgetenv("CARAFE_CONTROL");
++    if (!control.isEmpty()) {
++        control_dir = QString::fromLocal8Bit(control);
++        QDir().mkpath(control_dir);
++        QFile::remove(control_dir + QStringLiteral("/command"));
++        control_timer = new QTimer(this);
++        connect(control_timer, &QTimer::timeout, this, &MainWindow::OnControlTick);
++        control_timer->start(200);
++        ControlReply(QStringLiteral("ready"));
++    }
+ }
+ 
+ void MainWindow::HandleSigInterrupt(int sig) {
+@@ -1905,6 +1917,64 @@ void MainWindow::OnCloseLikeHomeMenu() {
+         OnEmulationStopped();
+     }
+ }
++
++void MainWindow::ControlReply(const QString& text) {
++    QFile file(control_dir + QStringLiteral("/replies"));
++    if (file.open(QIODevice::Append | QIODevice::Text)) {
++        file.write(QStringLiteral("%1 %2\n").arg(++control_sequence).arg(text).toUtf8());
++    }
++    LOG_INFO(Frontend, "Control: {}", text.toStdString());
++}
++
++void MainWindow::OnControlTick() {
++    const QString path = control_dir + QStringLiteral("/command");
++    QFile file(path);
++    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
++        return;
++    }
++    const QString line = QString::fromUtf8(file.readAll()).trimmed();
++    file.close();
++    QFile::remove(path);
++    const qsizetype space = line.indexOf(QLatin1Char(' '));
++    const QString verb = space < 0 ? line : line.left(space);
++    const QString argument = space < 0 ? QString{} : line.mid(space + 1).trimmed();
++    if (verb == QStringLiteral("boot")) {
++        if (emulation_running) {
++            ControlReply(QStringLiteral("error busy"));
++            return;
++        }
++        quit_after_stop = false;
++        ControlReply(QStringLiteral("booting %1").arg(argument));
++        BootGame(argument, ApplicationAppletParameters());
++        ControlReply(emulation_running ? QStringLiteral("booted") : QStringLiteral("error boot"));
++    } else if (verb == QStringLiteral("stop") || verb == QStringLiteral("quit")) {
++        quit_after_stop = verb == QStringLiteral("quit");
++        if (!emulation_running) {
++            ControlReply(QStringLiteral("stopped idle"));
++            if (quit_after_stop) {
++                close();
++            }
++            return;
++        }
++        control_stop_pending = true;
++        play_time_manager->Stop();
++        control_waited = OnShutdownBegin();
++        if (control_waited) {
++            OnShutdownBeginDialog();
++        } else {
++            OnEmulationStopped();
++        }
++    } else if (verb == QStringLiteral("screenshot")) {
++        if (!emulation_running || render_window == nullptr) {
++            ControlReply(QStringLiteral("error idle"));
++            return;
++        }
++        render_window->CaptureScreenshot(argument);
++        ControlReply(QStringLiteral("capturing %1").arg(argument));
++    } else {
++        ControlReply(QStringLiteral("error unknown %1").arg(verb));
++    }
++}
+ #endif // __unix__
+ 
+ void MainWindow::PreventOSSleep() {
+@@ -2294,6 +2364,14 @@ void MainWindow::OnEmulationStopped() {
+                  shutdown_timer.isActive() ? "the software exited by itself"
+                                            : "stopped by force after the shutdown timeout");
+     }
++    QString control_stopped = QStringLiteral("stopped self");
++    if (control_stop_pending) {
++        control_stopped = !control_waited             ? QStringLiteral("stopped immediately")
++                          : shutdown_timer.isActive() ? QStringLiteral("stopped exited")
++                                                      : QStringLiteral("stopped forced");
++        control_stop_pending = false;
++        control_waited = false;
++    }
+ #endif
+     shutdown_timer.stop();
+     if (emu_thread) {
+@@ -2369,6 +2447,9 @@ void MainWindow::OnEmulationStopped() {
+     UpdateStatusButtons();
+ 
+ #ifdef __unix__
++    if (!control_dir.isEmpty()) {
++        ControlReply(control_stopped);
++    }
+     if (quit_after_stop) {
+         QTimer::singleShot(0, this, &MainWindow::close);
+     }
+diff --git a/src/yuzu/main_window.h b/src/yuzu/main_window.h
+index f0249ff..4c01f03 100644
+--- a/src/yuzu/main_window.h
++++ b/src/yuzu/main_window.h
+@@ -329,6 +329,8 @@ private:
+     static void HandleSigInterrupt(int);
+     void OnSigInterruptNotifierActivated();
+     void OnCloseLikeHomeMenu();
++    void OnControlTick();
++    void ControlReply(const QString& text);
+ #endif
+     void SetGamemodeEnabled(bool state);
+ 
+@@ -593,6 +595,11 @@ private:
+     QSocketNotifier* sig_interrupt_notifier;
+     static std::array<int, 3> sig_interrupt_fds;
+     bool quit_after_stop{};
++    QString control_dir;
++    QTimer* control_timer{};
++    quint64 control_sequence{};
++    bool control_stop_pending{};
++    bool control_waited{};
+ #endif
+ 
+     std::filesystem::path GetEdenCommand();

@@ -62,7 +62,7 @@ case "${1:-}" in
         exit 0
         ;;
     "")
-        echo "usage: run-eden <file.nsp> | gpu-info | version" >&2
+        echo "usage: run-eden <file.nsp> | session | gpu-info | version" >&2
         exit 64
         ;;
 esac
@@ -72,7 +72,9 @@ websockify --web /usr/share/novnc 6080 127.0.0.1:5900 >/tmp/websockify.log 2>&1 
 
 mkdir -p /work/user
 cd /work
-if [ -x /opt/eden/AppRun ]; then
-    exec /opt/eden/AppRun -f -g "$1"
+eden=/opt/eden/bin/eden
+[ -x /opt/eden/AppRun ] && eden=/opt/eden/AppRun
+if [ "$1" = session ]; then
+    exec "$eden" -f
 fi
-exec /opt/eden/bin/eden -f -g "$1"
+exec "$eden" -f -g "$1"

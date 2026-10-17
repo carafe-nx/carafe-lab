@@ -136,6 +136,9 @@ pub trait Emulator {
     /// Returns the text of the first file named `name` the game of `title` has written to its save data or the
     /// SD card; `None` if there is none.
     fn find_file(&self, title: TitleId, name: &str) -> Option<String>;
+
+    /// Ends whatever the emulator keeps running between games, once the run has no more games for it.
+    fn finish(&mut self) {}
 }
 
 /// Time for the runner: real in a run, simulated in tests.
@@ -692,12 +695,13 @@ impl<'a> Runner<'a> {
                 };
                 self.result(step, outcome, detail, None)
             }
-            Ok(Closed::Forced) => self.result(
-                step,
-                Outcome::Warn,
-                format!("did not close in {timeout} s and was stopped"),
-                None,
-            ),
+            Ok(Closed::Forced) => {
+                let detail = match self.emulator.end_reason() {
+                    Some(reason) => format!("did not close by itself: {reason}"),
+                    None => format!("did not close in {timeout} s and was stopped"),
+                };
+                self.result(step, Outcome::Warn, detail, None)
+            }
             Err(error) => self.result(step, Outcome::Fail, error.to_string(), None),
         }
     }

@@ -38,6 +38,11 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    with diagnostic patches — and `edenSettings`, settings written over Eden's `qt-config.ini`:
    `{ "Renderer/gpu_accuracy": "0", "Renderer/debug": "true" }`. `Renderer/debug` makes Eden log the compile and
    link errors of its OpenGL shaders, which it keeps quiet otherwise.
+8. `oneEden` (`true` by default) keeps one container and one Eden for the whole run and loads each game into it
+   through Eden's control channel (`patches/eden/0046`): a one-line `command` file — `boot <file>`, `stop`,
+   `screenshot <file>`, `quit` — and a numbered `replies` file in `<work>/eden/user/control/`. An Eden that crashed or
+   stopped answering is replaced at the next launch, and the reason with the last lines of the container goes into
+   the launch's `container-end.log`. `false` starts a container for every launch, as before.
 
 From `app/`: `npm run dev` opens the window — the library, sets to run, the run going on, past runs and what the
 emulator needs to start. `cargo run --release -p lab-cli -- run [set]` runs the enabled games of `lab.json` or the

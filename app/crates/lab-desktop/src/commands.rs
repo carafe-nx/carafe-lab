@@ -3,9 +3,9 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use carafe_core::icon::data_url;
 use carafe_core::ports::{KeysChecker, KeysReport};
@@ -19,11 +19,14 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 use ts_rs::TS;
 
+use crate::detached;
 use crate::error::CommandError;
-use crate::lab::{DockerState, Lab, quiet};
+use crate::lab::{DockerState, Lab};
 
-const RUN_LOG: &str = "window-run.log";
+const RUN_LOGS: &str = "window-runs";
+const KEPT_RUN_LOGS: usize = 20;
 const RUN_LOG_TAIL: usize = 20;
+const EXIT_POLL: Duration = Duration::from_secs(2);
 
 /// What the title bar and the Emulator screen show.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -165,42 +168,18 @@ pub async fn start_run(
     let lab = Arc::clone(&lab);
     blocking(move || {
         let work = lab.config()?.work;
-        let queue_dir = work.join("queue");
-        fs::create_dir_all(&queue_dir).map_err(|error| error.to_string())?;
-        let log_path = queue_dir.join(RUN_LOG);
-        let log = File::create(&log_path).map_err(|error| error.to_string())?;
-        let log_err = log.try_clone().map_err(|error| error.to_string())?;
-        let mut command = Command::new(lab.cli());
-        command.arg("run");
-        if let Some(set) = &set {
-            command.arg(set);
+        let logs = work.join("queue").join(RUN_LOGS);
+        fs::create_dir_all(&logs).map_err(|error| error.to_string())?;
+        keep_newest(&logs, KEPT_RUN_LOGS);
+        let log_path = logs.join(format!("{}.log", unix_now()));
+        let mut args = vec!["run".to_owned()];
+        args.extend(set);
+        if let Some(only) = only {
+            args.extend(["--only".to_owned(), only]);
         }
-        if let Some(only) = &only {
-            command.args(["--only", only]);
-        }
-        command
-            .args(["--json", "--who", "window"])
-            .current_dir(lab.repository())
-            .stdin(Stdio::null())
-            .stdout(log)
-            .stderr(log_err);
-        let mut child = quiet(&mut command)
-            .spawn()
-            .map_err(|error| format!("{}: {error}", lab.cli().display()))?;
-        std::thread::spawn(move || {
-            let Ok(status) = child.wait() else {
-                return;
-            };
-            if !status.success() && status.code() != Some(3) {
-                let _ = app.emit(
-                    "run://exited",
-                    RunExit {
-                        code: status.code(),
-                        output: tail(&log_path, RUN_LOG_TAIL),
-                    },
-                );
-            }
-        });
+        args.extend(["--json", "--who", "window"].map(str::to_owned));
+        detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;
+        std::thread::spawn(move || watch_exit(&app, &log_path));
         Ok(())
     })
     .await
@@ -458,10 +437,45 @@ fn png_screen(file: &Path) -> Option<Screen> {
     })
 }
 
-fn tail(file: &Path, lines: usize) -> String {
-    let text = fs::read_to_string(file).unwrap_or_default();
-    let all: Vec<&str> = text.lines().collect();
-    all[all.len().saturating_sub(lines)..].join("\n")
+fn watch_exit(app: &AppHandle, log: &Path) {
+    loop {
+        std::thread::sleep(EXIT_POLL);
+        let text = fs::read_to_string(log).unwrap_or_default();
+        let Some(code) = detached::exit_code(&text) else {
+            continue;
+        };
+        if !matches!(code, 0 | 3 | 4) {
+            let lines: Vec<&str> = text
+                .lines()
+                .filter(|line| !line.trim().starts_with(detached::EXIT_MARK))
+                .collect();
+            let output = lines[lines.len().saturating_sub(RUN_LOG_TAIL)..].join("\n");
+            let _ = app.emit(
+                "run://exited",
+                RunExit {
+                    code: Some(code),
+                    output,
+                },
+            );
+        }
+        return;
+    }
+}
+
+fn keep_newest(dir: &Path, count: usize) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut logs: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "log"))
+        .collect();
+    logs.sort();
+    let extra = logs.len().saturating_sub(count);
+    for old in &logs[..extra] {
+        let _ = fs::remove_file(old);
+    }
 }
 
 async fn blocking<T, F>(work: F) -> Result<T, CommandError>

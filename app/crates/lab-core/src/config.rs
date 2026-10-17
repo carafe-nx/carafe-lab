@@ -72,6 +72,7 @@ struct RawConfig {
     emulator_cpu: Option<String>,
     carafe: Option<PathBuf>,
     eden_image: Option<String>,
+    one_eden: Option<bool>,
     #[serde(default)]
     eden_settings: BTreeMap<String, String>,
     lang: Option<String>,
@@ -122,6 +123,8 @@ pub struct Config {
     pub carafe: Option<PathBuf>,
     /// The emulator's Docker image; `None` means the image `compose.yaml` builds.
     pub eden_image: Option<String>,
+    /// One emulator serves the whole run instead of one for every launch; `true` unless `lab.json` says otherwise.
+    pub one_eden: bool,
     /// Settings written over the emulator's `qt-config.ini`, keyed `Section/key`.
     pub eden_settings: BTreeMap<String, String>,
     /// Language of `report.html`.
@@ -297,6 +300,7 @@ impl Config {
             emulator_cpu,
             carafe: raw.carafe,
             eden_image: raw.eden_image,
+            one_eden: raw.one_eden.unwrap_or(true),
             eden_settings: raw.eden_settings,
             lang,
             timeout,
@@ -625,6 +629,9 @@ mod tests {
         let plain = Config::parse(r#"{"work": "x"}"#).unwrap();
         assert_eq!(plain.eden_image, None);
         assert!(plain.eden_settings.is_empty());
+        assert!(plain.one_eden);
+        let per_launch = Config::parse(r#"{"work": "x", "oneEden": false}"#).unwrap();
+        assert!(!per_launch.one_eden);
         for bad in [
             r#"{"work": "x", "edenSettings": {"gpu_accuracy": "0"}}"#,
             r#"{"work": "x", "edenSettings": {"/gpu_accuracy": "0"}}"#,

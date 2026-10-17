@@ -12,9 +12,10 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
-- [ ] **`feature` One Eden for the whole run, set up like the console (4 cores, 4 GB, docked, firmware from Carafe)
-- [ ] `feature` Eden control channel (a patch): load and stop a game, press buttons, take screenshots
-- [ ] `feature` Watchdog: Eden restarts after a crash, a hang or a game that does not close; "clean start" switch
+- [ ] **`bug` Eden crashes (SIGSEGV) when software stops on the WSL GPU, so the one Eden restarts after every game**
+- [ ] `feature` The one Eden set up like the console (4 cores, 4 GB, docked, firmware from Carafe)
+- [ ] `feature` Button presses through the control channel instead of xdotool
+- [ ] `feature` Watchdog: a hang during a game (not only at close) restarts Eden; "clean start" switch
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 - [ ] `feature` Loader: emulator status in the title bar, start-up stages on the Run screen, a fix for each failing stage
 - [ ] `feature` Library: add a game by dropping its folder; tags, notes, last result, link to a ROADMAP item
@@ -103,6 +104,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` One Eden for the whole run through a control channel (`0046`: boot, stop, screenshot, quit); a crashed or hung Eden is replaced and its end recorded
 - [x] `feature` Console files chosen in the window's Emulator screen, kept in `lab.local.json` outside git; Carafe's choice when none
 - [x] `feature` Tauri window in Carafe's style: Library, Plans, Run, History, Emulator, Scenarios
 - [x] `feature` A queue of runs in its own process: closing the window does not stop a run, a second session waits

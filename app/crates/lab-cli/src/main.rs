@@ -117,7 +117,8 @@ fn start(args: Args) -> Result<ExitCode, String> {
         gpu,
         config.emulator_cpu,
     )
-    .with_settings(config.eden_settings.clone());
+    .with_settings(config.eden_settings.clone())
+    .with_one_eden(config.one_eden);
     if let Some(image) = &config.eden_image {
         eden = eden.with_image(image.clone());
     }

@@ -6,6 +6,10 @@
 //! a Docker volume instead: Eden checks the save's files thousands of times while a game starts, and through the
 //! host folder each check takes milliseconds. It is copied there before every launch and back when the lab
 //! reads the save.
+//!
+//! With [`Eden::with_one_eden`] one container and one Eden serve the whole run: each game is booted and stopped
+//! through Eden's control channel (`patches/eden/0046`), a one-line `command` file and a numbered `replies` file in
+//! a shared `control/` folder. An Eden that crashed or stopped answering is replaced at the next launch.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -31,6 +35,10 @@ const MEMORY_LIMIT: &str = "6g";
 const CPU_LIMIT: &str = "4";
 const NAND_VOLUME: &str = "carafe-lab-eden-nand";
 const SCREEN_FILE: &str = "lab-screen.png";
+const CONTAINER_END_FILE: &str = "container-end.log";
+const READY_TIMEOUT: Duration = Duration::from_secs(60);
+const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
+const STOP_GRACE: Duration = Duration::from_secs(15);
 const ZERO_USER: &str = "00000000000000000000000000000000";
 const KEEP_FILE: &str = ".carafe-lab";
 const SHARED_DIRS: [&str; 7] = [
@@ -54,6 +62,39 @@ pub struct Eden {
     title: Option<TitleId>,
     ended: Option<String>,
     presses: PressLog,
+    one_eden: bool,
+    session: Option<Session>,
+}
+
+struct Session {
+    nsp_dir: PathBuf,
+    seen: u64,
+    booted_at: u64,
+    log_from: usize,
+}
+
+/// A numbered answer of Eden's control channel (`patches/eden/0046`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    /// Its number, from 1, counted since Eden started.
+    pub number: u64,
+    /// Its text, such as `booted` or `stopped exited`.
+    pub text: String,
+}
+
+/// Returns the answers in the text of the control channel's `replies` file numbered above `after`, in order.
+#[must_use]
+pub fn replies_after(text: &str, after: u64) -> Vec<Reply> {
+    text.lines()
+        .filter_map(|line| {
+            let (number, reply) = line.trim().split_once(' ')?;
+            let number: u64 = number.parse().ok()?;
+            (number > after).then(|| Reply {
+                number,
+                text: reply.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// The buttons the lab pressed lately, shared with the live page.
@@ -104,7 +145,19 @@ impl Eden {
             title: None,
             ended: None,
             presses: PressLog::default(),
+            one_eden: false,
+            session: None,
         }
+    }
+
+    /// Returns the emulator that keeps one Eden for the whole run and loads each game into it through the control
+    /// channel, instead of a container for every launch.
+    ///
+    /// A crashed or hung Eden is replaced by a new one at the next launch.
+    #[must_use]
+    pub fn with_one_eden(mut self, one_eden: bool) -> Self {
+        self.one_eden = one_eden;
+        self
     }
 
     /// Returns the emulator running the Docker image `image` instead of [`IMAGE`].
@@ -299,7 +352,22 @@ impl Eden {
         let status = words.next()?;
         let code: i32 = words.next()?.parse().ok()?;
         let oom = words.next() == Some("true");
-        (status == "exited").then(|| describe_end(code, oom))
+        if status != "exited" {
+            return None;
+        }
+        let reason = describe_end(code, oom);
+        if let Ok(logs) = docker(&["logs", "--tail", "200", CONTAINER]) {
+            let text = format!(
+                "{reason}\n\n{}{}",
+                String::from_utf8_lossy(&logs.stdout),
+                String::from_utf8_lossy(&logs.stderr)
+            );
+            let _ = fs::write(
+                self.user_dir.join("log").join(CONTAINER_END_FILE),
+                redact(&text, &self.keys),
+            );
+        }
+        Some(reason)
     }
 }
 
@@ -326,19 +394,162 @@ pub fn describe_end(code: i32, out_of_memory: bool) -> String {
 
 impl Eden {
     fn start(&mut self, nsp: &Path) -> Result<(), EmulatorError> {
-        self.prepare()?;
-        self.remove_container();
-        self.push_nand()?;
-        let dir = nsp
-            .parent()
-            .ok_or_else(|| EmulatorError::Control(format!("no folder for {}", nsp.display())))?;
-        let name = nsp
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .ok_or_else(|| EmulatorError::Control(format!("no file name in {}", nsp.display())))?;
+        let (dir, name) = split_nsp(nsp)?;
         self.title = nsp
             .file_stem()
             .and_then(|stem| TitleId::parse(&stem.to_string_lossy()).ok());
+        if self.one_eden {
+            return self.boot_in_session(dir, &name);
+        }
+        self.prepare()?;
+        self.remove_container();
+        self.push_nand()?;
+        self.ended = None;
+        let mut args = self.container_args(dir);
+        args.push(format!("/nsp/{name}"));
+        docker_owned(&args)?;
+        self.wait_for_window()
+    }
+
+    fn boot_in_session(&mut self, dir: &Path, name: &str) -> Result<(), EmulatorError> {
+        let alive = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.nsp_dir == dir)
+            && self.container_running();
+        if !alive {
+            self.start_session(dir)?;
+        }
+        let seen = self.session.as_ref().map_or(0, |session| session.seen);
+        let log_from = read_text(&self.user_dir.join("log").join("eden_log.txt")).len();
+        if let Some(session) = self.session.as_mut() {
+            session.log_from = log_from;
+        }
+        self.send(&format!("boot /nsp/{name}"))?;
+        let replies = self.wait_for_reply(seen, BOOT_TIMEOUT, |text| {
+            text == "booted" || text.starts_with("error")
+        })?;
+        let last = replies
+            .last()
+            .map(|reply| reply.text.clone())
+            .unwrap_or_default();
+        if last != "booted" {
+            return Err(EmulatorError::Control(format!(
+                "Eden did not boot the game: {last}"
+            )));
+        }
+        if let (Some(session), Some(reply)) = (self.session.as_mut(), replies.last()) {
+            session.booted_at = reply.number;
+        }
+        let _ = self.exec("xdotool mousemove 640 360");
+        Ok(())
+    }
+
+    fn start_session(&mut self, dir: &Path) -> Result<(), EmulatorError> {
+        self.session = None;
+        self.prepare()?;
+        self.remove_container();
+        self.push_nand()?;
+        self.ended = None;
+        let control = self.control_dir();
+        let _ = fs::remove_dir_all(&control);
+        fs::create_dir_all(&control).map_err(io)?;
+        let mut args = self.container_args(dir);
+        let image = args.pop().unwrap_or_default();
+        args.extend([
+            "-v".to_owned(),
+            format!("{}:/work/control", control.display()),
+            "-e".to_owned(),
+            "CARAFE_CONTROL=/work/control".to_owned(),
+            image,
+            "session".to_owned(),
+        ]);
+        docker_owned(&args)?;
+        self.wait_for_window()?;
+        let replies = self.wait_for_reply(0, READY_TIMEOUT, |text| text == "ready")?;
+        self.session = Some(Session {
+            nsp_dir: dir.to_path_buf(),
+            seen: replies.last().map_or(0, |reply| reply.number),
+            booted_at: 0,
+            log_from: 0,
+        });
+        Ok(())
+    }
+
+    fn control_dir(&self) -> PathBuf {
+        self.user_dir.join("control")
+    }
+
+    fn send(&self, command: &str) -> Result<(), EmulatorError> {
+        let control = self.control_dir();
+        let staged = control.join("command.part");
+        fs::write(&staged, format!("{command}\n")).map_err(io)?;
+        fs::rename(&staged, control.join("command")).map_err(io)
+    }
+
+    fn replies(&self, after: u64) -> Vec<Reply> {
+        replies_after(&read_text(&self.control_dir().join("replies")), after)
+    }
+
+    fn wait_for_reply(
+        &mut self,
+        after: u64,
+        timeout: Duration,
+        wanted: impl Fn(&str) -> bool,
+    ) -> Result<Vec<Reply>, EmulatorError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let replies = self.replies(after);
+            if let Some(session) = self.session.as_mut()
+                && let Some(last) = replies.last()
+            {
+                session.seen = session.seen.max(last.number);
+            }
+            if replies.iter().any(|reply| wanted(&reply.text)) {
+                return Ok(replies);
+            }
+            if !self.container_running() {
+                self.session = None;
+                self.ended = self.container_end();
+                return Err(EmulatorError::Control(format!(
+                    "the emulator ended: {}",
+                    self.ended
+                        .clone()
+                        .unwrap_or_else(|| "no reason known".to_owned())
+                )));
+            }
+            if Instant::now() >= deadline {
+                return Err(EmulatorError::Control(format!(
+                    "Eden did not answer in {} s",
+                    timeout.as_secs()
+                )));
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    fn stopped_since_boot(&self) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            self.replies(session.booted_at)
+                .iter()
+                .any(|reply| reply.text.starts_with("stopped"))
+        })
+    }
+
+    fn end_session(&mut self) {
+        if self.session.take().is_some() && self.container_running() {
+            let _ = self.send("quit");
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < deadline && self.container_running() {
+                thread::sleep(Duration::from_millis(300));
+            }
+            self.pull_nand();
+        }
+        let _ = docker(&["stop", "-t", "5", CONTAINER]);
+        self.remove_container();
+    }
+
+    fn container_args(&self, dir: &Path) -> Vec<String> {
         let mut args = vec![
             "run".to_owned(),
             "-d".to_owned(),
@@ -359,7 +570,6 @@ impl Eden {
             "--cap-add".to_owned(),
             "SYS_PTRACE".to_owned(),
         ];
-        self.ended = None;
         for shared in SHARED_DIRS {
             args.push("-v".to_owned());
             if shared == "nand" {
@@ -379,8 +589,10 @@ impl Eden {
         ]);
         args.extend(self.gpu_args());
         args.push(self.image.clone());
-        args.push(format!("/nsp/{name}"));
-        docker_owned(&args)?;
+        args
+    }
+
+    fn wait_for_window(&self) -> Result<(), EmulatorError> {
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             if !self.container_running() {
@@ -419,8 +631,9 @@ impl Emulator for Eden {
 
     fn running(&mut self) -> bool {
         if self.container_running() {
-            return !self.shut_down();
+            return !self.shut_down() && !self.stopped_since_boot();
         }
+        self.session = None;
         if self.ended.is_none() {
             self.ended = self.container_end();
         }
@@ -457,6 +670,10 @@ impl Emulator for Eden {
 
     fn close(&mut self, timeout: Duration) -> Result<Closed, EmulatorError> {
         if !self.container_running() {
+            self.session = None;
+            if self.ended.is_none() {
+                self.ended = self.container_end();
+            }
             return Ok(if self.shut_down() {
                 Closed::ByRequest
             } else {
@@ -465,6 +682,33 @@ impl Emulator for Eden {
         }
         self.presses
             .record(&["HOME".to_owned()], PressLog::SHOWN_AT_LEAST);
+        if let Some(booted_at) = self.session.as_ref().map(|session| session.booted_at) {
+            if self.stopped_since_boot() {
+                return Ok(if self.shut_down() {
+                    Closed::ByRequest
+                } else {
+                    Closed::Forced
+                });
+            }
+            self.send("stop")?;
+            let waited = self.wait_for_reply(booted_at, timeout + STOP_GRACE, |text| {
+                text.starts_with("stopped")
+            });
+            return Ok(match waited {
+                Ok(replies) => {
+                    let exited = replies.iter().any(|reply| reply.text == "stopped exited");
+                    if exited || self.shut_down() {
+                        Closed::ByRequest
+                    } else {
+                        Closed::Forced
+                    }
+                }
+                Err(_) => {
+                    self.end_session();
+                    Closed::Forced
+                }
+            });
+        }
         let _ = self.exec("pkill -USR1 -x eden");
         let deadline = Instant::now() + timeout;
         let mut closed = Closed::Forced;
@@ -495,6 +739,12 @@ impl Emulator for Eden {
             fs::create_dir_all(dest).map_err(io)?;
             fs::copy(&emulator_log, dest.join("eden_log.txt")).map_err(io)?;
         }
+        let container_end = self.user_dir.join("log").join(CONTAINER_END_FILE);
+        if container_end.is_file() {
+            fs::create_dir_all(dest).map_err(io)?;
+            fs::copy(&container_end, dest.join(CONTAINER_END_FILE)).map_err(io)?;
+            let _ = fs::remove_file(&container_end);
+        }
         let source = self.logs_dir(title);
         if !source.exists() {
             return Ok(());
@@ -503,6 +753,15 @@ impl Emulator for Eden {
     }
 
     fn clear_save(&mut self, title: TitleId) -> Result<(), EmulatorError> {
+        if self.session.is_some() && self.container_running() {
+            let upper = title.to_string().to_ascii_uppercase();
+            let save = "/work/user/nand/user/save";
+            let script = format!(
+                "rm -rf {save}/0000000000000000/{ZERO_USER}/{upper} {save}/device/{upper} {save}/{upper} \
+                 && mkdir -p {save}/device/{upper}/0 && touch {save}/device/{upper}/{KEEP_FILE}"
+            );
+            return self.exec(&script).map(|_| ());
+        }
         let misplaced = self
             .user_dir
             .join("nand")
@@ -531,7 +790,17 @@ impl Emulator for Eden {
     }
 
     fn emulator_log(&self) -> String {
-        read_text(&self.user_dir.join("log").join("eden_log.txt"))
+        let text = read_text(&self.user_dir.join("log").join("eden_log.txt"));
+        match &self.session {
+            Some(session) => text.get(session.log_from..).unwrap_or(&text).to_owned(),
+            None => text,
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.one_eden {
+            self.end_session();
+        }
     }
 
     fn find_file(&self, title: TitleId, name: &str) -> Option<String> {
@@ -542,6 +811,17 @@ impl Emulator for Eden {
             .find_map(|dir| find_named(dir, name))
             .map(|path| read_text(&path))
     }
+}
+
+fn split_nsp(nsp: &Path) -> Result<(&Path, String), EmulatorError> {
+    let dir = nsp
+        .parent()
+        .ok_or_else(|| EmulatorError::Control(format!("no folder for {}", nsp.display())))?;
+    let name = nsp
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| EmulatorError::Control(format!("no file name in {}", nsp.display())))?;
+    Ok((dir, name))
 }
 
 fn find_named(dir: &Path, name: &str) -> Option<PathBuf> {
@@ -874,6 +1154,16 @@ mod tests {
         assert!(!root.join("dest").join("wine-nx-session-1.shm").exists());
         assert!(!source.join("carafe-overlay.log").exists());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn replies_are_read_after_the_last_one_seen() {
+        let text = "1 ready\n2 booting /nsp/a.nsp\n3 booted\nnot a reply\n4 stopped exited\n";
+        let fresh = replies_after(text, 2);
+        let texts: Vec<&str> = fresh.iter().map(|reply| reply.text.as_str()).collect();
+        assert_eq!(texts, ["booted", "stopped exited"]);
+        assert_eq!(fresh[0].number, 3);
+        assert!(replies_after(text, 4).is_empty());
     }
 
     #[test]

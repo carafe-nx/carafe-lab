@@ -1,6 +1,7 @@
 //! Carafe Lab's window: the composition root of the Tauri shell over the lab's crates and `carafe-lab`.
 
 mod commands;
+mod detached;
 mod error;
 mod lab;
 
