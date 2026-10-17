@@ -127,6 +127,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
     .with_settings(config.eden_settings.clone())
     .with_one_eden(config.one_eden)
     .with_fresh_eden(args.clean)
+    .with_video(args.video)
     .with_firmware(local_settings(&config_path)?.firmware);
     if let Some(image) = &config.eden_image {
         eden = eden.with_image(image.clone());

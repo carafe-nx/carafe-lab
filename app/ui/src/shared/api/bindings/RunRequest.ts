@@ -31,4 +31,8 @@ clean: boolean | null,
 /**
  * The scenario every game runs instead of its own: `standard` or a file relative to `lab.json`.
  */
-scenario: string | null, };
+scenario: string | null, 
+/**
+ * The live video: `full`, `low` or `off`; `None` means full.
+ */
+video: string | null, };

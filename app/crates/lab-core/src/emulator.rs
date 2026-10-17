@@ -59,3 +59,51 @@ impl EdenCpu {
         }
     }
 }
+
+/// How much of the emulator's screen goes out as live video.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Video {
+    /// Every change of the screen.
+    #[default]
+    Full,
+    /// About five pictures a second, so the video takes little from the game while it is measured.
+    Low,
+    /// No live video.
+    Off,
+}
+
+impl Video {
+    /// Reads `full`, `low` or `off`.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "full" => Some(Self::Full),
+            "low" => Some(Self::Low),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+
+    /// Returns the name the emulator's container takes.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Low => "low",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_names_read_back() {
+        for video in [Video::Full, Video::Low, Video::Off] {
+            assert_eq!(Video::parse(video.name()), Some(video));
+        }
+        assert_eq!(Video::parse("high"), None);
+    }
+}

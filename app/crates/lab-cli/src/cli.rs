@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use lab_core::emulator::Gpu;
+use lab_core::emulator::{Gpu, Video};
 use lab_core::lang::Lang;
 
 /// Help printed for `carafe-lab help` and after a command line error.
@@ -41,6 +41,7 @@ Options:
   --build-only        build the NSPs and stop
   --clean             a new Eden for every launch instead of one for the whole run
   --scenario <s>      every game runs this scenario: standard, or a file relative to lab.json
+  --video <v>         full, low (about five pictures a second, for measuring) or off; default full
   --no-open           do not open the live page in the browser
   --json              print the run as JSON lines, one event each, without the live page;
                       status, games and runs print one JSON document
@@ -129,6 +130,8 @@ pub struct Args {
     pub clean: bool,
     /// `--scenario`: `standard` or a scenario file relative to `lab.json`.
     pub scenario: Option<String>,
+    /// `--video`.
+    pub video: Video,
     /// `--json`.
     pub json: bool,
     /// `--who`.
@@ -195,6 +198,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         build_only: false,
         clean: false,
         scenario: None,
+        video: Video::Full,
         json: false,
         who: None,
         no_open: false,
@@ -217,6 +221,11 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                     Gpu::parse(&text)
                         .ok_or_else(|| ArgsError::Value(arg.clone(), "wsl or software"))?,
                 );
+            }
+            "--video" => {
+                let text = value("full, low or off")?;
+                parsed.video = Video::parse(&text)
+                    .ok_or_else(|| ArgsError::Value(arg.clone(), "full, low or off"))?;
             }
             "--lang" => {
                 let text = value("ru or en")?;
@@ -331,6 +340,9 @@ mod tests {
         assert!(!parsed.clean);
         assert!(parse(&args("run --clean")).unwrap().clean);
         assert_eq!(parse(&args("run")).unwrap().scenario, None);
+        assert_eq!(parse(&args("run")).unwrap().video, Video::Full);
+        assert_eq!(parse(&args("run --video low")).unwrap().video, Video::Low);
+        assert!(parse(&args("run --video high")).is_err());
         assert_eq!(
             parse(&args("run --scenario standard"))
                 .unwrap()

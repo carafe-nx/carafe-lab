@@ -146,6 +146,9 @@ emulator.
   n times in a row. A game that fails only sometimes shows its rate in the window's library ("failed 2 of 10").
 - `--scenario standard` or `--scenario scenarios/<file>.json` runs every game of the plan with that scenario instead
   of its own; the Plans screen has the same choice.
+- `--video low` sends the live picture at about five frames a second, `--video off` sends none (`CARAFE_VIDEO` in
+  the container), so the video takes little or nothing from the game while it is measured; A/B runs from the window
+  use `low`.
 - `run --games G --repeat <n> --ab '<settings>'` is an A/B run: G as it is (`G · A`) and with the settings merged over
   its own (`G · B`, in the shape of `carafe.json`'s `settings`), alternating. Each variant is its own NSP with its own
   Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame

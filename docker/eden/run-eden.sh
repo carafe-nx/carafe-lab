@@ -67,8 +67,24 @@ case "${1:-}" in
         ;;
 esac
 
-x11vnc -display :1 -localhost -forever -shared -nopw -quiet -rfbport 5900 >/tmp/x11vnc.log 2>&1 &
-websockify --web /usr/share/novnc 6080 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
+case "${CARAFE_VIDEO:-full}" in
+    full)
+        x11vnc -display :1 -localhost -forever -shared -nopw -quiet -rfbport 5900 >/tmp/x11vnc.log 2>&1 &
+        ;;
+    low)
+        x11vnc -display :1 -localhost -forever -shared -nopw -quiet -rfbport 5900 -wait 200 -defer 200 \
+            -nonap >/tmp/x11vnc.log 2>&1 &
+        ;;
+    off)
+        ;;
+    *)
+        echo "run-eden: CARAFE_VIDEO must be full, low or off, not $CARAFE_VIDEO" >&2
+        exit 64
+        ;;
+esac
+if [ "${CARAFE_VIDEO:-full}" != off ]; then
+    websockify --web /usr/share/novnc 6080 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
+fi
 
 mkdir -p /work/user
 cd /work

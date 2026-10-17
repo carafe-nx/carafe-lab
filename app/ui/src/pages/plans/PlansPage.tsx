@@ -49,7 +49,7 @@ export function PlansPage() {
   const start = (set: string | null, chosen: string[] | null = null, repeat = 1, ab: string | null = null) => {
     setError(null);
     api
-      .startRun(set, null, chosen, repeat, ab, clean, scenario || null)
+      .startRun(set, null, chosen, repeat, ab, clean, scenario || null, ab ? "low" : null)
       .then(() => {
         status.refresh();
         navigate("/run");

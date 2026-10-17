@@ -12,6 +12,7 @@ use carafe_core::ports::{FolderInspector, KeysChecker, KeysReport};
 use carafe_folder::DiskFolderInspector;
 use carafe_keys::FileKeysChecker;
 use lab_core::config;
+use lab_core::emulator::Video;
 use lab_core::firmware;
 use lab_core::local::{self, KeysSource, LocalSettings};
 use lab_core::perf::{self, PerfSample};
@@ -196,6 +197,8 @@ pub struct RunRequest {
     pub clean: Option<bool>,
     /// The scenario every game runs instead of its own: `standard` or a file relative to `lab.json`.
     pub scenario: Option<String>,
+    /// The live video: `full`, `low` or `off`; `None` means full.
+    pub video: Option<String>,
 }
 
 /// Starts `carafe-lab run` in its own process, so closing the window does not stop it, as `request` asks.
@@ -218,6 +221,7 @@ pub async fn start_run(
         ab,
         clean,
         scenario,
+        video,
     } = request;
     blocking(move || {
         let work = lab.config()?.work;
@@ -246,6 +250,9 @@ pub async fn start_run(
         }
         if let Some(scenario) = scenario.filter(|scenario| !scenario.is_empty()) {
             args.extend(["--scenario".to_owned(), scenario]);
+        }
+        if let Some(video) = video.filter(|video| Video::parse(video).is_some()) {
+            args.extend(["--video".to_owned(), video]);
         }
         args.extend(["--json", "--who", "window"].map(str::to_owned));
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;

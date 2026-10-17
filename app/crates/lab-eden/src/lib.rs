@@ -25,7 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use carafe_core::TitleId;
 use carafe_core::settings::SwitchButton;
-use lab_core::emulator::{EdenCpu, Gpu};
+use lab_core::emulator::{EdenCpu, Gpu, Video};
 use lab_core::firmware;
 use lab_core::perf::{self, PerfSample};
 pub use lab_core::redact::redact;
@@ -94,6 +94,7 @@ pub struct Eden {
     session: Option<Session>,
     perf_from: Option<u64>,
     firmware: Option<PathBuf>,
+    video: Video,
 }
 
 struct Session {
@@ -180,6 +181,7 @@ impl Eden {
             session: None,
             perf_from: None,
             firmware: None,
+            video: Video::Full,
         }
     }
 
@@ -211,6 +213,13 @@ impl Eden {
     #[must_use]
     pub fn with_firmware(mut self, firmware: Option<PathBuf>) -> Self {
         self.firmware = firmware;
+        self
+    }
+
+    /// Returns the emulator whose screen goes out as live video as `video` says.
+    #[must_use]
+    pub fn with_video(mut self, video: Video) -> Self {
+        self.video = video;
         self
     }
 
@@ -776,6 +785,8 @@ impl Eden {
             CPU_LIMIT.to_owned(),
             "-e".to_owned(),
             "SDL_AUDIODRIVER=dummy".to_owned(),
+            "-e".to_owned(),
+            format!("CARAFE_VIDEO={}", self.video.name()),
             "--cap-add".to_owned(),
             "SYS_PTRACE".to_owned(),
         ];

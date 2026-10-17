@@ -15,7 +15,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `bug` The input check still passes on OpenTTD: its title jumps between `first-frame` and `after-a` in every run
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
-- [ ] `feature` Video turned down or off during performance runs
 - [ ] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)
 
 ### 2. Logs
@@ -93,6 +92,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Video turned down (`--video low`, A/B from the window) or off during performance runs
 - [x] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
 - [x] `feature` Screenshots are the game's own frame from Eden through the control channel, not a capture of the X screen
 - [x] `feature` Watchdog: an Eden silent for 45 s during a game is replaced; "clean start" runs a new Eden per launch
