@@ -247,7 +247,8 @@ impl Eden {
         self.presses.clone()
     }
 
-    /// Joins the one Eden another process started, so presses go through its control channel.
+    /// Joins the one Eden another process started, so presses go through its control channel and the logs read are
+    /// those of the game it booted last.
     ///
     /// # Returns
     ///
@@ -260,13 +261,28 @@ impl Eden {
         if !self.container_running() {
             return false;
         }
+        let booted = replies
+            .iter()
+            .rev()
+            .find_map(|reply| reply.text.strip_prefix("booting "));
+        self.title = booted
+            .and_then(|nsp| Path::new(nsp).file_stem())
+            .and_then(|stem| TitleId::parse(&stem.to_string_lossy()).ok());
+        let log = read_text(&self.user_dir.join("log").join("eden_log.txt"));
         self.session = Some(Session {
             nsp_dir: PathBuf::new(),
             seen: last.number,
             booted_at: last.number,
-            log_from: 0,
+            log_from: log.rfind("Control: booting").unwrap_or(0),
         });
         true
+    }
+
+    /// Returns the Title ID of the game this emulator launched or, after [`Eden::join_running`], the one the joined
+    /// Eden booted last.
+    #[must_use]
+    pub fn title(&self) -> Option<TitleId> {
+        self.title
     }
 
     /// Returns Eden's version from the image, such as `v0.2.1`.

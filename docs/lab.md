@@ -173,6 +173,8 @@ For Claude and for quick looks, one call each:
 - `press <A+ZR>` presses buttons together in the running game, `--hold <s>` long;
 - `screen <file.png>` saves the running game's screen;
 - `perf` prints the median and worst-tenth FPS and the speed over the last 10 seconds; `--json` prints the readings.
+- `logs` prints how far the running game got (loading screen, first frame, stalls) and the error and warning lines of
+  Eden's log since its boot, the overlay's and the runtime's, grouped; `--json` prints the milestones and every group.
 
 ## The queue
 

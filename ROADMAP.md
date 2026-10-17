@@ -26,7 +26,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` Error lines that the previous version did not have are highlighted
 - [ ] `feature` Full logs compressed for failures and recent runs; a summary for older passing runs
 - [ ] `feature` Diagnostics as named flags instead of temporary patches
-- [ ] `feature` Tools for Claude, one call each: the running game's logs and milestones
 - [ ] `feature` `report.json` with milestones, step times, frame times and the reason for a failure
 
 ### 3. Versions and history
@@ -90,6 +89,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Tools for Claude, one call each: the running game's logs and milestones (`logs`)
 - [x] `feature` Every launch: Eden, runtime, Wine errors, DXVK and Mesa warnings; CPU and memory every second
 - [x] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)
 - [x] `feature` Video turned down (`--video low`, A/B from the window) or off during performance runs

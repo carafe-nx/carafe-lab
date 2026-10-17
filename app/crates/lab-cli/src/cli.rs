@@ -25,6 +25,7 @@ Usage:
   carafe-lab press <A+B…>          presses buttons together in the running game; --hold <s>, default 0.15
   carafe-lab screen <file.png>     saves the running game's screen
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
+  carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
   carafe-lab help
 
 Options:
@@ -93,6 +94,8 @@ pub enum Command {
     },
     /// Show the emulator's recent performance.
     Perf,
+    /// Show the running game's stages and the problems of its logs.
+    Logs,
     /// Print the help.
     Help,
 }
@@ -180,6 +183,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("press") => Command::Press { buttons: None },
         Some("screen") => Command::Screen { file: None },
         Some("perf") => Command::Perf,
+        Some("logs") => Command::Logs,
         Some(other) => return Err(ArgsError::Command(other.to_owned())),
     };
     let mut parsed = Args {

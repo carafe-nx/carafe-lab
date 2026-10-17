@@ -23,8 +23,10 @@ use lab_core::emulator::{EdenCpu, Gpu};
 use lab_core::lang::Lang;
 use lab_core::local::{self, LocalSettings};
 use lab_core::matrix;
+use lab_core::milestones::Launch;
 use lab_core::perf;
 use lab_core::probes::{self, ProbeRun};
+use lab_core::problems;
 use lab_core::scenario::{Milestone, Scenario, Step};
 use lab_core::time::Utc;
 use lab_core::view::LabView;
@@ -33,7 +35,7 @@ use lab_run::engine::{Engine, Event, Planned};
 use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
 use lab_run::report::{self, RunStamp};
-use lab_run::run::{Clock, Emulator, Outcome, StepResult};
+use lab_run::run::{Clock, Emulator, Outcome, StepResult, stage_name};
 use serde::Serialize;
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
@@ -42,6 +44,7 @@ const PAGE_IDLE: Duration = Duration::from_secs(60);
 const PAGE_LONGEST: Duration = Duration::from_secs(30 * 60);
 const QUEUE_POLL: Duration = Duration::from_secs(2);
 const PERF_WINDOW_MS: u64 = 10_000;
+const LOG_PROBLEMS_SHOWN: usize = 15;
 const RUNTIME_VERSION: &str = match option_env!("CARAFE_RUNTIME_VERSION") {
     Some(version) => version,
     None => "dev",
@@ -176,6 +179,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
             let file = file.ok_or("screen needs a file to save the picture to")?;
             lab.screen(&config, &file)
         }
+        Command::Logs => lab.show_logs(&config),
         Command::Help
         | Command::Status
         | Command::Games
@@ -534,6 +538,56 @@ impl Lab {
                 Duration::from_millis(u64::from(self.args.hold_ms)),
             )
             .map_err(|error| error.to_string())?;
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn show_logs(mut self, config: &Config) -> Result<ExitCode, String> {
+        self.require_running(config)?;
+        if !self.eden.join_running() {
+            return Err(
+                "no Eden with a control channel runs: logs reads the one Eden of a run".to_owned(),
+            );
+        }
+        let title = self
+            .eden
+            .title()
+            .ok_or("the running Eden has booted no game yet")?;
+        let logs = self.eden.logs(title);
+        let launch = Launch::read(&logs.overlay, &logs.runtime);
+        let mut found = problems::problems("eden", &self.eden.emulator_log());
+        found.extend(problems::problems("carafe", &logs.overlay));
+        found.extend(problems::problems("runtime", &logs.runtime));
+        if self.args.json {
+            print_json(&serde_json::json!({
+                "titleId": title.to_string(),
+                "stage": launch.stage(),
+                "launch": launch,
+                "problems": found,
+            }))?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        println!("{title}: got as far as {}", stage_name(launch.stage()));
+        if let Some(at) = launch.loading_drawn_at {
+            println!("  loading screen at {at} s");
+        }
+        if let Some((at, reason)) = &launch.loading_hidden {
+            println!("  loading screen gone at {at} s: {}", reason.text());
+        }
+        if launch.stalls > 0 {
+            println!("  {} stall reports", launch.stalls);
+        }
+        let counts = problems::count(&found);
+        println!(
+            "{} error lines, {} warning lines",
+            counts.errors, counts.warnings
+        );
+        found.sort_by(|a, b| b.severity.cmp(&a.severity).then(b.count.cmp(&a.count)));
+        for problem in found.iter().take(LOG_PROBLEMS_SHOWN) {
+            println!(
+                "{:>6} {:<7} {}",
+                problem.count, problem.source, problem.text
+            );
+        }
         Ok(ExitCode::SUCCESS)
     }
 
