@@ -8,6 +8,7 @@ import { Chip } from "@/shared/ui/Chip";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
 import styles from "@/shared/ui/lab.module.css";
+import { PerfTable } from "./PerfTable";
 import versions from "./VersionsPage.module.css";
 
 type Cell = { outcome: Outcome; runs: number; failed: number; dir: string; fps: number | null };
@@ -98,6 +99,7 @@ export function VersionsPage() {
           </table>
         </div>
       ) : null}
+      <PerfTable refreshKey={(runs.data ?? []).map((run) => `${run.dir}:${run.games.length}`).join(",")} />
     </Page>
   );
 }

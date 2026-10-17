@@ -12,6 +12,7 @@ use lab_core::frames::FrameSummary;
 use lab_core::perf::PerfSummary;
 use lab_core::problems::{self, Problem, ProblemCounts};
 use lab_core::resources::ResourceSummary;
+use lab_core::versions::{self, Sample, VersionPerf};
 
 /// The summary every run keeps next to its report and rewrites after every game.
 pub const SUMMARY_FILE: &str = "summary.json";
@@ -347,6 +348,49 @@ pub fn read(runs: &Path, dir: &str) -> Option<RunSummary> {
     let mut summary: RunSummary = serde_json::from_str(&text).ok()?;
     summary.dir = dir.to_owned();
     Some(summary)
+}
+
+/// Returns every game's performance at every Carafe commit of `runs`, oldest commit first; A/B variants and games
+/// that never reached their first frame are left out.
+#[must_use]
+pub fn version_performance(runs: &[RunSummary]) -> Vec<VersionPerf> {
+    let samples: Vec<(&str, &str, Sample)> = runs
+        .iter()
+        .rev()
+        .filter_map(|run| Some((run, run.stamp.carafe_commit.as_deref()?)))
+        .flat_map(|(run, commit)| {
+            run.games
+                .iter()
+                .filter(|game| !game.name.ends_with(VARIANT_A) && !game.name.ends_with(VARIANT_B))
+                .filter(|game| game.first_frame.is_some())
+                .map(move |game| (game.name.as_str(), commit, sample_of(game)))
+        })
+        .collect();
+    versions::by_version(samples)
+}
+
+/// Returns the performance of `game` at the newest Carafe commit of `runs` other than `current`, to compare a new
+/// run with; `None` when the game has no run at another commit.
+#[must_use]
+pub fn baseline(runs: &[RunSummary], game: &str, current: Option<&str>) -> Option<VersionPerf> {
+    let newest_other = runs
+        .iter()
+        .filter_map(|run| run.stamp.carafe_commit.as_deref())
+        .find(|commit| Some(*commit) != current && !commit.ends_with("+changes"))?;
+    version_performance(runs)
+        .into_iter()
+        .find(|perf| perf.game == game && perf.commit == newest_other)
+}
+
+fn sample_of(game: &GameSummary) -> Sample {
+    Sample {
+        first_frame: game.first_frame,
+        fps: game.perf.map(|perf| perf.median_fps),
+        p99_ms: game.frames.map(|frames| frames.p99_ms),
+        peak_mb: game
+            .resources
+            .map(|resources| f64::from(resources.peak_memory_mb)),
+    }
 }
 
 /// The problems in a game's logs in one run, and those the same game's run before did not have.

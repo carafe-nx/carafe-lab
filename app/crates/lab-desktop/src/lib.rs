@@ -18,6 +18,7 @@ pub fn run() {
             commands::get_status,
             commands::get_lab,
             commands::list_runs,
+            commands::version_steps,
             commands::run_events,
             commands::start_run,
             commands::stop_run,

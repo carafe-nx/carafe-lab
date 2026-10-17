@@ -17,6 +17,7 @@ use lab_core::firmware;
 use lab_core::local::{self, KeysSource, LocalSettings};
 use lab_core::perf::{self, PerfSample};
 use lab_core::scenario::Scenario;
+use lab_core::versions::{self, VersionStep};
 use lab_core::view::LabView;
 use lab_run::history::{self, EVENTS_FILE, GameProblems, RunSummary};
 use lab_run::queue::{QueueState, unix_now};
@@ -136,6 +137,22 @@ pub async fn get_lab(lab: State<'_, Arc<Lab>>) -> Result<LabView, CommandError> 
     blocking(move || {
         let roadmap = fs::read_to_string(lab.repository().join("ROADMAP.md")).unwrap_or_default();
         Ok(LabView::of(&lab.config()?, &roadmap))
+    })
+    .await
+}
+
+/// Returns every game's performance at every Carafe commit, oldest first, with how each measure went since the
+/// game's commit before.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.json` is missing or broken.
+#[tauri::command]
+pub async fn version_steps(lab: State<'_, Arc<Lab>>) -> Result<Vec<VersionStep>, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let runs = history::list(&lab.config()?.work.join("runs"));
+        Ok(versions::steps(&history::version_performance(&runs)))
     })
     .await
 }

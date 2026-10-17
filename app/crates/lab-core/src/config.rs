@@ -20,6 +20,7 @@ use thiserror::Error;
 use crate::emulator::{EdenCpu, Gpu};
 use crate::lang::Lang;
 use crate::scenario::{Scenario, ScenarioError};
+use crate::versions;
 
 /// Name of the developer's own file, next to the template.
 pub const CONFIG_FILE: &str = "lab.json";
@@ -103,6 +104,7 @@ struct RawGame {
     #[serde(default)]
     tags: Vec<String>,
     notes: Option<String>,
+    threshold: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,6 +173,8 @@ pub struct Game {
     pub tags: Vec<String>,
     /// Free notes about the game.
     pub notes: Option<String>,
+    /// The percentage the game may get slower by against the last Carafe version before it fails.
+    pub threshold: u32,
 }
 
 impl Config {
@@ -302,6 +306,7 @@ impl Config {
                 scenario_file,
                 tags: game.tags,
                 notes: game.notes,
+                threshold: game.threshold.unwrap_or(versions::DEFAULT_THRESHOLD),
             });
         }
         for (set, names) in &raw.sets {

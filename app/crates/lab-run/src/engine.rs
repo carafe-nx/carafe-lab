@@ -18,7 +18,7 @@ use lab_core::scenario::Scenario;
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::history::{EVENTS_FILE, RunSummary, SUMMARY_FILE};
+use crate::history::{self, EVENTS_FILE, RunSummary, SUMMARY_FILE};
 use crate::report::{self, BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::{Clock, Emulator, LaunchRecord, Outcome, Runner, StepResult};
 
@@ -37,6 +37,8 @@ pub struct Planned {
     pub label: String,
     /// What to do in the game.
     pub scenario: Scenario,
+    /// The percentage the game may get slower by against the last Carafe version before it fails.
+    pub threshold: u32,
 }
 
 /// What the run is doing, for the window, the live page and `--json`.
@@ -301,7 +303,13 @@ impl Engine<'_> {
         }
         let nsp = nsp_dir.join(format!("{}.nsp", record.title_id));
         let shared = RefCell::new(on_event);
+        let baseline = history::baseline(
+            &history::list(run_dir.parent().unwrap_or(run_dir)),
+            &game.name,
+            self.stamp.carafe_commit.as_deref(),
+        );
         let runner = Runner::new(&mut *self.emulator, clock, record.title_id, nsp, &game_dir)
+            .with_baseline(baseline, game.threshold)
             .with_input(record.settings.input.clone())
             .with_stop(self.stop.clone())
             .with_stages(|stage| (shared.borrow_mut())(&Event::Reached { stage }));

@@ -11,10 +11,12 @@ import type { RunRequest } from "./bindings/RunRequest";
 import type { RunSummary } from "./bindings/RunSummary";
 import type { Scenario } from "./bindings/Scenario";
 import type { Screen } from "./bindings/Screen";
+import type { VersionStep } from "./bindings/VersionStep";
 
 export const api = {
   getStatus: () => invoke<LabStatus>("get_status"),
   gameProblems: (dir: string, game: string) => invoke<GameProblems>("game_problems", { dir, game }),
+  versionSteps: () => invoke<VersionStep[]>("version_steps"),
   getLab: () => invoke<LabView>("get_lab"),
   listRuns: () => invoke<RunSummary[]>("list_runs"),
   runEvents: (dir: string, from: number) => invoke<Event[]>("run_events", { dir, from }),

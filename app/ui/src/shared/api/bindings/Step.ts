@@ -50,7 +50,11 @@ quiet?: Array<[string, string]>, } | { "step": "expectPattern",
 /**
  * The picture.
  */
-name: string, } | { "step": "expectInput" } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "close", 
+name: string, } | { "step": "expectInput" } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
+/**
+ * The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
+ */
+threshold?: number, } | { "step": "close", 
 /**
  * Seconds to wait for the game to end before it is stopped by force.
  */

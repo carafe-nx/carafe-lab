@@ -29,6 +29,7 @@ use lab_core::probes::{self, ProbeRun};
 use lab_core::problems;
 use lab_core::scenario::{Milestone, Scenario, Step};
 use lab_core::time::Utc;
+use lab_core::versions;
 use lab_core::view::LabView;
 use lab_eden::Eden;
 use lab_run::engine::{Engine, Event, Planned};
@@ -608,6 +609,7 @@ impl Lab {
                 .scenario
                 .clone()
                 .unwrap_or_else(|| game.scenario(self.timeout)),
+            threshold: game.threshold,
         }
     }
 
@@ -998,6 +1000,7 @@ fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> 
         entropy: config::name_entropy(&run.name),
         label: run.label.clone(),
         scenario: run.scenario.clone(),
+        threshold: versions::DEFAULT_THRESHOLD,
     }
 }
 

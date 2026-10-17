@@ -22,4 +22,5 @@ pub mod resources;
 pub mod roadmap;
 pub mod scenario;
 pub mod time;
+pub mod versions;
 pub mod view;

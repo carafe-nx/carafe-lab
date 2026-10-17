@@ -26,9 +26,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ### 3. Versions and history
 
-- [ ] **`feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats**
-- [ ] **`feature` Only changes larger than the spread between repeats are flagged**
-- [ ] **`feature` Thresholds: a game slower beyond its threshold (20 % by default) fails**
 - [ ] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
 - [ ] `feature` A regression between two versions starts a bisection over Carafe's commits
 
@@ -83,6 +80,9 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats
+- [x] `feature` Only changes larger than the spread between repeats are flagged
+- [x] `feature` Thresholds: a game slower beyond its threshold (20 % by default) fails (`expectPerformance`)
 - [x] `feature` "Repeat exactly": a past run again with its own runtime and Eden image, not the current ones
 - [x] `bug` Closing as from the HOME menu ends OpenTTD and it writes its save: the hang was Mesa's stop crash (`patches/mesa/0002`)
 - [x] `feature` Live page: the emulator's screen in a Switch frame, buttons light up when pressed (the Run screen)

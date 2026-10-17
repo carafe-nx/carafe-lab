@@ -80,6 +80,15 @@ pub enum Step {
     ExpectSave,
     /// Checks that the save data remembered by [`Step::ExpectSave`] is still there and unchanged.
     ExpectSaveKept,
+    /// Checks the first launch's time to the first frame and median FPS against the newest other Carafe version: the
+    /// step fails when either is worse by more than the threshold.
+    #[serde(rename_all = "camelCase")]
+    ExpectPerformance {
+        /// The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        threshold: Option<u32>,
+    },
     /// Asks the game to close the way the HOME Menu does, and waits for it to end.
     #[serde(rename_all = "camelCase")]
     Close {
@@ -264,6 +273,7 @@ impl Scenario {
                     timeout: default_close_timeout(),
                 },
                 Step::ExpectSave,
+                Step::ExpectPerformance { threshold: None },
                 Step::Launch,
                 wait_for_frame,
                 Step::ExpectSaveKept,

@@ -85,6 +85,9 @@
     "expectInput": "Buttons arrived",
     "expectSave": "Save data written",
     "expectSaveKept": "Save data kept",
+    "expectPerformance": "No slower than the last version",
+    "threshold": "threshold",
+    "gameThreshold": "the game's threshold",
     "close": "Close",
     "soft": "warn only",
     "quiet": "no input:",
@@ -325,7 +328,20 @@
     "empty": "No stamped runs yet",
     "game": "Game",
     "runs": "runs: {{count}}",
-    "broke": "broke here"
+    "broke": "broke here",
+    "perfTitle": "Performance by version",
+    "perfHint": "The median of the repeats and half their spread. ▲ better and ▼ worse than the version before, only when the difference is larger than the spread; with one repeat the spread is unknown and there is no arrow.",
+    "measure": {
+      "firstFrame": "frame",
+      "fps": "fps",
+      "p99": "1%",
+      "memory": "memory"
+    },
+    "sec": "s",
+    "ms": "ms",
+    "gb": "GB",
+    "repeats_one": "{{count}} repeat",
+    "repeats_other": "{{count}} repeats"
   },
   "who": {
     "window": "the window",

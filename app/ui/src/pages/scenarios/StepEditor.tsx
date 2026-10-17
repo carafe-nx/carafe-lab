@@ -15,7 +15,7 @@ const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"
 
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "expectChange",
-  "expectPattern", "expectInput", "expectSave", "expectSaveKept", "close",
+  "expectPattern", "expectInput", "expectSave", "expectSaveKept", "expectPerformance", "close",
 ];
 
 export function newStep(kind: Step["step"], steps: Step[]): Step {
@@ -41,6 +41,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "expectSave" };
     case "expectSaveKept":
       return { step: "expectSaveKept" };
+    case "expectPerformance":
+      return { step: "expectPerformance" };
     case "close":
       return { step: "close", timeout: 60 };
   }
@@ -231,6 +233,18 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
           <label htmlFor={`${id}-timeout`}>{t("scenarios.upTo")}</label>
           <NumberInput id={`${id}-timeout`} value={step.timeout} onChange={(timeout) => onChange({ ...step, timeout })} />
           <span>{t("scenarios.sec")}</span>
+        </>
+      );
+    case "expectPerformance":
+      return (
+        <>
+          <label htmlFor={`${id}-threshold`}>{t("steps.threshold")}</label>
+          <NumberInput
+            id={`${id}-threshold`}
+            value={step.threshold ?? 20}
+            onChange={(threshold) => onChange({ ...step, threshold })}
+          />
+          <span>%</span>
         </>
       );
     default:

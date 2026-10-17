@@ -111,6 +111,10 @@ save data is still there, close it.
 - `expectInput` — the input probe's log against the bindings of the build.
 - `expectSave` — the game has written save data; remembered for `expectSaveKept`.
 - `expectSaveKept` — the remembered save data is still there and unchanged.
+- `expectPerformance` — the first launch's time to the first frame and median FPS against the game at the newest
+  other Carafe commit in History: fails when either is worse by more than `threshold` percent, or by the game's
+  `threshold` in `lab.json` (20 by default). Passes with a note when there is no other commit to compare with. The
+  standard scenario has it after the first close.
 - `close` — asks the game to close and waits `timeout` seconds; then stops it. Lab sends Eden SIGUSR1, and
   Eden closes the software the way the HOME Menu does, without asking (`patches/eden/0025`): a hotkey cannot do
   this, because without a window manager Qt matches no shortcut.
@@ -164,6 +168,10 @@ emulator.
 - Every run keeps what it ran with: the runtime archive as `<work>/runtimes/<hash>.bin`, once for each hash, and the
   Eden image under the tag `carafe-lab-eden-kept:<id>`. `run --like <run folder>`, or History's "Repeat exactly",
   runs that run's games again with them instead of the current ones; the games' settings come from `lab.json`.
+- The Versions screen shows, under the pass/fail matrix, each game's performance at each Carafe commit: the median
+  and half the spread of its repeats for the time to the first frame, the median FPS, the worst hundredth of frames
+  and the peak memory. A measure is marked better or worse than the commit before only when the difference is
+  larger than the spread of both; with a single repeat the spread is unknown and nothing is marked.
 - `--video low` sends the live picture at about five frames a second, `--video off` sends none (`CARAFE_VIDEO` in
   the container), so the video takes little or nothing from the game while it is measured; A/B runs from the window
   use `low`.

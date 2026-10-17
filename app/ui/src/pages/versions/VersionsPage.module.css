@@ -55,3 +55,24 @@
   color: var(--danger);
   font-size: 11.5px;
 }
+
+.heading {
+  margin: 24px 0 0;
+  font-size: 16px;
+}
+
+.measures {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.better {
+  color: var(--ok);
+}
+
+.worse {
+  color: var(--danger);
+  font-weight: 600;
+}

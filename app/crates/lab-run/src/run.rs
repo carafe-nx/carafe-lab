@@ -18,6 +18,7 @@ use lab_core::picture::{self, Change, PatternCheck, Thumbnail};
 use lab_core::problems::{self, Problem, ProblemCounts};
 use lab_core::resources::{self, ResourceSample, ResourceSummary};
 use lab_core::scenario::{Milestone, Scenario, Step};
+use lab_core::versions::{self, VersionPerf};
 
 const POLL: Duration = Duration::from_millis(500);
 const GLIMPSE_EVERY: Duration = Duration::from_secs(10);
@@ -286,6 +287,8 @@ pub struct Runner<'a> {
     on_stage: Option<Box<dyn FnMut(Stage) + 'a>>,
     launch_started: Duration,
     last_glimpse: Duration,
+    baseline: Option<VersionPerf>,
+    threshold: u32,
 }
 
 impl<'a> Runner<'a> {
@@ -317,7 +320,18 @@ impl<'a> Runner<'a> {
             on_stage: None,
             launch_started: started,
             last_glimpse: started,
+            baseline: None,
+            threshold: versions::DEFAULT_THRESHOLD,
         }
+    }
+
+    /// Returns the runner checking [`Step::ExpectPerformance`] against `baseline`, the game at the newest other
+    /// Carafe version, with `threshold` percent as the game's own threshold.
+    #[must_use]
+    pub fn with_baseline(mut self, baseline: Option<VersionPerf>, threshold: u32) -> Self {
+        self.baseline = baseline;
+        self.threshold = threshold;
+        self
     }
 
     fn glimpse(&mut self) {
@@ -386,8 +400,13 @@ impl<'a> Runner<'a> {
             steps.push(result);
         }
         for step in &scenario.steps {
-            let independent =
-                matches!(step, Step::Launch | Step::ExpectSave | Step::ExpectSaveKept);
+            let independent = matches!(
+                step,
+                Step::Launch
+                    | Step::ExpectSave
+                    | Step::ExpectSaveKept
+                    | Step::ExpectPerformance { .. }
+            );
             let result = if self.stopped() {
                 self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None)
             } else if broken && !independent {
@@ -496,6 +515,9 @@ impl<'a> Runner<'a> {
                 }
             }
             Step::ExpectSaveKept => self.expect_save_kept(step),
+            Step::ExpectPerformance { threshold } => {
+                self.expect_performance(step, threshold.unwrap_or(self.threshold))
+            }
             Step::ExpectPattern { name } => self.expect_pattern(step, name),
             Step::ExpectInput => self.expect_input(step),
             Step::Close { timeout } => self.close(step, *timeout),
@@ -759,6 +781,70 @@ impl<'a> Runner<'a> {
                 self.result(step, outcome, detail, Some(after_file))
             }
         }
+    }
+
+    fn expect_performance(&mut self, step: &Step, threshold: u32) -> StepResult {
+        let Some(base) = self.baseline.clone() else {
+            return self.result(
+                step,
+                Outcome::Pass,
+                "no earlier Carafe version of this game to compare with".to_owned(),
+                None,
+            );
+        };
+        let first = self.launches.first();
+        let first_frame = first.and_then(|record| match &record.launch.loading_hidden {
+            Some((at, reason)) if reason.is_success() => Some(f64::from(*at)),
+            _ => None,
+        });
+        let fps = first
+            .and_then(|record| record.perf)
+            .map(|perf| perf.median_fps);
+        let mut worse = Vec::new();
+        let mut within = Vec::new();
+        if let (Some(before), Some(now)) = (base.first_frame, first_frame) {
+            match versions::slower_than(before.median, now, false, threshold) {
+                Some(percent) => worse.push(format!(
+                    "first frame at {now:.0} s against {:.0} s (+{percent:.0} %)",
+                    before.median
+                )),
+                None => within.push(format!(
+                    "first frame at {now:.0} s against {:.0} s",
+                    before.median
+                )),
+            }
+        }
+        if let (Some(before), Some(now)) = (base.fps, fps) {
+            match versions::slower_than(before.median, now, true, threshold) {
+                Some(percent) => worse.push(format!(
+                    "median FPS {now:.0} against {:.0} (−{percent:.0} %)",
+                    before.median
+                )),
+                None => within.push(format!("median FPS {now:.0} against {:.0}", before.median)),
+            }
+        }
+        if !worse.is_empty() {
+            let detail = format!(
+                "slower than {} by more than {threshold} %: {}",
+                base.commit,
+                worse.join(", ")
+            );
+            return self.result(step, Outcome::Fail, detail, None);
+        }
+        if within.is_empty() {
+            return self.result(
+                step,
+                Outcome::Pass,
+                format!("nothing measured to compare with {}", base.commit),
+                None,
+            );
+        }
+        let detail = format!(
+            "within {threshold} % of {}: {}",
+            base.commit,
+            within.join(", ")
+        );
+        self.result(step, Outcome::Pass, detail, None)
     }
 
     fn expect_save_kept(&mut self, step: &Step) -> StepResult {
@@ -1167,6 +1253,14 @@ mod tests {
     }
 
     fn run(emulator: FakeEmulator, scenario: &Scenario) -> (ScenarioResult, FakeEmulator) {
+        run_against(emulator, scenario, None)
+    }
+
+    fn run_against(
+        emulator: FakeEmulator,
+        scenario: &Scenario,
+        baseline: Option<VersionPerf>,
+    ) -> (ScenarioResult, FakeEmulator) {
         let shared = std::rc::Rc::new(std::cell::RefCell::new(emulator));
         let clock = FakeClock(Cell::new(Duration::ZERO));
         let stepping = Stepping {
@@ -1176,8 +1270,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("carafe-lab-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut adapter = Shared(shared.clone());
-        let result =
-            Runner::new(&mut adapter, &stepping, title(), "game.nsp", &dir).run(scenario, |_| {});
+        let result = Runner::new(&mut adapter, &stepping, title(), "game.nsp", &dir)
+            .with_baseline(baseline, versions::DEFAULT_THRESHOLD)
+            .run(scenario, |_| {});
         drop(adapter);
         drop(stepping);
         let emulator = std::rc::Rc::try_unwrap(shared).ok().unwrap().into_inner();
@@ -1199,6 +1294,47 @@ mod tests {
                 Step::Close { timeout: 10 },
             ],
         }
+    }
+
+    fn measured_at(first_frame: f64) -> VersionPerf {
+        VersionPerf {
+            game: "G".to_owned(),
+            commit: "aaa1111".to_owned(),
+            first_frame: Some(versions::Spread {
+                median: first_frame,
+                spread: 2.0,
+                count: 3,
+            }),
+            fps: None,
+            p99_ms: None,
+            peak_mb: None,
+        }
+    }
+
+    #[test]
+    fn a_game_slower_than_the_last_version_beyond_its_threshold_fails() {
+        let mut scenario = waiting(60);
+        scenario
+            .steps
+            .push(Step::ExpectPerformance { threshold: None });
+        let emulator = || FakeEmulator {
+            script: VecDeque::from(vec![started(), first_frame()]),
+            ..FakeEmulator::default()
+        };
+        let (slower, _) = run_against(emulator(), &scenario, Some(measured_at(20.0)));
+        let step = slower.steps.last().unwrap();
+        assert_eq!(step.outcome, Outcome::Fail, "{}", step.detail);
+        assert!(
+            step.detail.contains("aaa1111") && step.detail.contains("34 s against 20 s"),
+            "{}",
+            step.detail
+        );
+        let (close, _) = run_against(emulator(), &scenario, Some(measured_at(30.0)));
+        assert_eq!(close.steps.last().unwrap().outcome, Outcome::Pass);
+        let (first, _) = run_against(emulator(), &scenario, None);
+        let step = first.steps.last().unwrap();
+        assert_eq!(step.outcome, Outcome::Pass);
+        assert!(step.detail.contains("no earlier"), "{}", step.detail);
     }
 
     #[test]

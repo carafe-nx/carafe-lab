@@ -476,6 +476,12 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "Save data survived the restart",
             )
             .to_owned(),
+        Step::ExpectPerformance { .. } => lang
+            .pick(
+                "Не медленнее прошлой версии",
+                "No slower than the last version",
+            )
+            .to_owned(),
         Step::Close { .. } => lang
             .pick("Закрытие, как из меню HOME", "Close, as from the HOME Menu")
             .to_owned(),

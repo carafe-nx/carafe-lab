@@ -55,6 +55,9 @@ function StepParams({ step }: { step: Step }) {
     case "close":
       params.push(t("units.seconds", { count: step.timeout }));
       break;
+    case "expectPerformance":
+      params.push(step.threshold === undefined ? t("steps.gameThreshold") : `${step.threshold} %`);
+      break;
     default:
       break;
   }
