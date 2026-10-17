@@ -232,7 +232,17 @@
     "command line": "the command line"
   },
   "scenarios": {
-    "hint": "Scenarios are edited in lab.json and scenarios/ for now. Here is what the lab does in each game.",
+    "hint": "The steps the lab takes in a game. Changes are saved to the game's scenario file in scenarios/.",
+    "saved": "Saved to {{file}}",
+    "reset": "Undo changes",
+    "save": "Save",
+    "add": "Add a step",
+    "up": "Up",
+    "down": "Down",
+    "remove": "Remove the step",
+    "upTo": "up to",
+    "sec": "s",
+    "hold": "hold",
     "own": "its own",
     "standard": "standard"
   }

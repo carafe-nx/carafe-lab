@@ -43,6 +43,10 @@ scenario: Scenario,
  */
 ownScenario: boolean, 
 /**
+ * The file its scenario is kept in, relative to `lab.json`; `None` when it is written in `lab.json` or standard.
+ */
+scenarioFile: string | null, 
+/**
  * The sets the game is in.
  */
 sets: Array<string>, };

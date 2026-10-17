@@ -161,6 +161,9 @@ pub struct Game {
     pub settings: AutorunSettings,
     /// Its own scenario; `None` means [`Scenario::standard`].
     pub scenario: Option<Scenario>,
+    /// The file the scenario was read from, relative to `lab.json`; `None` when it is written in `lab.json` or the
+    /// game has none.
+    pub scenario_file: Option<String>,
 }
 
 impl Config {
@@ -251,6 +254,10 @@ impl Config {
             {
                 return Err(ConfigError::DuplicateName(game.name));
             }
+            let scenario_file = match &game.scenario {
+                Some(RawScenario::File(file)) => Some(file.clone()),
+                _ => None,
+            };
             let scenario = match game.scenario {
                 None => None,
                 Some(RawScenario::Steps(scenario)) => Some(scenario),
@@ -285,6 +292,7 @@ impl Config {
                 arguments: game.arguments,
                 settings,
                 scenario,
+                scenario_file,
             });
         }
         for (set, names) in &raw.sets {
@@ -557,6 +565,67 @@ pub fn add_game(
     Ok(updated)
 }
 
+/// Returns the text of `lab.json` with the game `name` reading its scenario from `file`; everything else keeps its
+/// order. `read` reads scenario files, as for [`Config::parse_with`], and must already find `file`.
+///
+/// # Errors
+///
+/// [`ConfigError`] when the text is not a valid lab file, has no game `name`, or the scenario file is not valid.
+pub fn set_scenario_file(
+    text: &str,
+    name: &str,
+    file: &str,
+    read: impl Fn(&str) -> Result<String, String>,
+) -> Result<String, ConfigError> {
+    let mut value: Value =
+        serde_json::from_str(text).map_err(|error| ConfigError::Format(error.to_string()))?;
+    let game = value
+        .get_mut("games")
+        .and_then(Value::as_array_mut)
+        .and_then(|games| {
+            games.iter_mut().find(|game| {
+                game.get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|known| known.eq_ignore_ascii_case(name))
+            })
+        })
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ConfigError::UnknownGame(name.to_owned()))?;
+    game.insert("scenario".to_owned(), Value::String(file.to_owned()));
+    let updated = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&value)
+            .map_err(|error| ConfigError::Format(error.to_string()))?
+    );
+    Config::parse_with(&updated, read)?;
+    Ok(updated)
+}
+
+/// Returns the scenario file a game named `name` gets when its scenario is first saved on its own:
+/// `scenarios/<name>.json` with the name in lower case and every character other than a letter or digit as `-`.
+#[must_use]
+pub fn scenario_file_for(name: &str) -> String {
+    let stem: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let stem = stem
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    format!(
+        "scenarios/{}.json",
+        if stem.is_empty() { "game" } else { &stem }
+    )
+}
+
 fn valid_name(name: &str) -> bool {
     !name.trim().is_empty()
         && name
@@ -684,6 +753,28 @@ mod tests {
         assert_eq!(
             config.pick(&["C".to_owned()]),
             Err(ConfigError::UnknownGame("C".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_saved_scenario_moves_into_its_own_file() {
+        assert_eq!(scenario_file_for("NFSU race"), "scenarios/nfsu-race.json");
+        assert_eq!(scenario_file_for("Игра"), "scenarios/game.json");
+        let text = r#"{"work": "x", "games": [{"name": "A", "folder": "a", "enabled": false}]}"#;
+        let steps = r#"{"steps": [{"step": "launch"}]}"#;
+        let updated = set_scenario_file(text, "a", "scenarios/a.json", |file| {
+            assert_eq!(file, "scenarios/a.json");
+            Ok(steps.to_owned())
+        })
+        .unwrap();
+        assert!(updated.find("\"enabled\"").unwrap() < updated.find("\"scenario\"").unwrap());
+        let config = Config::parse_with(&updated, |_| Ok(steps.to_owned())).unwrap();
+        assert_eq!(
+            config.games[0].scenario_file.as_deref(),
+            Some("scenarios/a.json")
+        );
+        assert!(
+            set_scenario_file(text, "B", "scenarios/b.json", |_| Ok(steps.to_owned())).is_err()
         );
     }
 

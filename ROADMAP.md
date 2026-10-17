@@ -48,11 +48,10 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` Only changes larger than the spread between repeats are flagged
 - [ ] `feature` Thresholds: a game slower beyond its threshold (20 % by default) fails
 - [ ] `feature` A regression between two versions starts a bisection over Carafe's commits
-- [ ] `feature` Two runs compared, screenshots included
 
 ### 4. Scenarios and A/B
 
-- [ ] `feature` Scenario editor: nested blocks, with a flowchart drawn from them for viewing
+- [ ] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
 - [ ] `feature` Reference screenshots for "the screen shows …" checks
 - [ ] `feature` Random presses for a set time, to catch crashes and hangs without a scenario
 - [ ] `feature` A/B: two variants (runtime build, runtime flag or game setting) alternate; the run ends with a verdict
@@ -102,6 +101,8 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Scenario editor in the window: every step with its settings, reorder, add, remove; saved to the game's file in `scenarios/`
+- [x] `feature` Two runs compared side by side: outcomes, times, what differs in their stamps, screenshots of the same steps
 - [x] `feature` Games that fail only sometimes get a rate in the library ("failed 2 of 10"), build-only runs left out
 - [x] `feature` Every run stamped with the Carafe commit, runtime hash, lab commit and Eden image; settings per game; "run these games again"
 - [x] `feature` Plans: games ticked by hand × repeats, with launch count and time from past runs; `--games` and `--repeat` on the command line

@@ -51,6 +51,8 @@ pub struct GameView {
     pub scenario: Scenario,
     /// The game has its own scenario rather than the standard one.
     pub own_scenario: bool,
+    /// The file its scenario is kept in, relative to `lab.json`; `None` when it is written in `lab.json` or standard.
+    pub scenario_file: Option<String>,
     /// The sets the game is in.
     pub sets: Vec<String>,
 }
@@ -86,6 +88,7 @@ impl GameView {
             settings: game.settings.clone(),
             scenario: game.scenario(config.timeout),
             own_scenario: game.scenario.is_some(),
+            scenario_file: game.scenario_file.clone(),
             sets: config
                 .sets
                 .iter()

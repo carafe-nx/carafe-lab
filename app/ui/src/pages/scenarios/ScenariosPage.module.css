@@ -1,0 +1,115 @@
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps .step {
+  display: grid;
+  grid-template-columns: 24px 132px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.number {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.kind {
+  font-weight: 600;
+}
+
+.params {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.tools {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.tools button {
+  min-height: 28px;
+  padding: 2px 8px;
+}
+
+.number_input,
+.text,
+.select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-solid);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.number_input {
+  width: 72px;
+}
+
+.text {
+  width: 180px;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 520px;
+}
+
+.pad {
+  min-width: 34px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-solid);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.padOn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.check input {
+  accent-color: var(--accent);
+}
+
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.palette button {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+
+.spacer {
+  flex: 1;
+}

@@ -13,6 +13,7 @@ use carafe_folder::DiskFolderInspector;
 use carafe_keys::FileKeysChecker;
 use lab_core::config;
 use lab_core::local::{self, KeysSource, LocalSettings};
+use lab_core::scenario::Scenario;
 use lab_core::view::LabView;
 use lab_run::history::{self, EVENTS_FILE, RunSummary};
 use lab_run::queue::{QueueState, unix_now};
@@ -192,6 +193,57 @@ pub async fn start_run(
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;
         std::thread::spawn(move || watch_exit(&app, &log_path));
         Ok(())
+    })
+    .await
+}
+
+/// Saves the scenario of the game `game` to its scenario file; a game whose scenario was standard or written in
+/// `lab.json` gets `scenarios/<name>.json`, and `lab.json` points to it.
+///
+/// # Returns
+///
+/// The scenario file, relative to `lab.json`.
+///
+/// # Errors
+///
+/// [`CommandError`] when the scenario does not make sense, the game is unknown or a file cannot be written.
+#[tauri::command]
+pub async fn save_scenario(
+    lab: State<'_, Arc<Lab>>,
+    game: String,
+    scenario: Scenario,
+) -> Result<String, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        scenario.check().map_err(|error| error.to_string())?;
+        let config = lab.config()?;
+        let known = config
+            .pick(std::slice::from_ref(&game))
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .next()
+            .ok_or("no such game")?;
+        let file = known
+            .scenario_file
+            .clone()
+            .unwrap_or_else(|| config::scenario_file_for(&known.name));
+        let path = lab.repository().join(&file);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let text = serde_json::to_string_pretty(&scenario).map_err(|error| error.to_string())?;
+        fs::write(&path, format!("{text}\n")).map_err(|error| error.to_string())?;
+        if known.scenario_file.is_none() {
+            let config_path = lab.config_path();
+            let lab_text = fs::read_to_string(&config_path).map_err(|error| error.to_string())?;
+            let base = lab.repository().to_path_buf();
+            let updated = config::set_scenario_file(&lab_text, &known.name, &file, |name| {
+                fs::read_to_string(base.join(name)).map_err(|error| error.to_string())
+            })
+            .map_err(|error| error.to_string())?;
+            fs::write(&config_path, updated).map_err(|error| error.to_string())?;
+        }
+        Ok(file)
     })
     .await
 }
