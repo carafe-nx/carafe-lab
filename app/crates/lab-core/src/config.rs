@@ -759,13 +759,9 @@ mod tests {
             fs::read_to_string(root.join(file)).map_err(|error| error.to_string())
         })
         .unwrap();
-        assert!(
-            config
-                .games
-                .iter()
-                .any(|game| game.name == "NFSU race" && game.scenario.is_some())
-        );
-        assert!(!config.games.is_empty());
+        assert_eq!(config.games.len(), 1);
+        assert_eq!(config.games[0].name, "OpenTTD");
+        assert_eq!(config.select(Some("quick")).unwrap().len(), 1);
         assert_eq!(config.gpu, Gpu::Wsl);
     }
 
