@@ -12,7 +12,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
-- [ ] `bug` The standard scenario's "input reached the game" passes on OpenTTD's scrolling title screen with no input at all
+- [ ] `bug` The input check still passes on OpenTTD: its title jumps between `first-frame` and `after-a` in every run
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 - [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own

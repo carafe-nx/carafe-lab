@@ -96,7 +96,13 @@
     "expectSave": "Есть сохранение",
     "expectSaveKept": "Сохранение на месте",
     "close": "Закрыть",
-    "soft": "только предупредить"
+    "soft": "только предупредить",
+    "quiet": "без ввода:",
+    "addQuiet": "+ пара без ввода",
+    "quietCount_one": "{{count}} пара без ввода",
+    "quietCount_few": "{{count}} пары без ввода",
+    "quietCount_many": "{{count}} пар без ввода",
+    "quietCount_other": "{{count}} пары без ввода"
   },
   "milestones": {
     "wine": "Wine готов",

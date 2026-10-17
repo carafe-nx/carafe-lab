@@ -13,7 +13,7 @@ use ts_rs::TS;
 use lab_core::input_check::{self, PressCheck};
 use lab_core::milestones::{Exit, Launch, Stage};
 use lab_core::perf::{self, PerfSample, PerfSummary};
-use lab_core::picture::{PatternCheck, Thumbnail};
+use lab_core::picture::{self, Change, PatternCheck, Thumbnail};
 use lab_core::scenario::{Milestone, Scenario, Step};
 
 const POLL: Duration = Duration::from_millis(500);
@@ -416,7 +416,12 @@ impl<'a> Runner<'a> {
                 }
             }
             Step::Screenshot { name } => self.screenshot(step, name),
-            Step::ExpectChange { from, to, soft } => self.expect_change(step, from, to, *soft),
+            Step::ExpectChange {
+                from,
+                to,
+                soft,
+                quiet,
+            } => self.expect_change(step, from, to, *soft, quiet),
             Step::ExpectSave => {
                 let files = self.emulator.save_files(self.title);
                 if files.is_empty() {
@@ -638,7 +643,14 @@ impl<'a> Runner<'a> {
         }
     }
 
-    fn expect_change(&mut self, step: &Step, from: &str, to: &str, soft: bool) -> StepResult {
+    fn expect_change(
+        &mut self,
+        step: &Step,
+        from: &str,
+        to: &str,
+        soft: bool,
+        quiet: &[[String; 2]],
+    ) -> StepResult {
         let thumb = |name: &str| {
             let file = self
                 .screenshots
@@ -654,16 +666,36 @@ impl<'a> Runner<'a> {
             return self.result(step, outcome, detail, None);
         };
         let difference = before.difference(&after);
-        if difference.changed() {
-            let detail = format!("the screen changed (difference {:.1})", difference.mean);
-            self.result(step, Outcome::Pass, detail, Some(after_file))
-        } else {
-            let outcome = if soft { Outcome::Warn } else { Outcome::Fail };
-            let detail = format!(
-                "the screen did not change (difference {:.1})",
-                difference.mean
-            );
-            self.result(step, outcome, detail, Some(after_file))
+        let own = quiet
+            .iter()
+            .filter_map(|[first, second]| {
+                let (_, first) = thumb(first)?;
+                let (_, second) = thumb(second)?;
+                Some(first.difference(&second))
+            })
+            .max_by(|a, b| a.mean.total_cmp(&b.mean));
+        match picture::press_change(own, difference) {
+            Change::Changed => {
+                let detail = format!("the screen changed (difference {:.1})", difference.mean);
+                self.result(step, Outcome::Pass, detail, Some(after_file))
+            }
+            Change::MovesOnItsOwn => {
+                let detail = format!(
+                    "the screen changes on its own about as much (difference {:.1}, without input {:.1}), so the \
+                     pictures cannot tell",
+                    difference.mean,
+                    own.map_or(0.0, |own| own.mean)
+                );
+                self.result(step, Outcome::Warn, detail, Some(after_file))
+            }
+            Change::Unchanged => {
+                let outcome = if soft { Outcome::Warn } else { Outcome::Fail };
+                let detail = format!(
+                    "the screen did not change (difference {:.1})",
+                    difference.mean
+                );
+                self.result(step, outcome, detail, Some(after_file))
+            }
         }
     }
 

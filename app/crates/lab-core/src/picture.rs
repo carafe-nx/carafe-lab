@@ -9,6 +9,7 @@ const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 const THUMB_WIDTH: usize = 64;
 const THUMB_HEIGHT: usize = 36;
 const CHANGE_THRESHOLD: f64 = 2.0;
+const OWN_MOTION_FACTOR: f64 = 2.0;
 const BLANK_SPREAD: f64 = 3.0;
 
 /// An error reading a PNG file.
@@ -40,6 +41,30 @@ impl Difference {
     #[must_use]
     pub fn changed(self) -> bool {
         self.mean > CHANGE_THRESHOLD
+    }
+}
+
+/// What a press did to the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    /// The screen changed, and more than it does on its own.
+    Changed,
+    /// The screen stayed as it was.
+    Unchanged,
+    /// The screen changes about as much on its own, so the pictures cannot tell whether the press reached the game.
+    MovesOnItsOwn,
+}
+
+/// Returns what a press did, from the difference `after` the press and the difference `own` over the same time
+/// without input; `None` for `own` judges by `after` alone.
+#[must_use]
+pub fn press_change(own: Option<Difference>, after: Difference) -> Change {
+    match own {
+        Some(own) if own.changed() && after.mean < own.mean * OWN_MOTION_FACTOR => {
+            Change::MovesOnItsOwn
+        }
+        _ if after.changed() => Change::Changed,
+        _ => Change::Unchanged,
     }
 }
 
@@ -312,6 +337,29 @@ mod tests {
     use flate2::write::ZlibEncoder;
 
     use super::*;
+
+    #[test]
+    fn a_press_counts_only_beyond_what_the_screen_does_on_its_own() {
+        let difference = |mean| Difference { mean };
+        assert_eq!(press_change(None, difference(20.0)), Change::Changed);
+        assert_eq!(press_change(None, difference(0.5)), Change::Unchanged);
+        assert_eq!(
+            press_change(Some(difference(20.0)), difference(20.0)),
+            Change::MovesOnItsOwn
+        );
+        assert_eq!(
+            press_change(Some(difference(20.0)), difference(45.0)),
+            Change::Changed
+        );
+        assert_eq!(
+            press_change(Some(difference(0.3)), difference(6.0)),
+            Change::Changed
+        );
+        assert_eq!(
+            press_change(Some(difference(0.3)), difference(0.4)),
+            Change::Unchanged
+        );
+    }
 
     fn png(width: u32, height: u32, filter: u8, pixel: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
         let mut raw = Vec::new();

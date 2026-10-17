@@ -41,7 +41,12 @@ to: string,
 /**
  * The step only warns when the screen did not change.
  */
-soft: boolean, } | { "step": "expectPattern", 
+soft: boolean, 
+/**
+ * Pairs of pictures taken as far apart as `from` and `to` with no input between: when the screen changed
+ * about as much on its own in any of them, the step warns that it cannot tell.
+ */
+quiet?: Array<[string, string]>, } | { "step": "expectPattern", 
 /**
  * The picture.
  */

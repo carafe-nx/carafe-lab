@@ -102,7 +102,11 @@ save data is still there, close it.
 - `wait` — `seconds`.
 - `press` — `buttons`: Switch buttons as in `carafe.json` (`A`, `ZR`, `LUP`…), held together; `hold` in seconds.
 - `screenshot` — `name`.
-- `expectChange` — `from`, `to`: two screenshots that must differ; `soft` makes it a warning.
+- `expectChange` — `from`, `to`: two screenshots that must differ; `soft` makes it a warning. `quiet` lists pairs
+  of screenshots taken as far apart as `from` and `to` with no input between: when the screen changed about as much
+  on its own in any of them, the step warns that the pictures cannot tell. The standard scenario has one pair before
+  the press and one after. A screen that jumps now and then, as OpenTTD's title does every ~17 s, can still slip
+  between the pairs.
 - `expectPattern` — `name`: a screenshot of a graphics probe.
 - `expectInput` — the input probe's log against the bindings of the build.
 - `expectSave` — the game has written save data; remembered for `expectSaveKept`.

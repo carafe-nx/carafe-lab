@@ -98,6 +98,23 @@
   accent-color: var(--accent);
 }
 
+.pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.remove,
+.add {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-solid);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .palette {
   display: flex;
   flex-wrap: wrap;

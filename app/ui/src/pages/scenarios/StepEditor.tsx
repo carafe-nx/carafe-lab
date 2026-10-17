@@ -108,6 +108,39 @@ function ShotSelect({ id, value, shots, onChange }: { id: string; value: string;
   );
 }
 
+function QuietPairs({
+  id,
+  pairs,
+  shots,
+  onChange,
+}: {
+  id: string;
+  pairs: [string, string][];
+  shots: string[];
+  onChange: (pairs: [string, string][]) => void;
+}) {
+  const { t } = useTranslation();
+  const replace = (index: number, pair: [string, string]) => onChange(pairs.map((entry, at) => (at === index ? pair : entry)));
+  return (
+    <>
+      <span>{t("steps.quiet")}</span>
+      {pairs.map(([first, second], index) => (
+        <span key={index} className={styles.pair}>
+          <ShotSelect id={`${id}-quiet-${index}-a`} value={first} shots={shots} onChange={(value) => replace(index, [value, second])} />
+          <span>→</span>
+          <ShotSelect id={`${id}-quiet-${index}-b`} value={second} shots={shots} onChange={(value) => replace(index, [first, value])} />
+          <button type="button" className={styles.remove} onClick={() => onChange(pairs.filter((_, at) => at !== index))}>
+            ×
+          </button>
+        </span>
+      ))}
+      <button type="button" className={styles.add} onClick={() => onChange([...pairs, [shots[0] ?? "", shots[1] ?? ""]])}>
+        {t("steps.addQuiet")}
+      </button>
+    </>
+  );
+}
+
 function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: string[]; onChange: (step: Step) => void }) {
   const { t } = useTranslation();
   switch (step.step) {
@@ -178,6 +211,7 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
           <ShotSelect id={`${id}-from`} value={step.from} shots={shots} onChange={(from) => onChange({ ...step, from })} />
           <span>→</span>
           <ShotSelect id={`${id}-to`} value={step.to} shots={shots} onChange={(to) => onChange({ ...step, to })} />
+          <QuietPairs id={id} pairs={step.quiet ?? []} shots={shots} onChange={(quiet) => onChange({ ...step, quiet })} />
           <label className={styles.check} htmlFor={`${id}-soft`}>
             <input
               id={`${id}-soft`}

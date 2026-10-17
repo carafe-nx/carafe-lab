@@ -63,6 +63,11 @@ pub enum Step {
         /// The step only warns when the screen did not change.
         #[serde(default)]
         soft: bool,
+        /// Pairs of pictures taken as far apart as `from` and `to` with no input between: when the screen changed
+        /// about as much on its own in any of them, the step warns that it cannot tell.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(as = "Option<Vec<[String; 2]>>", optional)]
+        quiet: Vec<[String; 2]>,
     },
     /// Checks that a picture shows the graphics probes' four quadrants.
     ExpectPattern {
@@ -189,8 +194,10 @@ impl Scenario {
                     }
                     screenshots.push(name);
                 }
-                Step::ExpectChange { from, to, .. } => {
-                    for name in [from, to] {
+                Step::ExpectChange {
+                    from, to, quiet, ..
+                } => {
+                    for name in [from, to].into_iter().chain(quiet.iter().flatten()) {
                         if !screenshots.contains(&name.as_str()) {
                             return Err(ScenarioError::UnknownScreenshot(number, name.clone()));
                         }
@@ -224,7 +231,11 @@ impl Scenario {
             steps: vec![
                 Step::Launch,
                 wait_for_frame.clone(),
-                Step::Wait { seconds: 10.0 },
+                Step::Wait { seconds: 5.0 },
+                Step::Screenshot {
+                    name: "still".to_owned(),
+                },
+                Step::Wait { seconds: 5.0 },
                 Step::Screenshot {
                     name: "first-frame".to_owned(),
                 },
@@ -236,10 +247,18 @@ impl Scenario {
                 Step::Screenshot {
                     name: "after-a".to_owned(),
                 },
+                Step::Wait { seconds: 5.0 },
+                Step::Screenshot {
+                    name: "settled".to_owned(),
+                },
                 Step::ExpectChange {
                     from: "first-frame".to_owned(),
                     to: "after-a".to_owned(),
                     soft: true,
+                    quiet: vec![
+                        ["still".to_owned(), "first-frame".to_owned()],
+                        ["after-a".to_owned(), "settled".to_owned()],
+                    ],
                 },
                 Step::Close {
                     timeout: default_close_timeout(),

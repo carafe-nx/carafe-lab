@@ -86,7 +86,11 @@
     "expectSave": "Save data written",
     "expectSaveKept": "Save data kept",
     "close": "Close",
-    "soft": "warn only"
+    "soft": "warn only",
+    "quiet": "no input:",
+    "addQuiet": "+ quiet pair",
+    "quietCount_one": "{{count}} quiet pair",
+    "quietCount_other": "{{count}} quiet pairs"
   },
   "milestones": {
     "wine": "Wine ready",

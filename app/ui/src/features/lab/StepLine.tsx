@@ -49,6 +49,7 @@ function StepParams({ step }: { step: Step }) {
       break;
     case "expectChange":
       params.push(`${step.from} → ${step.to}`);
+      if (step.quiet?.length) params.push(t("steps.quietCount", { count: step.quiet.length }));
       if (step.soft) params.push(t("steps.soft"));
       break;
     case "close":
