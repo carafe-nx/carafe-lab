@@ -58,6 +58,9 @@ pub struct GameSummary {
     /// Seconds it took: the build and the scenario; zero in summaries from before it was kept.
     #[serde(default)]
     pub seconds: f64,
+    /// Its folder inside the run's folder; empty in summaries from before it was kept.
+    #[serde(default)]
+    pub dir: String,
 }
 
 impl RunSummary {
@@ -82,6 +85,7 @@ impl RunSummary {
                     settings: game.settings.clone(),
                     outcome: game.outcome(),
                     seconds: game_seconds(game),
+                    dir: game.dir.clone(),
                 })
                 .collect(),
         }
@@ -165,6 +169,7 @@ mod tests {
                     settings: String::new(),
                     outcome: *outcome,
                     seconds: 0.0,
+                    dir: String::new(),
                 })
                 .collect(),
         }

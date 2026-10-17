@@ -1,0 +1,56 @@
+.heads {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-left: 160px;
+}
+
+.gameHead {
+  display: grid;
+  grid-template-columns: 144px 1fr 1fr;
+  gap: 16px;
+  align-items: center;
+}
+
+.gameHead h2 {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shotRow {
+  display: grid;
+  grid-template-columns: 144px 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.shotName {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.shot {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--screen);
+}
+
+.noShot {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}

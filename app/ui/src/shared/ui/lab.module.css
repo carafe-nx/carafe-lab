@@ -209,3 +209,11 @@
 .kv dd > span {
   white-space: normal;
 }
+
+.markRow {
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+}
+
+.markRow input {
+  accent-color: var(--accent);
+}

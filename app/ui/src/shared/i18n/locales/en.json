@@ -151,7 +151,9 @@
     "runtimeHash": "Runtime (hash)",
     "lab": "Lab commit",
     "edenImage": "Eden image",
-    "repeat": "Run these games again"
+    "repeat": "Run these games again",
+    "mark": "Mark for comparing",
+    "compare": "Compare ({{count}} of 2)"
   },
   "stages": {
     "lab": "lab.json",
@@ -208,6 +210,22 @@
   "record": {
     "clean": "no failures in the last {{count}}",
     "failed": "failed {{failed}} of {{total}}"
+  },
+  "compare": {
+    "title": "Two runs compared",
+    "missing": "One of the runs is not in the history",
+    "noStamp": "One of the runs has no stamp, so what it was made of is unknown",
+    "sameParts": "Both runs were made of the same parts: Carafe, runtime, Lab and Eden image match",
+    "changedParts": "Different: {{parts}}",
+    "part": {
+      "carafeCommit": "Carafe commit",
+      "runtimeHash": "runtime",
+      "labCommit": "Lab commit",
+      "edenImage": "Eden image"
+    },
+    "noShots": "No screenshots",
+    "notInRun": "not in the run",
+    "noShot": "no screenshot"
   },
   "who": {
     "window": "the window",

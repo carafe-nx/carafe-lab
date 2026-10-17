@@ -18,16 +18,37 @@ export function HistoryPage() {
   const navigate = useNavigate();
   const { dir } = useParams();
   const { runs } = useLab();
+  const [marked, setMarked] = useState<string[]>([]);
   const list = runs.data ?? [];
   const selected = list.find((run) => run.dir === dir) ?? list[0] ?? null;
+  const mark = (runDir: string) =>
+    setMarked((current) =>
+      current.includes(runDir) ? current.filter((entry) => entry !== runDir) : [...current, runDir].slice(-2),
+    );
+  const [older, newer] = [...marked].sort();
+  const aside = (
+    <>
+      <span className={styles.muted}>{t("history.count", { count: list.length })}</span>
+      <Button disabled={marked.length !== 2} onClick={() => navigate(`/compare/${older}/${newer}`)}>
+        {t("history.compare", { count: marked.length })}
+      </Button>
+    </>
+  );
   return (
-    <Page title={t("nav.history")} aside={<span className={styles.muted}>{t("history.count", { count: list.length })}</span>}>
+    <Page title={t("nav.history")} aside={aside}>
       {runs.error ? <Notice tone="error">{runs.error}</Notice> : null}
       <div className={styles.split}>
         <div className={styles.list}>
           {list.length === 0 ? <div className={styles.empty}>{t("history.empty")}</div> : null}
           {list.map((run) => (
-            <RunRow key={run.dir} run={run} selected={run.dir === selected?.dir} onPick={() => navigate(`/history/${run.dir}`)} />
+            <RunRow
+              key={run.dir}
+              run={run}
+              selected={run.dir === selected?.dir}
+              marked={marked.includes(run.dir)}
+              onMark={() => mark(run.dir)}
+              onPick={() => navigate(`/history/${run.dir}`)}
+            />
           ))}
         </div>
         {selected ? <RunCard run={selected} /> : null}
@@ -69,10 +90,37 @@ function RunState({ run }: { run: RunSummary }) {
   return running ? <Chip tone="acc">{t("history.running")}</Chip> : <Chip tone="bad">{t("history.broken")}</Chip>;
 }
 
-function RunRow({ run, selected, onPick }: { run: RunSummary; selected: boolean; onPick: () => void }) {
+function RunRow({
+  run,
+  selected,
+  marked,
+  onMark,
+  onPick,
+}: {
+  run: RunSummary;
+  selected: boolean;
+  marked: boolean;
+  onMark: () => void;
+  onPick: () => void;
+}) {
   const { t } = useTranslation();
   return (
-    <button type="button" className={`${styles.row} ${styles.plainRow} ${selected ? styles.selected : ""}`} onClick={onPick}>
+    <div
+      role="button"
+      tabIndex={0}
+      className={`${styles.row} ${styles.markRow} ${selected ? styles.selected : ""}`}
+      onClick={onPick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") onPick();
+      }}
+    >
+      <input
+        type="checkbox"
+        aria-label={t("history.mark")}
+        checked={marked}
+        onClick={(event) => event.stopPropagation()}
+        onChange={onMark}
+      />
       <span className={styles.name}>
         <b>{run.started}</b>
         <span className={styles.tags}>
@@ -88,7 +136,7 @@ function RunRow({ run, selected, onPick }: { run: RunSummary; selected: boolean;
         <RunCounts run={run} />
         <span>{t("units.minutes", { count: Math.max(1, Math.round(run.seconds / 60)) })}</span>
       </span>
-    </button>
+    </div>
   );
 }
 

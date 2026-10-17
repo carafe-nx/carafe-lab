@@ -1,4 +1,5 @@
 import { createHashRouter, Navigate } from "react-router";
+import { ComparePage } from "@/pages/compare/ComparePage";
 import { EmulatorPage } from "@/pages/emulator/EmulatorPage";
 import { HistoryPage } from "@/pages/history/HistoryPage";
 import { LibraryPage } from "@/pages/library/LibraryPage";
@@ -18,6 +19,7 @@ export const router = createHashRouter([
       { path: "run", element: <RunPage /> },
       { path: "history", element: <HistoryPage /> },
       { path: "history/:dir", element: <HistoryPage /> },
+      { path: "compare/:a/:b", element: <ComparePage /> },
       { path: "emulator", element: <EmulatorPage /> },
       { path: "scenarios", element: <ScenariosPage /> },
     ],

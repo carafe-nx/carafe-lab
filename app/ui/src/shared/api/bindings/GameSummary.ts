@@ -24,4 +24,8 @@ outcome: Outcome,
 /**
  * Seconds it took: the build and the scenario; zero in summaries from before it was kept.
  */
-seconds: number, };
+seconds: number, 
+/**
+ * Its folder inside the run's folder; empty in summaries from before it was kept.
+ */
+dir: string, };

@@ -15,6 +15,7 @@ export const api = {
   startRun: (set: string | null, only: string | null, games: string[] | null = null, repeat = 1) =>
     invoke<void>("start_run", { set, only, games, repeat }),
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),
+  runScreenshots: (dir: string, game: string) => invoke<string[]>("run_screenshots", { dir, game }),
   addGame: (folder: string) => invoke<string>("add_game", { folder }),
   chooseKeys: (path: string) => invoke<KeysState>("choose_keys", { path }),
   forgetKeys: () => invoke<KeysState>("forget_keys"),

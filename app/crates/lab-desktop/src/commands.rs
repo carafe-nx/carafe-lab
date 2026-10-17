@@ -196,6 +196,38 @@ pub async fn start_run(
     .await
 }
 
+/// Returns the screenshots a game of the run `dir` saved, as paths sorted by name.
+///
+/// # Errors
+///
+/// [`CommandError`] when `lab.json` is broken or either name is not a folder name of the run.
+#[tauri::command]
+pub async fn run_screenshots(
+    lab: State<'_, Arc<Lab>>,
+    dir: String,
+    game: String,
+) -> Result<Vec<String>, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        if !plain_name(&game) {
+            return Err("not a game folder".into());
+        }
+        let folder = run_dir(&lab, &dir)?.join(game);
+        let Ok(entries) = fs::read_dir(folder) else {
+            return Ok(Vec::new());
+        };
+        let mut shots: Vec<String> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "png"))
+            .map(|path| path.display().to_string())
+            .collect();
+        shots.sort();
+        Ok(shots)
+    })
+    .await
+}
+
 /// Adds the game in `folder` to `lab.json` under a name made from the folder's.
 ///
 /// # Returns
@@ -444,14 +476,17 @@ fn keys_state(lab: &Lab) -> KeysState {
 }
 
 fn run_dir(lab: &Lab, dir: &str) -> Result<PathBuf, CommandError> {
-    let plain = !dir.is_empty()
-        && dir
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if !plain {
+    if !plain_name(dir) {
         return Err("not a run folder".into());
     }
     Ok(lab.config()?.work.join("runs").join(dir))
+}
+
+fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn inside_lab(lab: &Lab, path: &str) -> Result<PathBuf, CommandError> {

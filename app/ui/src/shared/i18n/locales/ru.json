@@ -169,7 +169,9 @@
     "runtimeHash": "Рантайм (хеш)",
     "lab": "Коммит Lab",
     "edenImage": "Образ Eden",
-    "repeat": "Повторить эти игры"
+    "repeat": "Повторить эти игры",
+    "mark": "Отметить для сравнения",
+    "compare": "Сравнить ({{count}} из 2)"
   },
   "stages": {
     "lab": "Файл lab.json",
@@ -226,6 +228,22 @@
   "record": {
     "clean": "без отказов в последних: {{count}}",
     "failed": "не прошла в {{failed}} из {{total}}"
+  },
+  "compare": {
+    "title": "Сравнение прогонов",
+    "missing": "Одного из прогонов нет в истории",
+    "noStamp": "У одного из прогонов нет штампа — из чего он сделан, неизвестно",
+    "sameParts": "Оба прогона сделаны из одного и того же: Carafe, рантайм, Lab и образ Eden совпадают",
+    "changedParts": "Отличается: {{parts}}",
+    "part": {
+      "carafeCommit": "коммит Carafe",
+      "runtimeHash": "рантайм",
+      "labCommit": "коммит Lab",
+      "edenImage": "образ Eden"
+    },
+    "noShots": "Снимков нет",
+    "notInRun": "не было в прогоне",
+    "noShot": "нет снимка"
   },
   "who": {
     "window": "окно",
