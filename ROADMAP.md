@@ -11,10 +11,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Planned
 
-### 3. Versions and history
-
-- [ ] **`feature` A regression between two versions starts a bisection over Carafe's commits**
-
 ### Research and later ideas (not the app)
 
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
@@ -50,17 +46,14 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `feature` A regression between two versions starts a bisection over Carafe's commits
 - [x] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
-
 - [x] `feature` Scouting: play by hand, the lab records presses and milestones into a scenario
-
 - [x] `feature` Reference screenshots for "the screen shows …" checks
-
 - [x] `feature` "Take control": play by hand during a run and hand the game back
 - [x] `feature` Random presses for a set time, to catch crashes and hangs without a scenario
 - [x] `feature` A/B between two runtime builds or a runtime flag, not only a game setting
 - [x] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
-
 - [x] `feature` Diagnostics as named flags instead of temporary patches
 - [x] `feature` One timeline of all log sources with one clock
 - [x] `feature` On a crash: registers, stack and module map, without Eden's full crash dump
