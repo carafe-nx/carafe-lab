@@ -18,8 +18,10 @@ use lab_core::local::{self, KeysSource, LocalSettings};
 use lab_core::matrix;
 use lab_core::perf::{self, PerfSample};
 use lab_core::scenario::Scenario;
+use lab_core::time::Utc;
 use lab_core::versions::{self, VersionStep};
 use lab_core::view::LabView;
+use lab_run::console::{self, ConsoleVerdict};
 use lab_run::history::{self, EVENTS_FILE, GameProblems, RunSummary};
 use lab_run::queue::{QueueState, unix_now};
 use lab_run::ready;
@@ -448,6 +450,39 @@ pub async fn save_scenario(
             fs::write(&config_path, updated).map_err(|error| error.to_string())?;
         }
         Ok(file)
+    })
+    .await
+}
+
+/// Keeps what the console said about the game in the folder `game` of the run `dir`.
+///
+/// # Errors
+///
+/// [`CommandError`] when `dir` or `game` is not a folder's name or the verdict cannot be written.
+#[tauri::command]
+pub async fn record_console_verdict(
+    lab: State<'_, Arc<Lab>>,
+    dir: String,
+    game: String,
+    works: bool,
+    note: String,
+) -> Result<(), CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        if !plain_name(&game) {
+            return Err("not a game folder".into());
+        }
+        let run = run_dir(&lab, &dir)?;
+        console::record(
+            &run,
+            ConsoleVerdict {
+                game,
+                works,
+                note: note.trim().to_owned(),
+                at: Utc::from_unix(unix_now()).minutes(),
+            },
+        )
+        .map_err(|error| CommandError::from(error.to_string()))
     })
     .await
 }

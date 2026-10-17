@@ -33,7 +33,8 @@ pub struct TidyPlan {
     pub compress_bytes: u64,
     /// Bytes the files to remove take.
     pub remove_bytes: u64,
-    /// NSPs no game of the newest runs uses, with their build keys, and Eden's crash dumps, to remove.
+    /// NSPs no game of the newest runs uses, with their build keys, NSPs older runs built for the console and Eden's
+    /// crash dumps, to remove.
     pub stale: Vec<PathBuf>,
     /// Bytes the stale files take.
     pub stale_bytes: u64,
@@ -72,6 +73,17 @@ pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
     stale.extend(stale_nsps(&places.nsp.join(READY_DIR), &used));
     if let Some(dumps) = places.dumps {
         stale.extend(eden_dumps(dumps));
+    }
+    for run in list.iter().skip(keep) {
+        for game in run.games.iter().filter(|game| !game.dir.is_empty()) {
+            let for_console = runs
+                .join(&run.dir)
+                .join(&game.dir)
+                .join(format!("{}.nsp", game.title_id));
+            if for_console.is_file() {
+                stale.push(for_console);
+            }
+        }
     }
     plan.stale_bytes = stale
         .iter()

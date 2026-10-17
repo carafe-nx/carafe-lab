@@ -37,10 +37,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` "Take control": play by hand during a run and hand the game back
 - [ ] `feature` Scouting: play by hand, the lab records presses and milestones into a scenario
 
-### 5. Ready NSPs and the console
-
-- [ ] `feature` The lab builds NSPs and a "check on the console" list; console verdicts go into the same history
-
 ### Research and later ideas (not the app)
 
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
@@ -75,6 +71,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
 
 ## Done
+
+- [x] `feature` The lab builds NSPs and a "check on the console" list; console verdicts go into the same history
 
 - [x] `feature` A ready NSP runs as it is, with the runtime version and settings read from inside
 - [x] `feature` "Rebuild with the current runtime" for a ready NSP whose game folder is in the library

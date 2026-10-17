@@ -123,6 +123,8 @@ pub struct RunReport {
     pub seconds: f64,
     /// The games in run order.
     pub games: Vec<GameReport>,
+    /// The run only built the NSPs, for the console.
+    pub build_only: bool,
 }
 
 impl RunReport {
@@ -698,6 +700,7 @@ mod tests {
             stamp: RunStamp::default(),
             seconds: 125.0,
             games,
+            build_only: false,
         }
     }
 

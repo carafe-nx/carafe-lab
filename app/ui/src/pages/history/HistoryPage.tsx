@@ -12,6 +12,8 @@ import { Icon } from "@/shared/ui/Icon";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
 import styles from "@/shared/ui/lab.module.css";
+import { ConsoleBlock, waitsForConsole } from "./ConsoleBlock";
+import history from "./HistoryPage.module.css";
 import { ProblemsBlock } from "./ProblemsBlock";
 import { VerdictBlock } from "./VerdictBlock";
 
@@ -39,6 +41,7 @@ export function HistoryPage() {
   return (
     <Page title={t("nav.history")} aside={aside}>
       {runs.error ? <Notice tone="error">{runs.error}</Notice> : null}
+      <ConsoleQueue runs={list} onPick={(runDir) => navigate(`/history/${runDir}`)} />
       <div className={styles.split}>
         <div className={styles.list}>
           {list.length === 0 ? <div className={styles.empty}>{t("history.empty")}</div> : null}
@@ -56,6 +59,42 @@ export function HistoryPage() {
         {selected ? <RunCard run={selected} /> : null}
       </div>
     </Page>
+  );
+}
+
+function ConsoleQueue({ runs, onPick }: { runs: RunSummary[]; onPick: (runDir: string) => void }) {
+  const { t } = useTranslation();
+  const waiting = runs.flatMap((run) =>
+    run.games.filter((game) => waitsForConsole(run, game)).map((game) => ({ run, game })),
+  );
+  if (waiting.length === 0) {
+    return null;
+  }
+  return (
+    <section className={styles.card}>
+      <div className={styles.cardHead}>
+        <h2>{t("console.queue")}</h2>
+        <Chip tone="acc">{t("console.waiting", { count: waiting.length })}</Chip>
+      </div>
+      <div className={history.waiting}>
+        {waiting.map(({ run, game }) => (
+          <button
+            key={`${run.dir}/${game.dir}`}
+            type="button"
+            className={`${styles.row} ${styles.plainRow}`}
+            onClick={() => onPick(run.dir)}
+          >
+            <span className={styles.name}>
+              <b>{game.name}</b>
+              <span className={styles.muted}>
+                {run.started} · {t(run.buildOnly ? "console.built" : "console.gap")}
+              </span>
+            </span>
+            <Icon name="play" size={14} />
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -145,7 +184,7 @@ function RunRow({
 function RunCard({ run }: { run: RunSummary }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { status } = useLab();
+  const { status, runs } = useLab();
   const [error, setError] = useState<string | null>(null);
   const work = status.data?.work ?? "";
   const open = (...rest: string[]) => {
@@ -230,6 +269,7 @@ function RunCard({ run }: { run: RunSummary }) {
               <Chip tone={outcomeTone(game.outcome)}>{t(`outcome.${game.outcome}`)}</Chip>
             </div>
             {game.problems && game.dir ? <ProblemsBlock dir={run.dir} game={game.dir} /> : null}
+            <ConsoleBlock run={run} game={game} onOpen={open} onSaved={runs.refresh} />
           </div>
         ))}
       </div>

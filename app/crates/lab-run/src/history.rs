@@ -6,6 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::console::{self, ConsoleVerdict};
 use crate::engine::{DETAILED, READY};
 use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::{Outcome, PROBLEMS_FILE};
@@ -49,6 +50,12 @@ pub struct RunSummary {
     /// The verdict when the run was an A/B run of one game.
     #[serde(default)]
     pub verdict: Option<Verdict>,
+    /// The run only built the NSPs, for the console.
+    #[serde(default)]
+    pub build_only: bool,
+    /// What the console said about its games; read from `console.json`, empty in the summary file.
+    #[serde(default)]
+    pub console: Vec<ConsoleVerdict>,
 }
 
 /// A game of a run in short.
@@ -241,7 +248,11 @@ impl RunSummary {
                 name: game.name.clone(),
                 title_id: game.title_id.clone(),
                 settings: game.settings.clone(),
-                outcome: game.outcome(),
+                outcome: if report.build_only && matches!(game.build, BuildOutcome::Built { .. }) {
+                    Outcome::Console
+                } else {
+                    game.outcome()
+                },
                 seconds: game_seconds(game),
                 dir: game.dir.clone(),
                 first_frame: first_frame(game),
@@ -283,6 +294,8 @@ impl RunSummary {
             finished,
             planned: planned.to_vec(),
             verdict: verdict(&games),
+            build_only: report.build_only,
+            console: Vec::new(),
             games,
         }
     }
@@ -343,11 +356,35 @@ pub fn list(runs: &Path) -> Vec<RunSummary> {
 }
 
 /// Returns the summary of the run `dir` in `runs`, or `None` if it has none or it cannot be read.
+///
+/// A game that waited for the console and has its verdict passes or fails by it; a failing verdict's note becomes
+/// the reason it failed.
 #[must_use]
 pub fn read(runs: &Path, dir: &str) -> Option<RunSummary> {
     let text = fs::read_to_string(runs.join(dir).join(SUMMARY_FILE)).ok()?;
     let mut summary: RunSummary = serde_json::from_str(&text).ok()?;
     summary.dir = dir.to_owned();
+    summary.console = console::read(&runs.join(dir));
+    for game in &mut summary.games {
+        let verdict = summary
+            .console
+            .iter()
+            .find(|verdict| verdict.game == game.dir);
+        if let Some(verdict) = verdict.filter(|_| game.outcome == Outcome::Console) {
+            game.outcome = if verdict.works {
+                Outcome::Pass
+            } else {
+                Outcome::Fail
+            };
+            if !verdict.works {
+                game.failure = Some(if verdict.note.is_empty() {
+                    "fails on the console".to_owned()
+                } else {
+                    format!("fails on the console: {}", verdict.note)
+                });
+            }
+        }
+    }
     Some(summary)
 }
 
@@ -488,6 +525,8 @@ mod tests {
                 .map(|outcome| game("Game", *outcome, None))
                 .collect(),
             verdict: None,
+            build_only: false,
+            console: Vec::new(),
         }
     }
 
@@ -506,6 +545,55 @@ mod tests {
             frames: None,
             failure: None,
         }
+    }
+
+    #[test]
+    fn a_console_verdict_decides_the_game_that_waited_for_it() {
+        let runs = std::env::temp_dir().join(format!("lab-history-console-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&runs);
+        let run_dir = runs.join("2026-10-17_20-00-00");
+        fs::create_dir_all(&run_dir).unwrap();
+        let mut run = summary(&[]);
+        run.build_only = true;
+        run.games = vec![
+            GameSummary {
+                dir: "A".to_owned(),
+                ..game("A", Outcome::Console, None)
+            },
+            GameSummary {
+                dir: "B".to_owned(),
+                ..game("B", Outcome::Console, None)
+            },
+            GameSummary {
+                dir: "C".to_owned(),
+                ..game("C", Outcome::Console, None)
+            },
+        ];
+        fs::write(
+            run_dir.join(SUMMARY_FILE),
+            serde_json::to_string(&run).unwrap(),
+        )
+        .unwrap();
+        for (game, works, note) in [("A", true, ""), ("B", false, "black screen")] {
+            console::record(
+                &run_dir,
+                ConsoleVerdict {
+                    game: game.to_owned(),
+                    works,
+                    note: note.to_owned(),
+                    at: "2026-10-17 21:00".to_owned(),
+                },
+            )
+            .unwrap();
+        }
+        let read = read(&runs, "2026-10-17_20-00-00").unwrap();
+        let outcomes: Vec<Outcome> = read.games.iter().map(|game| game.outcome).collect();
+        assert_eq!(outcomes, [Outcome::Pass, Outcome::Fail, Outcome::Console]);
+        assert_eq!(
+            read.games[1].failure.as_deref(),
+            Some("fails on the console: black screen")
+        );
+        let _ = fs::remove_dir_all(&runs);
     }
 
     #[test]

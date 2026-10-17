@@ -57,6 +57,16 @@ export function PlansPage() {
       })
       .catch((reason: unknown) => setError(errorText(reason)));
   };
+  const buildForConsole = (chosen: string[]) => {
+    setError(null);
+    api
+      .buildForConsole(chosen)
+      .then(() => {
+        status.refresh();
+        navigate("/run");
+      })
+      .catch((reason: unknown) => setError(errorText(reason)));
+  };
   const startReady = (nsp: string, rebuild: boolean) => {
     setError(null);
     api
@@ -87,7 +97,12 @@ export function PlansPage() {
           </select>
         </label>
       </div>
-      <OwnPlan games={games} runs={runs.data ?? []} onStart={(chosen, repeat) => start(null, chosen, repeat)} />
+      <OwnPlan
+        games={games}
+        runs={runs.data ?? []}
+        onStart={(chosen, repeat) => start(null, chosen, repeat)}
+        onBuild={buildForConsole}
+      />
       <AbPlan games={games} onStart={(game, overrides, repeat) => start(null, [game], repeat, overrides)} />
       <ReadyPlan onStart={startReady} />
       <div className={plans.grid}>
@@ -104,10 +119,12 @@ function OwnPlan({
   games,
   runs,
   onStart,
+  onBuild,
 }: {
   games: GameView[];
   runs: RunSummary[];
   onStart: (chosen: string[], repeat: number) => void;
+  onBuild: (chosen: string[]) => void;
 }) {
   const { t } = useTranslation();
   const [chosen, setChosen] = useState<string[]>([]);
@@ -157,6 +174,10 @@ function OwnPlan({
               : t("plans.launches", { launches: guess.launches })}
           {guess.unknown > 0 ? ` · ${t("plans.unknown", { count: guess.unknown })}` : ""}
         </span>
+        <Button disabled={picked.length === 0} title={t("plans.buildHint")} onClick={() => onBuild(chosen)}>
+          <Icon name="install" size={14} />
+          {t("plans.build")}
+        </Button>
         <Button variant="primary" disabled={picked.length === 0} onClick={() => onStart(chosen, repeat)}>
           <Icon name="play" size={14} />
           {t("plans.start")}

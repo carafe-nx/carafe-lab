@@ -55,6 +55,12 @@ export const api = {
     return invoke<void>("start_run", { request });
   },
   readNsp: (path: string) => invoke<NspInfo>("read_nsp", { path }),
+  buildForConsole: (games: string[]) => {
+    const request: RunRequest = { ...noRun, games, buildOnly: true };
+    return invoke<void>("start_run", { request });
+  },
+  recordConsoleVerdict: (dir: string, game: string, works: boolean, note: string) =>
+    invoke<void>("record_console_verdict", { dir, game, works, note }),
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),
   runScreenshots: (dir: string, game: string) => invoke<string[]>("run_screenshots", { dir, game }),
   addGame: (folder: string) => invoke<string>("add_game", { folder }),

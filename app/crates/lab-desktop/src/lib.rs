@@ -31,6 +31,7 @@ pub fn run() {
             commands::forget_keys,
             commands::choose_firmware,
             commands::read_nsp,
+            commands::record_console_verdict,
             commands::forget_firmware,
             commands::open_path,
             commands::read_screen,

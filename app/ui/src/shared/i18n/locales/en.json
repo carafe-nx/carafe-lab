@@ -126,7 +126,24 @@
     "pickGames": "Tick the games to run",
     "estimate": "Launches: {{launches}} · about {{minutes}} min from past runs",
     "unknown": "without past runs: {{count}}",
-    "launches": "Launches: {{launches}}"
+    "launches": "Launches: {{launches}}",
+    "build": "Only build for the console",
+    "buildHint": "Builds the NSPs without running them; History lists them to check on the Switch"
+  },
+  "console": {
+    "title": "On the console",
+    "works": "Works on the console",
+    "fails": "Fails on the console",
+    "change": "Change the verdict",
+    "builtHint": "Copy the NSP to the Switch, try it and say how it went: the verdict goes into this run's history.",
+    "gapHint": "The emulator could not show a step of this game; try it on the Switch and say how it went.",
+    "note": "What you saw (optional)",
+    "showNsp": "Show the NSP",
+    "queue": "Check on the console",
+    "waiting_one": "{{count}} waits",
+    "waiting_other": "{{count}} wait",
+    "built": "built for the console",
+    "gap": "the emulator cannot show a step"
   },
   "ready": {
     "title": "A ready NSP",

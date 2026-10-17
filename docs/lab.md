@@ -178,6 +178,12 @@ emulator.
   again from its game folder with the lab's runtime and the NSP's own settings, keeping its Title ID. The game takes
   the name, scenario and threshold of the `lab.json` game with the same folder, if there is one. The Plans screen has
   the same under "A ready NSP".
+- `run --build-only`, or "Only build for the console" in the Plans screen's own plan, builds the NSPs without running
+  them and links each into its game's folder in the run as `<Title ID>.nsp`, so a later build does not replace the
+  one under test. Such games, like games with a step the emulator cannot show, end "on the console", and History
+  lists them under "Check on the console". The verdict brought back from the Switch, works or fails with a note, goes
+  into `console.json` in the run's folder; from then on the game passes or fails by it everywhere History is read.
+  Tidying removes these NSPs from runs older than the 10 newest.
 - The Versions screen shows, under the pass/fail matrix, each game's performance at each Carafe commit: the median
   and half the spread of its repeats for the time to the first frame, the median FPS, the worst hundredth of frames
   and the peak memory. A measure is marked better or worse than the commit before only when the difference is

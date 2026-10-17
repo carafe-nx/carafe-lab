@@ -288,6 +288,7 @@ impl Engine<'_> {
             stamp: self.stamp.clone(),
             seconds: 0.0,
             games: Vec::new(),
+            build_only: self.build_only,
         };
         let total = planned.len();
         let mut names: Vec<String> = planned.iter().map(|game| game.name.clone()).collect();
@@ -424,6 +425,12 @@ impl Engine<'_> {
             size_bytes,
         };
         if self.build_only {
+            let kept = game_dir.join(format!("{}.nsp", record.title_id));
+            if fs::hard_link(&nsp, &kept).is_err() {
+                on_event(&Event::BuildStage {
+                    stage: format!("the NSP stays only in {}", nsp.display()),
+                });
+            }
             return entry;
         }
         if let Some(dir) = self.emulator.live_logs(record.title_id) {
