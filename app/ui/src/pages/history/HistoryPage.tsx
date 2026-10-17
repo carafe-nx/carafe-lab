@@ -12,6 +12,7 @@ import { Icon } from "@/shared/ui/Icon";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
 import styles from "@/shared/ui/lab.module.css";
+import { VerdictBlock } from "./VerdictBlock";
 
 export function HistoryPage() {
   const { t } = useTranslation();
@@ -185,6 +186,7 @@ function RunCard({ run }: { run: RunSummary }) {
         <dt>{t("history.edenImage")}</dt>
         <dd className={styles.mono}>{run.stamp.edenImage ?? "—"}</dd>
       </dl>
+      {run.verdict ? <VerdictBlock verdict={run.verdict} /> : null}
       <span className={styles.label}>{t("run.games")}</span>
       <div className={styles.list}>
         {run.games.map((game, index) => (
@@ -209,7 +211,7 @@ function RunCard({ run }: { run: RunSummary }) {
           <Icon name="folder" size={14} />
           {t("history.openFolder")}
         </Button>
-        <Button variant="ghost" disabled={run.planned.length === 0} onClick={repeatRun}>
+        <Button variant="ghost" disabled={run.planned.length === 0 || run.verdict !== null} onClick={repeatRun}>
           <Icon name="restart" size={14} />
           {t("history.repeat")}
         </Button>

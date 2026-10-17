@@ -40,6 +40,9 @@ pub struct RunSummary {
     pub planned: Vec<String>,
     /// The games done so far.
     pub games: Vec<GameSummary>,
+    /// The verdict when the run was an A/B run of one game.
+    #[serde(default)]
+    pub verdict: Option<Verdict>,
 }
 
 /// A game of a run in short.
@@ -61,12 +64,122 @@ pub struct GameSummary {
     /// Its folder inside the run's folder; empty in summaries from before it was kept.
     #[serde(default)]
     pub dir: String,
+    /// Seconds from its first launch to its first frame; `None` when it never got there.
+    #[serde(default)]
+    pub first_frame: Option<f64>,
+}
+
+/// What each variant of an A/B run gave and whether they differ.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Verdict {
+    /// The game the variants ran.
+    pub game: String,
+    /// Variant A: the game's own settings.
+    pub a: VariantResult,
+    /// Variant B: the game's settings with the run's overrides.
+    pub b: VariantResult,
+    /// How much later B reached its first frame than A, in percent of A; negative when B was earlier.
+    pub difference_percent: Option<f64>,
+    /// The difference of the medians is larger than the spread of either variant's first frames.
+    pub significant: bool,
+}
+
+/// What one variant of an A/B run gave.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VariantResult {
+    /// Times it ran.
+    pub runs: usize,
+    /// Times it did not fail.
+    pub passed: usize,
+    /// The median of its first-frame times.
+    pub median_first_frame: Option<f64>,
+    /// The largest first-frame time minus the smallest.
+    pub spread: Option<f64>,
+}
+
+/// Suffix of the name variant A runs under.
+pub const VARIANT_A: &str = " · A";
+/// Suffix of the name variant B runs under.
+pub const VARIANT_B: &str = " · B";
+
+/// Returns the verdict of a run whose games are the two variants of one game, or `None` for any other run.
+#[must_use]
+pub fn verdict(games: &[GameSummary]) -> Option<Verdict> {
+    let base = games.first()?.name.strip_suffix(VARIANT_A)?.to_owned();
+    let name_a = format!("{base}{VARIANT_A}");
+    let name_b = format!("{base}{VARIANT_B}");
+    if games
+        .iter()
+        .any(|game| game.name != name_a && game.name != name_b)
+    {
+        return None;
+    }
+    let a = variant(games.iter().filter(|game| game.name == name_a));
+    let b = variant(games.iter().filter(|game| game.name == name_b));
+    let difference_percent = match (a.median_first_frame, b.median_first_frame) {
+        (Some(first), Some(second)) if first > 0.0 => Some((second - first) / first * 100.0),
+        _ => None,
+    };
+    let significant = match (a.median_first_frame, b.median_first_frame) {
+        (Some(first), Some(second)) => {
+            let spread = a.spread.unwrap_or(0.0).max(b.spread.unwrap_or(0.0));
+            a.runs > 1 && b.runs > 1 && (second - first).abs() > spread
+        }
+        _ => false,
+    };
+    Some(Verdict {
+        game: base,
+        a,
+        b,
+        difference_percent,
+        significant,
+    })
+}
+
+fn variant<'a>(games: impl Iterator<Item = &'a GameSummary>) -> VariantResult {
+    let games: Vec<&GameSummary> = games.collect();
+    let mut times: Vec<f64> = games.iter().filter_map(|game| game.first_frame).collect();
+    times.sort_by(f64::total_cmp);
+    let median = match times.len() {
+        0 => None,
+        count if count % 2 == 1 => Some(times[count / 2]),
+        count => Some(f64::midpoint(times[count / 2 - 1], times[count / 2])),
+    };
+    VariantResult {
+        runs: games.len(),
+        passed: games
+            .iter()
+            .filter(|game| game.outcome != Outcome::Fail)
+            .count(),
+        median_first_frame: median,
+        spread: times
+            .last()
+            .zip(times.first())
+            .map(|(high, low)| high - low),
+    }
 }
 
 impl RunSummary {
     /// Creates the summary of `report` with the games `planned` for the run.
     #[must_use]
     pub fn of(report: &RunReport, planned: &[String], finished: bool) -> Self {
+        let games: Vec<GameSummary> = report
+            .games
+            .iter()
+            .map(|game| GameSummary {
+                name: game.name.clone(),
+                title_id: game.title_id.clone(),
+                settings: game.settings.clone(),
+                outcome: game.outcome(),
+                seconds: game_seconds(game),
+                dir: game.dir.clone(),
+                first_frame: first_frame(game),
+            })
+            .collect();
         Self {
             dir: String::new(),
             started: report.started.clone(),
@@ -76,18 +189,8 @@ impl RunSummary {
             stamp: report.stamp.clone(),
             finished,
             planned: planned.to_vec(),
-            games: report
-                .games
-                .iter()
-                .map(|game| GameSummary {
-                    name: game.name.clone(),
-                    title_id: game.title_id.clone(),
-                    settings: game.settings.clone(),
-                    outcome: game.outcome(),
-                    seconds: game_seconds(game),
-                    dir: game.dir.clone(),
-                })
-                .collect(),
+            verdict: verdict(&games),
+            games,
         }
     }
 
@@ -105,6 +208,14 @@ impl RunSummary {
             counts[slot] += 1;
         }
         counts
+    }
+}
+
+fn first_frame(game: &GameReport) -> Option<f64> {
+    let launch = &game.scenario.as_ref()?.launches.first()?.launch;
+    match &launch.loading_hidden {
+        Some((at, reason)) if reason.is_success() => Some(f64::from(*at)),
+        _ => None,
     }
 }
 
@@ -163,16 +274,62 @@ mod tests {
             planned: Vec::new(),
             games: outcomes
                 .iter()
-                .map(|outcome| GameSummary {
-                    name: "Game".to_owned(),
-                    title_id: String::new(),
-                    settings: String::new(),
-                    outcome: *outcome,
-                    seconds: 0.0,
-                    dir: String::new(),
-                })
+                .map(|outcome| game("Game", *outcome, None))
                 .collect(),
+            verdict: None,
         }
+    }
+
+    fn game(name: &str, outcome: Outcome, first_frame: Option<f64>) -> GameSummary {
+        GameSummary {
+            name: name.to_owned(),
+            title_id: String::new(),
+            settings: String::new(),
+            outcome,
+            seconds: 0.0,
+            dir: String::new(),
+            first_frame,
+        }
+    }
+
+    #[test]
+    fn an_ab_run_gets_a_verdict_beyond_its_spread() {
+        let games = [
+            game("NFSU · A", Outcome::Pass, Some(100.0)),
+            game("NFSU · B", Outcome::Pass, Some(80.0)),
+            game("NFSU · A", Outcome::Pass, Some(104.0)),
+            game("NFSU · B", Outcome::Fail, Some(82.0)),
+        ];
+        let verdict = verdict(&games).unwrap();
+        assert_eq!(verdict.game, "NFSU");
+        assert_eq!(verdict.a.median_first_frame, Some(102.0));
+        assert_eq!(verdict.b.median_first_frame, Some(81.0));
+        assert_eq!(verdict.b.passed, 1);
+        assert!(verdict.significant);
+        assert!(verdict.difference_percent.unwrap() < -20.0);
+    }
+
+    #[test]
+    fn a_difference_inside_the_spread_is_not_flagged() {
+        let games = [
+            game("G · A", Outcome::Pass, Some(100.0)),
+            game("G · B", Outcome::Pass, Some(95.0)),
+            game("G · A", Outcome::Pass, Some(90.0)),
+            game("G · B", Outcome::Pass, Some(99.0)),
+        ];
+        assert!(!verdict(&games).unwrap().significant);
+    }
+
+    #[test]
+    fn a_plain_run_has_no_verdict() {
+        assert_eq!(verdict(&[game("OpenTTD", Outcome::Pass, Some(30.0))]), None);
+        assert_eq!(
+            verdict(&[
+                game("G · A", Outcome::Pass, None),
+                game("H", Outcome::Pass, None)
+            ]),
+            None
+        );
     }
 
     #[test]

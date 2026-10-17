@@ -30,6 +30,8 @@ Options:
   --only <name>       only the game or probe with this name
   --games <a,b,…>     run these games of lab.json, in this order, instead of a set
   --repeat <n>        run every game n times in a row; default 1
+  --ab <json>         A/B: run the one game as it is (A) and with these settings merged over its own (B),
+                      alternating, --repeat times each; the run ends with a verdict
   --build-only        build the NSPs and stop
   --no-open           do not open the live page in the browser
   --json              print the run as JSON lines, one event each, without the live page;
@@ -88,6 +90,8 @@ pub struct Args {
     pub games: Vec<String>,
     /// `--repeat`.
     pub repeat: u32,
+    /// `--ab`: the settings of variant B, as JSON.
+    pub ab: Option<String>,
     /// `--build-only`.
     pub build_only: bool,
     /// `--json`.
@@ -146,6 +150,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         only: None,
         games: Vec::new(),
         repeat: 1,
+        ab: None,
         build_only: false,
         json: false,
         who: None,
@@ -192,6 +197,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                     .map(str::to_owned)
                     .collect();
             }
+            "--ab" => parsed.ab = Some(value("settings as JSON")?),
             "--repeat" => {
                 let times: u32 = number(arg, value("a count")?, "a count from 1 to 100")?;
                 if !(1..=100).contains(&times) {

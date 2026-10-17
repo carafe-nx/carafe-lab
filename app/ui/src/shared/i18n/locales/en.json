@@ -242,6 +242,30 @@
     "notInRun": "not in the run",
     "noShot": "no screenshot"
   },
+  "ab": {
+    "title": "A/B",
+    "hint": "One game in two variants, alternating: A with its own settings, B with the changes below. The run ends with a verdict on the time to the first frame.",
+    "variantB": "Variant B",
+    "presets": {
+      "box64": "Box64 instead of FEX",
+      "fex": "FEX instead of Box64",
+      "gplasync": "DXVK gplasync",
+      "twoCores": "2 cores instead of 4",
+      "noVsync": "no vsync",
+      "hudOff": "no HUD"
+    },
+    "repeat": "Repeats of each",
+    "launches": "Game runs: {{count}}",
+    "pickGame": "Pick a game",
+    "start": "Run A/B",
+    "verdict": "A/B verdict",
+    "runs": "passed {{passed}} of {{runs}}",
+    "median": "first frame: {{seconds}} s (spread {{spread}} s)",
+    "noMedian": "no first frame",
+    "slower": "B is {{percent}}% slower than A",
+    "faster": "B is {{percent}}% faster than A",
+    "noise": "The difference is within the spread of the repeats, so it does not count"
+  },
   "who": {
     "window": "the window",
     "command line": "the command line"

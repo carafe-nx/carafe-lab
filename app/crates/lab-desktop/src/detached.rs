@@ -25,7 +25,8 @@ const WMI_CREATE: &str = "$si = New-CimInstance -ClassName Win32_ProcessStartup 
 pub fn wrapper_line(program: &Path, args: &[String], log: &Path) -> String {
     let mut line = format!("\"{}\"", program.display());
     for arg in args {
-        line.push_str(&format!(" \"{arg}\""));
+        line.push(' ');
+        line.push_str(&quote(arg));
     }
     let log = log.display();
     format!("/d /s /c \"{line} > \"{log}\" 2>&1 & call echo {EXIT_MARK}%^errorlevel%>> \"{log}\"\"")
@@ -92,6 +93,32 @@ pub fn spawn(program: &Path, args: &[String], dir: &Path, log: &Path) -> Result<
     }
 }
 
+/// Returns `arg` in double quotes the way a Windows program splits its command line back: a quote inside becomes
+/// `\"`, and backslashes before a quote or the closing quote are doubled.
+#[must_use]
+pub fn quote(arg: &str) -> String {
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0;
+    for c in arg.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            other => {
+                quoted.push_str(&"\\".repeat(backslashes));
+                quoted.push(other);
+                backslashes = 0;
+            }
+        }
+    }
+    quoted.push_str(&"\\".repeat(backslashes * 2));
+    quoted.push('"');
+    quoted
+}
+
 /// Returns the exit code the wrapper wrote at the end of `log`, or `None` while the program runs.
 #[must_use]
 pub fn exit_code(log: &str) -> Option<i32> {
@@ -117,6 +144,13 @@ mod tests {
             "/d /s /c \"\"D:\\Lab\\carafe-lab.exe\" \"run\" \"NFSU menu\" > \"D:\\Lab\\work\\run.log\" 2>&1 \
              & call echo carafe-lab-exit %^errorlevel%>> \"D:\\Lab\\work\\run.log\"\""
         );
+    }
+
+    #[test]
+    fn quotes_and_backslashes_survive_the_command_line() {
+        assert_eq!(quote(r#"{"hud":"fps"}"#), r#""{\"hud\":\"fps\"}""#);
+        assert_eq!(quote(r"D:\Games\"), r#""D:\Games\\""#);
+        assert_eq!(quote(r#"a\"b"#), r#""a\\\"b""#);
     }
 
     #[test]

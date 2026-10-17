@@ -28,4 +28,8 @@ seconds: number,
 /**
  * Its folder inside the run's folder; empty in summaries from before it was kept.
  */
-dir: string, };
+dir: string, 
+/**
+ * Seconds from its first launch to its first frame; `None` when it never got there.
+ */
+firstFrame: number | null, };

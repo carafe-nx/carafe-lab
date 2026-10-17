@@ -53,7 +53,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
 - [ ] `feature` Reference screenshots for "the screen shows …" checks
 - [ ] `feature` Random presses for a set time, to catch crashes and hangs without a scenario
-- [ ] `feature` A/B: two variants (runtime build, runtime flag or game setting) alternate; the run ends with a verdict
+- [ ] `feature` A/B between two runtime builds or a runtime flag, not only a game setting
 - [ ] `feature` "Take control": play by hand during a run and hand the game back
 - [ ] `feature` Scouting: play by hand, the lab records presses and milestones into a scenario
 - [ ] `feature` Clean-up: Eden crash dumps, stopped containers, old NSPs; a warning when space runs low
@@ -100,6 +100,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` A/B of a game setting: variants alternate, the run ends with a verdict on the first frame that counts only differences beyond the spread
 - [x] `feature` Loader: each launch's start-up stages live on the Run screen, and what to look at when a launch stops at one
 - [x] `feature` Scenario editor in the window: every step with its settings, reorder, add, remove; saved to the game's file in `scenarios/`
 - [x] `feature` Two runs compared side by side: outcomes, times, what differs in their stamps, screenshots of the same steps

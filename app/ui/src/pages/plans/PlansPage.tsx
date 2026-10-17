@@ -12,6 +12,7 @@ import { Icon } from "@/shared/ui/Icon";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
 import styles from "@/shared/ui/lab.module.css";
+import { AbPlan } from "./AbPlan";
 import plans from "./PlansPage.module.css";
 
 type Estimate = { launches: number; seconds: number; unknown: number };
@@ -40,10 +41,10 @@ export function PlansPage() {
   const games = lab.data?.games ?? [];
   const sets = Object.entries(lab.data?.sets ?? {});
   const enabled = games.filter((game) => game.enabled).map((game) => game.name);
-  const start = (set: string | null, chosen: string[] | null = null, repeat = 1) => {
+  const start = (set: string | null, chosen: string[] | null = null, repeat = 1, ab: string | null = null) => {
     setError(null);
     api
-      .startRun(set, null, chosen, repeat)
+      .startRun(set, null, chosen, repeat, ab)
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -56,6 +57,7 @@ export function PlansPage() {
       {error ? <Notice tone="error">{error}</Notice> : null}
       <p className={styles.muted}>{t("plans.hint")}</p>
       <OwnPlan games={games} runs={runs.data ?? []} onStart={(chosen, repeat) => start(null, chosen, repeat)} />
+      <AbPlan games={games} onStart={(game, overrides, repeat) => start(null, [game], repeat, overrides)} />
       <div className={plans.grid}>
         <PlanCard title={t("plans.enabled")} names={enabled} onStart={() => start(null)} />
         {sets.map(([set, names]) => (

@@ -477,6 +477,20 @@ pub fn merged_settings(overrides: Option<&Value>) -> Result<AutorunSettings, Str
     Ok(settings)
 }
 
+/// Merges `overrides` over `base`, the way a game's own settings are merged over the defaults.
+///
+/// # Errors
+///
+/// A message if the result is not valid settings.
+pub fn settings_over(base: &AutorunSettings, overrides: &Value) -> Result<AutorunSettings, String> {
+    let mut value = serde_json::to_value(base).map_err(|error| error.to_string())?;
+    merge(&mut value, overrides);
+    let settings: AutorunSettings =
+        serde_json::from_value(value).map_err(|error| error.to_string())?;
+    settings.validate().map_err(|error| error.to_string())?;
+    Ok(settings)
+}
+
 fn merge(base: &mut Value, overrides: &Value) {
     match (base, overrides) {
         (Value::Object(base), Value::Object(overrides)) => {

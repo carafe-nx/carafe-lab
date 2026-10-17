@@ -28,7 +28,7 @@ use lab_core::time::Utc;
 use lab_core::view::LabView;
 use lab_eden::Eden;
 use lab_run::engine::{Engine, Event, Planned};
-use lab_run::history;
+use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
 use lab_run::report::{self, RunStamp};
 use lab_run::run::{Clock, Outcome, StepResult};
@@ -358,40 +358,66 @@ impl Lab {
         if games.is_empty() {
             return Err("no games to run: enable some in lab.json or name a set".to_owned());
         }
-        let inspector = DiskFolderInspector;
         let repeat = self.args.repeat as usize;
-        let planned = games
-            .iter()
-            .flat_map(|game| std::iter::repeat_n(*game, repeat))
-            .map(|game| {
-                let request = inspector
-                    .inspect(&game.folder.to_string_lossy())
-                    .map_err(|error| error.to_string())
-                    .and_then(|report| {
-                        game.request(&report).ok_or_else(|| {
-                            "the folder has no game .exe; name one with \"executable\"".to_owned()
-                        })
-                    });
-                Planned {
-                    name: game.name.clone(),
-                    folder: game.folder.clone(),
-                    request,
-                    entropy: game.entropy(),
-                    label: settings_label(&game.settings),
-                    scenario: game.scenario(self.timeout),
-                }
-            })
-            .collect();
         let mut what = match (set, &self.args.only) {
             (_, Some(only)) => only.clone(),
             _ if !self.args.games.is_empty() => self.args.games.join(", "),
             (Some(set), None) => set.to_owned(),
             (None, None) => "enabled games".to_owned(),
         };
+        let planned: Vec<Planned> = if let Some(ab) = self.args.ab.clone() {
+            let [game] = games.as_slice() else {
+                return Err(
+                    "an A/B run takes exactly one game: name it with --games or --only".to_owned(),
+                );
+            };
+            let overrides: serde_json::Value =
+                serde_json::from_str(&ab).map_err(|error| format!("--ab: {error}"))?;
+            let settings_b = config::settings_over(&game.settings, &overrides)
+                .map_err(|error| format!("--ab: {error}"))?;
+            what = format!("A/B {}", game.name);
+            (0..repeat)
+                .flat_map(|_| {
+                    [
+                        self.plan(game, format!("{}{VARIANT_A}", game.name), &game.settings),
+                        self.plan(game, format!("{}{VARIANT_B}", game.name), &settings_b),
+                    ]
+                })
+                .collect()
+        } else {
+            games
+                .iter()
+                .flat_map(|game| std::iter::repeat_n(*game, repeat))
+                .map(|game| self.plan(game, game.name.clone(), &game.settings))
+                .collect()
+        };
         if repeat > 1 {
             what = format!("{what} ×{repeat}");
         }
         self.execute(planned, &what)
+    }
+
+    fn plan(&self, game: &Game, name: String, settings: &AutorunSettings) -> Planned {
+        let request = DiskFolderInspector
+            .inspect(&game.folder.to_string_lossy())
+            .map_err(|error| error.to_string())
+            .and_then(|report| {
+                game.request(&report).ok_or_else(|| {
+                    "the folder has no game .exe; name one with \"executable\"".to_owned()
+                })
+            })
+            .map(|mut request| {
+                request.settings = settings.clone();
+                request
+            });
+        Planned {
+            entropy: config::name_entropy(&name),
+            name,
+            folder: game.folder.clone(),
+            request,
+            label: settings_label(settings),
+            scenario: game.scenario(self.timeout),
+        }
     }
 
     fn run_probes(mut self) -> Result<ExitCode, String> {

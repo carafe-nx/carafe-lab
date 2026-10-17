@@ -13,8 +13,8 @@ export const api = {
   getLab: () => invoke<LabView>("get_lab"),
   listRuns: () => invoke<RunSummary[]>("list_runs"),
   runEvents: (dir: string, from: number) => invoke<Event[]>("run_events", { dir, from }),
-  startRun: (set: string | null, only: string | null, games: string[] | null = null, repeat = 1) =>
-    invoke<void>("start_run", { set, only, games, repeat }),
+  startRun: (set: string | null, only: string | null, games: string[] | null = null, repeat = 1, ab: string | null = null) =>
+    invoke<void>("start_run", { set, only, games, repeat, ab }),
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),
   runScreenshots: (dir: string, game: string) => invoke<string[]>("run_screenshots", { dir, game }),
   addGame: (folder: string) => invoke<string>("add_game", { folder }),

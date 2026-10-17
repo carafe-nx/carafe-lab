@@ -125,6 +125,18 @@ Each run gets `<work>/runs/<date>/`:
 The exit code is 0 when nothing failed, 3 when something did, 4 when the run was stopped while it waited for the
 emulator.
 
+## Plans, repeats and A/B
+
+- `run --games A,B` runs these games in this order, whatever sets and `enabled` say; `--repeat <n>` runs each of them
+  n times in a row. A game that fails only sometimes shows its rate in the window's library ("failed 2 of 10").
+- `run --games G --repeat <n> --ab '<settings>'` is an A/B run: G as it is (`G · A`) and with the settings merged over
+  its own (`G · B`, in the shape of `carafe.json`'s `settings`), alternating. Each variant is its own NSP with its own
+  Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame
+  of each variant; a difference counts only when it is larger than the spread of either variant.
+- Every run's `summary.json` and `report.json` carry a stamp: the Carafe commit (`+changes` when the checkout has
+  uncommitted changes), the first 12 hex digits of the runtime archive's SHA-256, the lab's commit and the Eden image.
+  The window compares two runs side by side, their screenshots of the same steps included.
+
 ## The queue
 
 One run holds the emulator at a time; the others wait in `<work>/queue/` in the order they came, whoever started them:
