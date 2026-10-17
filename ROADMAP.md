@@ -22,7 +22,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` On a hang: backtraces of all the game's threads through the gdb stub before the watchdog stops it
 - [ ] `feature` On a crash: registers, stack and module map, without Eden's full crash dump
 - [ ] `feature` One timeline of all log sources with one clock
-- [ ] `feature` Full logs compressed for failures and recent runs; a summary for older passing runs
 - [ ] `feature` Diagnostics as named flags instead of temporary patches
 
 ### 3. Versions and history
@@ -86,6 +85,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Full logs compressed for failures and recent runs; a summary for older passing runs (`tidy`)
 - [x] `feature` `report.json` with milestones, step times, frame times and the reason for a failure
 - [x] `feature` A screenshot every few seconds of a launch: a small picture every 10 s in `timeline/`
 - [x] `feature` Frame times of every frame, not only FPS: mean, worst hundredth and stutters per launch

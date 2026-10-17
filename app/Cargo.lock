@@ -1669,6 +1669,7 @@ name = "lab-run"
 version = "0.0.0"
 dependencies = [
  "carafe-core",
+ "flate2",
  "lab-core",
  "serde",
  "serde_json",

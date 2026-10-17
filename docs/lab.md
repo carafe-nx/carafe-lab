@@ -144,6 +144,11 @@ Each run gets `<work>/runs/<date>/`:
   `summary.json` keeps the peak memory, the processor use and the counts for the History screen, which lists a
   game's problems and highlights those its run before did not have.
 
+`carafe-lab tidy` shows what keeping the runs folder small would do and changes nothing; `tidy --apply` does it.
+The 10 newest runs stay whole. Older failed or unfinished runs get their logs compressed into `.gz` next to them,
+their pictures kept. Older runs where nothing failed lose their raw logs and timeline pictures and keep their
+summaries, reports, events, screenshots and `problems.json`, which History reads.
+
 Together they are the run's dataset: every press in `events.jsonl` has its buttons, hold and time, every screenshot
 step its file, time and outcome, and every check the pictures it compared and its verdict.
 

@@ -26,6 +26,9 @@ Usage:
   carafe-lab screen <file.png>     saves the running game's screen
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
+  carafe-lab tidy [--apply]        what keeping the runs folder small would do; --apply does it: the 10 newest runs
+                                   stay whole, older failed runs get their logs compressed, older passing runs
+                                   lose their raw logs and timeline pictures
   carafe-lab help
 
 Options:
@@ -96,6 +99,8 @@ pub enum Command {
     Perf,
     /// Show the running game's stages and the problems of its logs.
     Logs,
+    /// Keep the runs folder small.
+    Tidy,
     /// Print the help.
     Help,
 }
@@ -131,6 +136,8 @@ pub struct Args {
     pub build_only: bool,
     /// `--clean`.
     pub clean: bool,
+    /// `--apply`.
+    pub apply: bool,
     /// `--scenario`: `standard` or a scenario file relative to `lab.json`.
     pub scenario: Option<String>,
     /// `--video`.
@@ -184,6 +191,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("screen") => Command::Screen { file: None },
         Some("perf") => Command::Perf,
         Some("logs") => Command::Logs,
+        Some("tidy") => Command::Tidy,
         Some(other) => return Err(ArgsError::Command(other.to_owned())),
     };
     let mut parsed = Args {
@@ -201,6 +209,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         hold_ms: 150,
         build_only: false,
         clean: false,
+        apply: false,
         scenario: None,
         video: Video::Full,
         json: false,
@@ -279,6 +288,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             "--probes-dir" => parsed.probes_dir = Some(PathBuf::from(value("a folder")?)),
             "--build-only" => parsed.build_only = true,
             "--clean" => parsed.clean = true,
+            "--apply" => parsed.apply = true,
             "--no-open" => parsed.no_open = true,
             "--json" => parsed.json = true,
             other if other.starts_with("--") => return Err(ArgsError::Option(other.to_owned())),

@@ -36,6 +36,7 @@ use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
 use lab_run::report::{self, RunStamp};
 use lab_run::run::{Clock, Emulator, Outcome, StepResult, stage_name};
+use lab_run::tidy;
 use serde::Serialize;
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
@@ -112,6 +113,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         Command::Runs => return show_runs(&config, args.json),
         Command::Stop { id } => return stop_run(&config, id.as_deref()),
         Command::Perf => return show_perf(&config, args.json),
+        Command::Tidy => return tidy_runs(&config, args.apply, args.json),
         _ => {}
     }
     let keys = console_files(args.keys.as_deref(), &config_path)?;
@@ -185,8 +187,35 @@ fn start(args: Args) -> Result<ExitCode, String> {
         | Command::Games
         | Command::Runs
         | Command::Stop { .. }
-        | Command::Perf => Ok(ExitCode::SUCCESS),
+        | Command::Perf
+        | Command::Tidy => Ok(ExitCode::SUCCESS),
     }
+}
+
+fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, String> {
+    let plan = tidy::plan(&config.work.join("runs"), tidy::KEPT_WHOLE);
+    if json && !apply {
+        print_json(&plan)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    let mib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+    println!(
+        "{} runs; the {} newest stay whole; compress {} log files of failed runs ({:.1} MB), remove {} files of \
+         passing runs ({:.1} MB)",
+        plan.runs,
+        tidy::KEPT_WHOLE,
+        plan.compress.len(),
+        mib(plan.compress_bytes),
+        plan.remove.len(),
+        mib(plan.remove_bytes)
+    );
+    if !apply {
+        println!("nothing changed; run with --apply to do it");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let freed = tidy::apply(&plan).map_err(|error| error.to_string())?;
+    println!("freed {:.1} MB", mib(freed));
+    Ok(ExitCode::SUCCESS)
 }
 
 fn show_perf(config: &Config, json: bool) -> Result<ExitCode, String> {
