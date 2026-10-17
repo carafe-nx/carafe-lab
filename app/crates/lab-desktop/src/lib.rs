@@ -24,6 +24,7 @@ pub fn run() {
             commands::add_game,
             commands::run_screenshots,
             commands::save_scenario,
+            commands::save_game_notes,
             commands::choose_keys,
             commands::forget_keys,
             commands::open_path,

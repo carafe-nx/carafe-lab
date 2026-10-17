@@ -15,6 +15,7 @@ pub mod perf;
 pub mod picture;
 pub mod probes;
 pub mod redact;
+pub mod roadmap;
 pub mod scenario;
 pub mod time;
 pub mod view;

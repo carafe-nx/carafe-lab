@@ -7,6 +7,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::config::{Config, Game};
+use crate::roadmap::{self, RoadmapItem};
 use crate::scenario::Scenario;
 
 /// The lab's settings and games, for showing.
@@ -53,14 +54,20 @@ pub struct GameView {
     pub own_scenario: bool,
     /// The file its scenario is kept in, relative to `lab.json`; `None` when it is written in `lab.json` or standard.
     pub scenario_file: Option<String>,
+    /// Words to find and group the game by.
+    pub tags: Vec<String>,
+    /// Free notes about the game.
+    pub notes: Option<String>,
     /// The sets the game is in.
     pub sets: Vec<String>,
+    /// The open items of `ROADMAP.md` that name the game, its title or its folder.
+    pub roadmap: Vec<RoadmapItem>,
 }
 
 impl LabView {
-    /// Creates the view of `config`.
+    /// Creates the view of `config`, with each game's open items of the roadmap text `roadmap`.
     #[must_use]
-    pub fn of(config: &Config) -> Self {
+    pub fn of(config: &Config, roadmap: &str) -> Self {
         Self {
             work: config.work.display().to_string(),
             gpu: config.gpu.name().to_owned(),
@@ -69,7 +76,7 @@ impl LabView {
             games: config
                 .games
                 .iter()
-                .map(|game| GameView::of(game, config))
+                .map(|game| GameView::of(game, config, roadmap))
                 .collect(),
             sets: config.sets.clone(),
         }
@@ -77,7 +84,17 @@ impl LabView {
 }
 
 impl GameView {
-    fn of(game: &Game, config: &Config) -> Self {
+    fn of(game: &Game, config: &Config, roadmap: &str) -> Self {
+        let folder = game
+            .folder
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let words = [
+            game.name.as_str(),
+            game.title.as_deref().unwrap_or_default(),
+            folder.as_str(),
+        ];
         Self {
             name: game.name.clone(),
             folder: game.folder.display().to_string(),
@@ -89,6 +106,8 @@ impl GameView {
             scenario: game.scenario(config.timeout),
             own_scenario: game.scenario.is_some(),
             scenario_file: game.scenario_file.clone(),
+            tags: game.tags.clone(),
+            notes: game.notes.clone(),
             sets: config
                 .sets
                 .iter()
@@ -99,6 +118,7 @@ impl GameView {
                 })
                 .map(|(set, _)| set.clone())
                 .collect(),
+            roadmap: roadmap::open_items_mentioning(roadmap, &words),
         }
     }
 }
@@ -115,11 +135,18 @@ mod tests {
                 "sets": {"quick": ["a"], "all": ["A", "B"]}}"#,
         )
         .unwrap();
-        let view = LabView::of(&config);
+        let view = LabView::of(
+            &config,
+            "- [ ] `bug` A crashes
+- [x] `bug` A hung
+",
+        );
         assert_eq!(view.games[0].sets, ["all", "quick"]);
         assert_eq!(view.games[1].sets, ["all"]);
         assert!(!view.games[0].own_scenario);
         assert_eq!(view.games[0].scenario, Scenario::standard(90));
         assert_eq!(view.gpu, "wsl");
+        assert_eq!(view.games[0].roadmap.len(), 1);
+        assert!(view.games[1].roadmap.is_empty());
     }
 }

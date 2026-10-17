@@ -66,7 +66,16 @@
     "moreSteps_one": "и ещё {{count}} шаг",
     "moreSteps_few": "и ещё {{count}} шага",
     "moreSteps_many": "и ещё {{count}} шагов",
-    "moreSteps_other": "и ещё {{count}} шага"
+    "moreSteps_other": "и ещё {{count}} шага",
+    "filter": "Название, тег или заметка",
+    "nothingFound": "Ничего не нашлось",
+    "tags": "Теги",
+    "tagsHint": "через запятую: dx9, долгий-старт",
+    "notes": "Заметки",
+    "notesHint": "что важно знать об игре",
+    "saveNotes": "Сохранить",
+    "cancelNotes": "Отменить",
+    "roadmap": "Открытые пункты ROADMAP"
   },
   "outcome": {
     "pass": "прошла",

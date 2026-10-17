@@ -271,7 +271,8 @@ fn show_status(config: &Config, config_path: &Path, json: bool) -> Result<ExitCo
 }
 
 fn show_games(config: &Config, json: bool) -> Result<ExitCode, String> {
-    let view = LabView::of(config);
+    let roadmap = fs::read_to_string(repository().join("ROADMAP.md")).unwrap_or_default();
+    let view = LabView::of(config, &roadmap);
     if json {
         print_json(&view)?;
         return Ok(ExitCode::SUCCESS);

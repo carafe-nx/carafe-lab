@@ -12,12 +12,10 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
-- [ ] `bug` Eden crashes in Mesa's d3d12 `end_query` when software stops on the WSL GPU, so the one Eden restarts after every game ([research](docs/research/eden-stop-crash.md); needs Mesa's source)
 - [ ] `feature` The one Eden set up like the console (4 cores, 4 GB, docked, firmware from Carafe)
 - [ ] `feature` Button presses through the control channel instead of xdotool
 - [ ] `feature` Watchdog: a hang during a game (not only at close) restarts Eden; "clean start" switch
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
-- [ ] `feature` Library: tags, notes, link to a ROADMAP item
 - [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
 - [ ] `feature` Exact uncompressed screenshots for checks from Eden through the control channel
 - [ ] `feature` Video turned down or off during performance runs
@@ -98,6 +96,9 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Library: tags, notes and the open ROADMAP items that name the game; search by name, tag or note
+- [x] `bug` One Eden runs game after game: stopped games give their memory back, a new Eden starts when memory runs short
+- [x] `bug` Eden no longer crashes in Mesa's d3d12 `end_query` when software stops on the WSL GPU ([research](docs/research/eden-stop-crash.md))
 - [x] `feature` Tools for Claude, one call each: `play`, `press`, `screen`, `perf`
 - [x] `feature` Run screen: the scenario's button presses light up on the Switch frame's Joy-Con
 - [x] `feature` Compatibility by version: games × Carafe commits with the last result, failures and FPS; where a game broke is marked

@@ -116,7 +116,11 @@ pub async fn get_status(lab: State<'_, Arc<Lab>>) -> Result<LabStatus, CommandEr
 #[tauri::command]
 pub async fn get_lab(lab: State<'_, Arc<Lab>>) -> Result<LabView, CommandError> {
     let lab = Arc::clone(&lab);
-    blocking(move || Ok(LabView::of(&lab.config()?))).await
+    blocking(move || {
+        let roadmap = fs::read_to_string(lab.repository().join("ROADMAP.md")).unwrap_or_default();
+        Ok(LabView::of(&lab.config()?, &roadmap))
+    })
+    .await
 }
 
 /// Returns the runs, newest first.
@@ -252,6 +256,29 @@ pub async fn save_scenario(
             fs::write(&config_path, updated).map_err(|error| error.to_string())?;
         }
         Ok(file)
+    })
+    .await
+}
+
+/// Replaces the tags and notes of the game `game` in `lab.json`.
+#[tauri::command]
+pub async fn save_game_notes(
+    lab: State<'_, Arc<Lab>>,
+    game: String,
+    tags: Vec<String>,
+    notes: String,
+) -> Result<(), CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let config_path = lab.config_path();
+        let text = fs::read_to_string(&config_path).map_err(|error| error.to_string())?;
+        let base = lab.repository().to_path_buf();
+        let updated = config::set_game_notes(&text, &game, &tags, &notes, |name| {
+            fs::read_to_string(base.join(name)).map_err(|error| error.to_string())
+        })
+        .map_err(|error| error.to_string())?;
+        fs::write(&config_path, updated).map_err(|error| error.to_string())?;
+        Ok(())
     })
     .await
 }

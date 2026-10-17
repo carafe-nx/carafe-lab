@@ -56,7 +56,16 @@
     "openFolder": "Game folder",
     "openRun": "To the run",
     "moreSteps_one": "and {{count}} more step",
-    "moreSteps_other": "and {{count}} more steps"
+    "moreSteps_other": "and {{count}} more steps",
+    "filter": "Name, tag or note",
+    "nothingFound": "Nothing found",
+    "tags": "Tags",
+    "tagsHint": "comma-separated: dx9, slow-start",
+    "notes": "Notes",
+    "notesHint": "what is worth knowing about the game",
+    "saveNotes": "Save",
+    "cancelNotes": "Cancel",
+    "roadmap": "Open ROADMAP items"
   },
   "outcome": {
     "pass": "passed",

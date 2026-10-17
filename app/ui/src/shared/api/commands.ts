@@ -26,6 +26,8 @@ export const api = {
   livePerf: (seconds: number) => invoke<PerfSample[]>("live_perf", { seconds }),
   readImage: (path: string) => invoke<string>("read_image", { path }),
   saveScenario: (game: string, scenario: Scenario) => invoke<string>("save_scenario", { game, scenario }),
+  saveGameNotes: (game: string, tags: string[], notes: string) =>
+    invoke<void>("save_game_notes", { game, tags, notes }),
 };
 
 export function errorText(error: unknown): string {

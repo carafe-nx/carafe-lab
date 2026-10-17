@@ -100,6 +100,9 @@ struct RawGame {
     arguments: Vec<String>,
     settings: Option<Value>,
     scenario: Option<RawScenario>,
+    #[serde(default)]
+    tags: Vec<String>,
+    notes: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -164,6 +167,10 @@ pub struct Game {
     /// The file the scenario was read from, relative to `lab.json`; `None` when it is written in `lab.json` or the
     /// game has none.
     pub scenario_file: Option<String>,
+    /// Words to find and group the game by, such as `dx9` or `slow-start`.
+    pub tags: Vec<String>,
+    /// Free notes about the game.
+    pub notes: Option<String>,
 }
 
 impl Config {
@@ -293,6 +300,8 @@ impl Config {
                 settings,
                 scenario,
                 scenario_file,
+                tags: game.tags,
+                notes: game.notes,
             });
         }
         for (set, names) in &raw.sets {
@@ -615,6 +624,58 @@ pub fn set_scenario_file(
     Ok(updated)
 }
 
+/// Returns the text of `lab.json` with the game `name`'s tags and notes replaced; empty ones are removed, everything
+/// else keeps its order.
+///
+/// # Errors
+///
+/// [`ConfigError`] when the text is not a valid lab file or has no game `name`.
+pub fn set_game_notes(
+    text: &str,
+    name: &str,
+    tags: &[String],
+    notes: &str,
+    read: impl Fn(&str) -> Result<String, String>,
+) -> Result<String, ConfigError> {
+    let mut value: Value =
+        serde_json::from_str(text).map_err(|error| ConfigError::Format(error.to_string()))?;
+    let game = value
+        .get_mut("games")
+        .and_then(Value::as_array_mut)
+        .and_then(|games| {
+            games.iter_mut().find(|game| {
+                game.get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|known| known.eq_ignore_ascii_case(name))
+            })
+        })
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ConfigError::UnknownGame(name.to_owned()))?;
+    let tags: Vec<Value> = tags
+        .iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .map(|tag| Value::String(tag.to_owned()))
+        .collect();
+    if tags.is_empty() {
+        game.remove("tags");
+    } else {
+        game.insert("tags".to_owned(), Value::Array(tags));
+    }
+    if notes.trim().is_empty() {
+        game.remove("notes");
+    } else {
+        game.insert("notes".to_owned(), Value::String(notes.trim().to_owned()));
+    }
+    let updated = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&value)
+            .map_err(|error| ConfigError::Format(error.to_string()))?
+    );
+    Config::parse_with(&updated, read)?;
+    Ok(updated)
+}
+
 /// Returns the scenario file a game named `name` gets when its scenario is first saved on its own:
 /// `scenarios/<name>.json` with the name in lower case and every character other than a letter or digit as `-`.
 #[must_use]
@@ -790,6 +851,24 @@ mod tests {
         assert!(
             set_scenario_file(text, "B", "scenarios/b.json", |_| Ok(steps.to_owned())).is_err()
         );
+    }
+
+    #[test]
+    fn tags_and_notes_are_kept_and_empty_ones_removed() {
+        let text = r#"{"work": "x", "games": [{"name": "A", "folder": "a"}]}"#;
+        let tagged = set_game_notes(
+            text,
+            "a",
+            &["dx9".to_owned(), " ".to_owned()],
+            "stalls at start",
+            |_| Err("none".to_owned()),
+        )
+        .unwrap();
+        let config = Config::parse(&tagged).unwrap();
+        assert_eq!(config.games[0].tags, ["dx9"]);
+        assert_eq!(config.games[0].notes.as_deref(), Some("stalls at start"));
+        let cleared = set_game_notes(&tagged, "A", &[], "", |_| Err("none".to_owned())).unwrap();
+        assert!(!cleared.contains("tags") && !cleared.contains("notes"));
     }
 
     #[test]

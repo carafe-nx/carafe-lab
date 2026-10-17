@@ -17,6 +17,7 @@ import { GameArt } from "@/shared/ui/GameArt";
 import { Icon } from "@/shared/ui/Icon";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
+import controls from "@/shared/ui/controls.module.css";
 import styles from "@/shared/ui/lab.module.css";
 
 export function LibraryPage() {
@@ -25,7 +26,17 @@ export function LibraryPage() {
   const [picked, setPicked] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
-  const games = lab.data?.games ?? [];
+  const [filter, setFilter] = useState("");
+  const allGames = lab.data?.games ?? [];
+  const wanted = filter.trim().toLowerCase();
+  const games = wanted
+    ? allGames.filter(
+        (game) =>
+          game.name.toLowerCase().includes(wanted) ||
+          game.tags.some((tag) => tag.toLowerCase().includes(wanted)) ||
+          (game.notes ?? "").toLowerCase().includes(wanted),
+      )
+    : allGames;
   const selected = games.find((game) => game.name === picked) ?? games[0] ?? null;
   const refreshLab = lab.refresh;
 
@@ -73,7 +84,15 @@ export function LibraryPage() {
 
   const aside = (
     <>
-      <span className={styles.muted}>{t("library.count", { count: games.length })}</span>
+      <input
+        id="library-filter"
+        className={`${controls.input} ${styles.filter}`}
+        type="search"
+        placeholder={t("library.filter")}
+        value={filter}
+        onChange={(event) => setFilter(event.target.value)}
+      />
+      <span className={styles.muted}>{t("library.count", { count: allGames.length })}</span>
       <Button onClick={() => void choose()}>
         <Icon name="plus" size={14} />
         {t("library.add")}
@@ -87,7 +106,8 @@ export function LibraryPage() {
       <div className={dragging ? `${styles.drop} ${styles.dropActive}` : styles.drop}>{t("library.drop")}</div>
       <div className={styles.split}>
         <div className={styles.list}>
-          {games.length === 0 && !lab.error ? <div className={styles.empty}>{t("library.empty")}</div> : null}
+          {allGames.length === 0 && !lab.error ? <div className={styles.empty}>{t("library.empty")}</div> : null}
+          {allGames.length > 0 && games.length === 0 ? <div className={styles.empty}>{t("library.nothingFound")}</div> : null}
           {games.map((game) => (
             <GameRow
               key={game.name}
@@ -98,7 +118,7 @@ export function LibraryPage() {
             />
           ))}
         </div>
-        {selected ? <GameCard game={selected} runs={runs.data ?? []} /> : null}
+        {selected ? <GameCard key={selected.name} game={selected} runs={runs.data ?? []} /> : null}
       </div>
     </Page>
   );
@@ -120,6 +140,9 @@ function GameRow({ game, runs, selected, onPick }: { game: GameView; runs: RunSu
             </Chip>
           ))}
           <Chip>{t("library.steps", { count: game.scenario.steps.length })}</Chip>
+          {game.tags.map((tag) => (
+            <Chip key={`tag-${tag}`}>#{tag}</Chip>
+          ))}
         </span>
       </span>
       <span className={styles.end}>
@@ -208,6 +231,22 @@ function GameCard({ game, runs }: { game: GameView; runs: RunSummary[] }) {
           </Button>
         ) : null}
       </div>
+      <GameNotes game={game} />
+      {game.roadmap.length > 0 ? (
+        <>
+          <span className={styles.label}>{t("library.roadmap")}</span>
+          <ul className={styles.roadmap}>
+            {game.roadmap.map((item) => (
+              <li key={item.text}>
+                <Chip tone={item.tag === "bug" || item.tag === "game" ? "bad" : "plain"}>{item.tag}</Chip>
+                <span className={item.doing ? `${styles.itemText} ${styles.doing}` : styles.itemText} title={item.text}>
+                  {item.text}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       <span className={styles.label}>{t("library.scenario")}</span>
       <ol className={styles.steps}>
         {game.scenario.steps.slice(0, 12).map((step, index) => (
@@ -218,5 +257,72 @@ function GameCard({ game, runs }: { game: GameView; runs: RunSummary[] }) {
         <span className={styles.muted}>{t("library.moreSteps", { count: game.scenario.steps.length - 12 })}</span>
       ) : null}
     </aside>
+  );
+}
+
+function GameNotes({ game }: { game: GameView }) {
+  const { t } = useTranslation();
+  const { lab } = useLab();
+  const savedTags = game.tags.join(", ");
+  const savedNotes = game.notes ?? "";
+  const [tags, setTags] = useState(savedTags);
+  const [notes, setNotes] = useState(savedNotes);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const changed = tags !== savedTags || notes !== savedNotes;
+  const save = () => {
+    setSaving(true);
+    setError(null);
+    const list = tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+    api
+      .saveGameNotes(game.name, list, notes)
+      .then(() => lab.refresh())
+      .catch((reason: unknown) => setError(errorText(reason)))
+      .finally(() => setSaving(false));
+  };
+  return (
+    <div className={styles.notes}>
+      <label className={controls.field} htmlFor="game-tags">
+        <span className={controls.fieldLabel}>{t("library.tags")}</span>
+        <input
+          id="game-tags"
+          className={controls.input}
+          placeholder={t("library.tagsHint")}
+          value={tags}
+          onChange={(event) => setTags(event.target.value)}
+        />
+      </label>
+      <label className={controls.field} htmlFor="game-notes">
+        <span className={controls.fieldLabel}>{t("library.notes")}</span>
+        <textarea
+          id="game-notes"
+          className={controls.input}
+          rows={3}
+          placeholder={t("library.notesHint")}
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+        />
+      </label>
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {changed ? (
+        <div className={styles.actions}>
+          <Button variant="primary" disabled={saving} onClick={save}>
+            {t("library.saveNotes")}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setTags(savedTags);
+              setNotes(savedNotes);
+            }}
+          >
+            {t("library.cancelNotes")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }

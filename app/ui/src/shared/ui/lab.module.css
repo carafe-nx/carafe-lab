@@ -217,3 +217,47 @@
 .markRow input {
   accent-color: var(--accent);
 }
+
+.filter {
+  width: 220px;
+  min-height: 32px;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notes textarea {
+  resize: vertical;
+  font: inherit;
+}
+
+.roadmap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.roadmap li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.doing {
+  font-weight: 600;
+}
+
+.itemText {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
