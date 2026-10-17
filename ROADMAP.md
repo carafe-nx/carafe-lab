@@ -36,7 +36,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` A/B between two runtime builds or a runtime flag, not only a game setting
 - [ ] `feature` "Take control": play by hand during a run and hand the game back
 - [ ] `feature` Scouting: play by hand, the lab records presses and milestones into a scenario
-- [ ] `feature` Clean-up: Eden crash dumps, stopped containers, old NSPs; a warning when space runs low
 
 ### 5. Ready NSPs and the console
 
@@ -78,6 +77,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
 
 ## Done
+
+- [x] `feature` Clean-up: Eden crash dumps, stopped containers, old NSPs; a warning when space runs low
 
 - [x] `feature` After a failure the game runs again with detailed logs chosen by the symptom (`· detailed`)
 - [x] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats

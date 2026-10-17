@@ -218,11 +218,20 @@ fn start(args: Args) -> Result<ExitCode, String> {
 }
 
 fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, String> {
-    let plan = tidy::plan(&config.work.join("runs"), tidy::KEPT_WHOLE);
+    let runs = config.work.join("runs");
+    let nsp = config.work.join("nsp");
+    let dumps = std::env::temp_dir().join("wsl-crashes");
+    let places = tidy::Places {
+        runs: &runs,
+        nsp: &nsp,
+        dumps: Some(&dumps),
+    };
+    let plan = tidy::plan(places, tidy::KEPT_WHOLE);
     if json && !apply {
         print_json(&plan)?;
         return Ok(ExitCode::SUCCESS);
     }
+    let containers = stopped_containers();
     let mib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
     println!(
         "{} runs; the {} newest stay whole; compress {} log files of failed runs ({:.1} MB), remove {} files of \
@@ -234,13 +243,48 @@ fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, Strin
         plan.remove.len(),
         mib(plan.remove_bytes)
     );
+    println!(
+        "remove {} old NSPs and Eden crash dumps ({:.1} MB) and {} stopped lab containers",
+        plan.stale.len(),
+        mib(plan.stale_bytes),
+        containers.len()
+    );
     if !apply {
         println!("nothing changed; run with --apply to do it");
         return Ok(ExitCode::SUCCESS);
     }
     let freed = tidy::apply(&plan).map_err(|error| error.to_string())?;
+    if !containers.is_empty() {
+        let _ = std::process::Command::new("docker")
+            .arg("rm")
+            .args(&containers)
+            .output();
+    }
     println!("freed {:.1} MB", mib(freed));
     Ok(ExitCode::SUCCESS)
+}
+
+fn stopped_containers() -> Vec<String> {
+    std::process::Command::new("docker")
+        .args([
+            "ps",
+            "--all",
+            "--quiet",
+            "--filter",
+            "name=carafe-lab",
+            "--filter",
+            "status=exited",
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn show_perf(config: &Config, json: bool) -> Result<ExitCode, String> {

@@ -88,6 +88,15 @@ function TitleBar() {
       {waiting > 0 ? <Chip>{t("emulator.waiting", { count: waiting })}</Chip> : null}
       <span className={styles.right}>
         {data?.problem ? <Chip tone="bad">{t("lab.broken")}</Chip> : null}
+        {data?.disk.low ? (
+          <span title={t("lab.lowSpaceHint")}>
+            <Chip tone="warn">
+              {t("lab.lowSpace", {
+                gb: Math.min(...[data.disk.workFreeGb, data.disk.tempFreeGb].filter((gb) => gb !== null)),
+              })}
+            </Chip>
+          </span>
+        ) : null}
         {data && data.keys.complete !== true ? (
           <NavLink to="/emulator" className={styles.chipLink}>
             <Chip tone="warn">{t("lab.noKeys")}</Chip>

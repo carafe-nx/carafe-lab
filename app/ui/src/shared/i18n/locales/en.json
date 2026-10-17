@@ -14,7 +14,9 @@
   },
   "lab": {
     "broken": "lab.json does not read",
-    "noKeys": "No console files"
+    "noKeys": "No console files",
+    "lowSpace": "{{gb}} GB free",
+    "lowSpaceHint": "Little disk space left. Run carafe-lab tidy to see what can go: old NSPs, logs of old runs, Eden crash dumps."
   },
   "emulator": {
     "checking": "Checking the emulator…",

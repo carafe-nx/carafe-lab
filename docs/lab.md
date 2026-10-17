@@ -151,7 +151,10 @@ Each run gets `<work>/runs/<date>/`:
 `carafe-lab tidy` shows what keeping the runs folder small would do and changes nothing; `tidy --apply` does it.
 The 10 newest runs stay whole. Older failed or unfinished runs get their logs compressed into `.gz` next to them,
 their pictures kept. Older runs where nothing failed lose their raw logs and timeline pictures and keep their
-summaries, reports, events, screenshots and `problems.json`, which History reads.
+summaries, reports, events, screenshots and `problems.json`, which History reads. NSPs in `work/nsp` that no game
+of the 10 newest runs uses go, with their build keys, and so do Eden's crash dumps in `%TEMP%\wsl-crashes` (WSL
+writes 10–13 GB per crash) and stopped `carafe-lab` containers. The title bar warns when the work drive or the
+temporary drive has less than 15 GB free.
 
 Together they are the run's dataset: every press in `events.jsonl` has its buttons, hold and time, every screenshot
 step its file, time and outcome, and every check the pictures it compared and its verdict.

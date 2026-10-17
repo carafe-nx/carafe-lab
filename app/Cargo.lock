@@ -1642,6 +1642,7 @@ dependencies = [
  "carafe-core",
  "carafe-folder",
  "carafe-keys",
+ "fs4",
  "lab-core",
  "lab-eden",
  "lab-run",

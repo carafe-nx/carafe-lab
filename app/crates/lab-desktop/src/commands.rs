@@ -62,7 +62,25 @@ pub struct LabStatus {
     pub firmware: FirmwareState,
     /// Who holds the emulator and who waits.
     pub queue: QueueState,
+    /// Free space on the drives the lab fills.
+    pub disk: DiskState,
 }
+
+/// Free space on the drives the lab fills.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct DiskState {
+    /// Gigabytes free on the drive of the work folder; `None` when unknown.
+    pub work_free_gb: Option<u32>,
+    /// Gigabytes free on the drive of the temporary folder, where WSL writes Eden's crash dumps.
+    pub temp_free_gb: Option<u32>,
+    /// One of the drives has less than [`LOW_SPACE_GB`] left.
+    pub low: bool,
+}
+
+/// Free gigabytes under which the title bar warns: about one Eden crash dump and a few NSPs.
+pub const LOW_SPACE_GB: u32 = 15;
 
 /// The console files Lab packs with, without their location.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -688,6 +706,7 @@ fn status(lab: &Lab) -> LabStatus {
                 keys: keys_state(lab),
                 firmware: firmware_state(lab),
                 queue: QueueState::default(),
+                disk: disk_state(None),
             };
         }
     };
@@ -714,6 +733,26 @@ fn status(lab: &Lab) -> LabStatus {
         keys: keys_state(lab),
         firmware: firmware_state(lab),
         queue: Lab::queue(&config.work).state(unix_now()),
+        disk: disk_state(Some(&config.work)),
+    }
+}
+
+fn disk_state(work: Option<&Path>) -> DiskState {
+    let free_gb = |path: &Path| {
+        let existing = path.ancestors().find(|place| place.exists())?;
+        let bytes = fs4::available_space(existing).ok()?;
+        u32::try_from(bytes / (1024 * 1024 * 1024)).ok()
+    };
+    let work_free_gb = work.and_then(free_gb);
+    let temp_free_gb = free_gb(&std::env::temp_dir());
+    let low = [work_free_gb, temp_free_gb]
+        .into_iter()
+        .flatten()
+        .any(|gb| gb < LOW_SPACE_GB);
+    DiskState {
+        work_free_gb,
+        temp_free_gb,
+        low,
     }
 }
 
