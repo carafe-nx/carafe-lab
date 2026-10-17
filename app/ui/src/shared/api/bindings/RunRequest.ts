@@ -27,4 +27,8 @@ ab: string | null,
 /**
  * A new Eden for every launch instead of one for the whole run.
  */
-clean: boolean | null, };
+clean: boolean | null, 
+/**
+ * The scenario every game runs instead of its own: `standard` or a file relative to `lab.json`.
+ */
+scenario: string | null, };

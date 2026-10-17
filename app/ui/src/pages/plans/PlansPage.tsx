@@ -12,6 +12,7 @@ import { Icon } from "@/shared/ui/Icon";
 import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
 import { Toggle } from "@/shared/ui/Toggle";
+import controls from "@/shared/ui/controls.module.css";
 import styles from "@/shared/ui/lab.module.css";
 import { AbPlan } from "./AbPlan";
 import plans from "./PlansPage.module.css";
@@ -40,13 +41,15 @@ export function PlansPage() {
   const { lab, status, runs } = useLab();
   const [error, setError] = useState<string | null>(null);
   const [clean, setClean] = useState(false);
+  const [scenario, setScenario] = useState("");
   const games = lab.data?.games ?? [];
+  const scenarioFiles = [...new Set(games.flatMap((game) => (game.scenarioFile ? [game.scenarioFile] : [])))];
   const sets = Object.entries(lab.data?.sets ?? {});
   const enabled = games.filter((game) => game.enabled).map((game) => game.name);
   const start = (set: string | null, chosen: string[] | null = null, repeat = 1, ab: string | null = null) => {
     setError(null);
     api
-      .startRun(set, null, chosen, repeat, ab, clean)
+      .startRun(set, null, chosen, repeat, ab, clean, scenario || null)
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -58,7 +61,21 @@ export function PlansPage() {
       {lab.error ? <Notice tone="error">{lab.error}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <p className={styles.muted}>{t("plans.hint")}</p>
-      <Toggle id="plan-clean" label={t("plans.clean")} hint={t("plans.cleanHint")} checked={clean} onChange={setClean} />
+      <div className={plans.options}>
+        <Toggle id="plan-clean" label={t("plans.clean")} hint={t("plans.cleanHint")} checked={clean} onChange={setClean} />
+        <label className={controls.field} htmlFor="plan-scenario">
+          <span className={controls.fieldLabel}>{t("plans.scenario")}</span>
+          <select id="plan-scenario" className={controls.select} value={scenario} onChange={(event) => setScenario(event.target.value)}>
+            <option value="">{t("plans.ownScenarios")}</option>
+            <option value="standard">{t("plans.standardScenario")}</option>
+            {scenarioFiles.map((file) => (
+              <option key={file} value={file}>
+                {file}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       <OwnPlan games={games} runs={runs.data ?? []} onStart={(chosen, repeat) => start(null, chosen, repeat)} />
       <AbPlan games={games} onStart={(game, overrides, repeat) => start(null, [game], repeat, overrides)} />
       <div className={plans.grid}>

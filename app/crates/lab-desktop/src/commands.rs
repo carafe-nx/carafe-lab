@@ -194,6 +194,8 @@ pub struct RunRequest {
     pub ab: Option<String>,
     /// A new Eden for every launch instead of one for the whole run.
     pub clean: Option<bool>,
+    /// The scenario every game runs instead of its own: `standard` or a file relative to `lab.json`.
+    pub scenario: Option<String>,
 }
 
 /// Starts `carafe-lab run` in its own process, so closing the window does not stop it, as `request` asks.
@@ -215,6 +217,7 @@ pub async fn start_run(
         repeat,
         ab,
         clean,
+        scenario,
     } = request;
     blocking(move || {
         let work = lab.config()?.work;
@@ -240,6 +243,9 @@ pub async fn start_run(
         }
         if clean == Some(true) {
             args.push("--clean".to_owned());
+        }
+        if let Some(scenario) = scenario.filter(|scenario| !scenario.is_empty()) {
+            args.extend(["--scenario".to_owned(), scenario]);
         }
         args.extend(["--json", "--who", "window"].map(str::to_owned));
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;

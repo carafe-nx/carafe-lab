@@ -72,6 +72,7 @@ struct Lab {
     desktop: PathBuf,
     packer: HacBrewPacker,
     eden: Eden,
+    scenario: Option<Scenario>,
 }
 
 fn main() -> ExitCode {
@@ -130,12 +131,19 @@ fn start(args: Args) -> Result<ExitCode, String> {
     if let Some(image) = &config.eden_image {
         eden = eden.with_image(image.clone());
     }
+    let timeout = args.timeout.unwrap_or(config.timeout);
+    let scenario = args
+        .scenario
+        .as_deref()
+        .map(|choice| plan_scenario(choice, &config_path, timeout))
+        .transpose()?;
     let lab = Lab {
         work: config.work.clone(),
         gpu,
         cpu: config.emulator_cpu,
         lang: args.lang.unwrap_or(config.lang),
-        timeout: args.timeout.unwrap_or(config.timeout),
+        timeout,
+        scenario,
         args,
         keys,
         carafe: carafe_checkout(&config),
@@ -471,7 +479,10 @@ impl Lab {
             folder: game.folder.clone(),
             request,
             label: settings_label(settings),
-            scenario: game.scenario(self.timeout),
+            scenario: self
+                .scenario
+                .clone()
+                .unwrap_or_else(|| game.scenario(self.timeout)),
         }
     }
 
@@ -843,6 +854,22 @@ fn print_step(step: &StepResult) {
         report::step_title(step, Lang::En),
         step.detail
     );
+}
+
+fn plan_scenario(choice: &str, config_path: &Path, timeout: u32) -> Result<Scenario, String> {
+    if choice == "standard" {
+        return Ok(Scenario::standard(timeout));
+    }
+    let file = config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(choice);
+    let text = fs::read_to_string(&file).map_err(|error| format!("{choice}: {error}"))?;
+    let scenario = Scenario::parse(&text).map_err(|error| format!("{choice}: {error}"))?;
+    scenario
+        .check()
+        .map_err(|error| format!("{choice}: {error}"))?;
+    Ok(scenario)
 }
 
 fn local_settings(config_path: &Path) -> Result<LocalSettings, String> {

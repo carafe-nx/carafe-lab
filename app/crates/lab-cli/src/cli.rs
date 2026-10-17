@@ -40,6 +40,7 @@ Options:
                       alternating, --repeat times each; the run ends with a verdict
   --build-only        build the NSPs and stop
   --clean             a new Eden for every launch instead of one for the whole run
+  --scenario <s>      every game runs this scenario: standard, or a file relative to lab.json
   --no-open           do not open the live page in the browser
   --json              print the run as JSON lines, one event each, without the live page;
                       status, games and runs print one JSON document
@@ -126,6 +127,8 @@ pub struct Args {
     pub build_only: bool,
     /// `--clean`.
     pub clean: bool,
+    /// `--scenario`: `standard` or a scenario file relative to `lab.json`.
+    pub scenario: Option<String>,
     /// `--json`.
     pub json: bool,
     /// `--who`.
@@ -191,6 +194,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         hold_ms: 150,
         build_only: false,
         clean: false,
+        scenario: None,
         json: false,
         who: None,
         no_open: false,
@@ -237,6 +241,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                     .collect();
             }
             "--ab" => parsed.ab = Some(value("settings as JSON")?),
+            "--scenario" => parsed.scenario = Some(value("standard or a scenario file")?),
             "--minutes" => parsed.minutes = number(arg, value("minutes")?, "minutes")?,
             "--hold" => {
                 let seconds: f64 = number(arg, value("seconds")?, "seconds")?;
@@ -325,6 +330,14 @@ mod tests {
         assert!(!parsed.build_only);
         assert!(!parsed.clean);
         assert!(parse(&args("run --clean")).unwrap().clean);
+        assert_eq!(parse(&args("run")).unwrap().scenario, None);
+        assert_eq!(
+            parse(&args("run --scenario standard"))
+                .unwrap()
+                .scenario
+                .as_deref(),
+            Some("standard")
+        );
     }
 
     #[test]

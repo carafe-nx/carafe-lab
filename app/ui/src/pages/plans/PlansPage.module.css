@@ -4,6 +4,17 @@
   gap: 16px;
 }
 
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 40px;
+}
+
+.options > label:last-child {
+  min-width: 260px;
+}
+
 .games {
   margin: 0;
   padding-left: 18px;

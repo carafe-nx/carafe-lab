@@ -23,8 +23,9 @@ export const api = {
     repeat = 1,
     ab: string | null = null,
     clean = false,
+    scenario: string | null = null,
   ) => {
-    const request: RunRequest = { set, only, games, repeat, ab, clean };
+    const request: RunRequest = { set, only, games, repeat, ab, clean, scenario };
     return invoke<void>("start_run", { request });
   },
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),
