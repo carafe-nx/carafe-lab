@@ -12,13 +12,12 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
-- [ ] **`feature` The command line answers in JSON on top of the crates, for the window and for Claude**
-- [ ] `feature` A queue of runs in its own process: closing the window does not stop a run, a second session waits
+- [ ] **`feature` A queue of runs in its own process: closing the window does not stop a run, a second session waits**
+- [ ] **`feature` Tauri window in Carafe's style: Library, Plans, Run, History, Emulator, Scenarios**
 - [ ] `feature` One Eden for the whole run, set up like the console (4 cores, 4 GB, docked, firmware from Carafe)
 - [ ] `feature` Eden control channel (a patch): load and stop a game, press buttons, take screenshots
 - [ ] `feature` Watchdog: Eden restarts after a crash, a hang or a game that does not close; "clean start" switch
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
-- [ ] `feature` Tauri window in Carafe's style: Library, Plans, Run, History, Emulator, Scenarios
 - [ ] `feature` Loader: emulator status in the title bar, start-up stages on the Run screen, a fix for each failing stage
 - [ ] `feature` Library: add a game by dropping its folder; tags, notes, last result, link to a ROADMAP item
 - [ ] `feature` Plans: games × scenario × repeats, with launch count and time
@@ -106,6 +105,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` The command line answers in JSON: `status`, `games`, `runs`, `stop`, `run --json`; every run keeps `summary.json` and `events.jsonl`
 - [x] `feature` The repository `carafe-lab` replaces the bench: Carafe's layout, crates `lab-core`, `lab-run`, `lab-eden` and `lab-cli`, Eden and Carafe as submodules, `lab.json` with scenario files in `scenarios/`
 - [x] `feature` The image builds Mesa for the PC's graphics card itself (`docker/mesa-d3d12`) instead of taking a tar
 - [x] `feature` The bench runs on the WSL GPU by default; `edenImage` and `edenSettings` in `bench.json` choose another Eden image and change Eden's settings without a patch

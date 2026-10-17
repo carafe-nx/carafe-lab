@@ -331,6 +331,37 @@ impl Config {
             })
             .collect())
     }
+
+    /// Returns the Carafe checkout the lab packs with: `carafe` as it is when absolute, relative to `repository`
+    /// otherwise, or the `external/carafe` submodule of `repository`.
+    #[must_use]
+    pub fn carafe_checkout(&self, repository: &Path) -> PathBuf {
+        match &self.carafe {
+            Some(path) if path.is_absolute() => tidy(path),
+            Some(path) => tidy(&repository.join(path)),
+            None => tidy(&repository.join("external").join("carafe")),
+        }
+    }
+}
+
+/// Returns `path` with its `.` and `..` parts resolved by name, without asking the file system.
+#[must_use]
+pub fn tidy(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut tidied = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !tidied.pop() {
+                    tidied.push(part);
+                }
+            }
+            other => tidied.push(other),
+        }
+    }
+    tidied
 }
 
 impl Game {
@@ -543,6 +574,21 @@ mod tests {
             config(scenario, ""),
             Err(ConfigError::Scenario(..))
         ));
+    }
+
+    #[test]
+    fn the_carafe_checkout_is_found_beside_the_repository() {
+        let repository = Path::new("D:\\Lab\\app\\crates\\lab-cli\\..\\..\\..");
+        let beside = Config::parse(r#"{"work": "x", "carafe": "../carafe"}"#).unwrap();
+        assert_eq!(
+            beside.carafe_checkout(repository),
+            PathBuf::from("D:\\carafe")
+        );
+        let submodule = Config::parse(r#"{"work": "x"}"#).unwrap();
+        assert_eq!(
+            submodule.carafe_checkout(repository),
+            PathBuf::from("D:\\Lab\\external\\carafe")
+        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! A whole run: builds every planned game with Carafe's packer, runs its scenario in the emulator, writes
 //! `report.json` and `report.html` after every game and tells the front end what happens as [`Event`]s.
 
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 
@@ -13,7 +14,9 @@ use lab_core::lang::Lang;
 use lab_core::redact::redact;
 use lab_core::scenario::Scenario;
 use serde::Serialize;
+use ts_rs::TS;
 
+use crate::history::{EVENTS_FILE, RunSummary, SUMMARY_FILE};
 use crate::report::{self, BuildOutcome, GameReport, RunReport};
 use crate::run::{Clock, Emulator, LaunchRecord, Outcome, Runner, StepResult};
 
@@ -35,9 +38,18 @@ pub struct Planned {
 }
 
 /// What the run is doing, for the window, the live page and `--json`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase", tag = "event")]
+#[ts(export)]
 pub enum Event {
+    /// Another run holds the emulator; this one waits for its turn.
+    #[serde(rename_all = "camelCase")]
+    Waiting {
+        /// Who holds the emulator.
+        holder: String,
+        /// Runs ahead of this one, the holder's included.
+        ahead: usize,
+    },
     /// The run started; its files go into `dir`.
     #[serde(rename_all = "camelCase")]
     RunStarted {
@@ -163,6 +175,17 @@ impl Engine<'_> {
             games: Vec::new(),
         };
         let total = planned.len();
+        let names: Vec<String> = planned.iter().map(|game| game.name.clone()).collect();
+        let mut events = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(run_dir.join(EVENTS_FILE))
+            .ok();
+        let mut on_event = |event: &Event| {
+            record_event(events.as_mut(), event);
+            on_event(event);
+        };
+        write_summary(&run_dir, &report, &names, false)?;
         on_event(&Event::RunStarted {
             dir: run_dir.display().to_string(),
             games: total,
@@ -178,7 +201,7 @@ impl Engine<'_> {
                 index: index + 1,
                 name: game.name.clone(),
             });
-            let entry = self.one_game(&game, &run_dir, &nsp_dir, clock, on_event);
+            let entry = self.one_game(&game, &run_dir, &nsp_dir, clock, &mut on_event);
             on_event(&Event::GameFinished {
                 name: entry.name.clone(),
                 outcome: entry.outcome(),
@@ -186,8 +209,10 @@ impl Engine<'_> {
             report.games.push(entry);
             report.seconds = clock.now().as_secs_f64();
             write_report(&run_dir, &report, self.lang)?;
+            write_summary(&run_dir, &report, &names, false)?;
         }
         write_report(&run_dir, &report, self.lang)?;
+        write_summary(&run_dir, &report, &names, true)?;
         let [passed, warned, console, failed] = report.counts();
         on_event(&Event::RunFinished {
             report: run_dir.join("report.html").display().to_string(),
@@ -368,6 +393,23 @@ fn excerpt(game_dir: &Path, launches: &[LaunchRecord]) -> Vec<String> {
         lines.extend(report::log_excerpt(&overlay, &runtime));
     }
     lines
+}
+
+fn record_event(file: Option<&mut File>, event: &Event) {
+    if let (Some(file), Ok(line)) = (file, serde_json::to_string(event)) {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn write_summary(
+    run_dir: &Path,
+    report: &RunReport,
+    planned: &[String],
+    finished: bool,
+) -> Result<(), String> {
+    let summary = RunSummary::of(report, planned, finished);
+    let json = serde_json::to_string_pretty(&summary).map_err(|error| error.to_string())?;
+    fs::write(run_dir.join(SUMMARY_FILE), json).map_err(|error| error.to_string())
 }
 
 fn write_report(run_dir: &Path, report: &RunReport, lang: Lang) -> Result<(), String> {

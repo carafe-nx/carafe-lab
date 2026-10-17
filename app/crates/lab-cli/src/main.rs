@@ -24,16 +24,21 @@ use lab_core::lang::Lang;
 use lab_core::matrix;
 use lab_core::probes::{self, ProbeRun};
 use lab_core::time::Utc;
+use lab_core::view::LabView;
 use lab_eden::Eden;
 use lab_run::engine::{Engine, Event, Planned};
+use lab_run::history;
+use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
 use lab_run::report;
 use lab_run::run::{Clock, Outcome, StepResult};
+use serde::Serialize;
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
 const DESKTOP: &str = "app/crates/carafe-desktop";
 const PREFERENCES: &str = "app.carafe.builder/preferences.json";
 const PAGE_IDLE: Duration = Duration::from_secs(60);
 const PAGE_LONGEST: Duration = Duration::from_secs(30 * 60);
+const QUEUE_POLL: Duration = Duration::from_secs(2);
 const RUNTIME_VERSION: &str = match option_env!("CARAFE_RUNTIME_VERSION") {
     Some(version) => version,
     None => "dev",
@@ -90,8 +95,15 @@ fn start(args: Args) -> Result<ExitCode, String> {
     let config_path = args
         .config
         .clone()
-        .unwrap_or_else(|| Path::new(REPOSITORY).join(config::CONFIG_FILE));
+        .unwrap_or_else(|| repository().join(config::CONFIG_FILE));
     let config = Config::load(&config_path).map_err(|error| error.to_string())?;
+    match &args.command {
+        Command::Status => return show_status(&config, &config_path, args.json),
+        Command::Games => return show_games(&config, args.json),
+        Command::Runs => return show_runs(&config, args.json),
+        Command::Stop { id } => return stop_run(&config, id.as_deref()),
+        _ => {}
+    }
     let keys = match &args.keys {
         Some(keys) => keys.clone(),
         None => keys_from_carafe()?,
@@ -132,8 +144,154 @@ fn start(args: Args) -> Result<ExitCode, String> {
         }
         Command::Run { set } => lab.run_games(&config, set.as_deref()),
         Command::Probes => lab.run_probes(),
-        Command::Help => Ok(ExitCode::SUCCESS),
+        Command::Help | Command::Status | Command::Games | Command::Runs | Command::Stop { .. } => {
+            Ok(ExitCode::SUCCESS)
+        }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Status {
+    config: String,
+    work: String,
+    carafe: String,
+    carafe_commit: Option<String>,
+    runtime_built: bool,
+    queue: QueueState,
+}
+
+fn show_status(config: &Config, config_path: &Path, json: bool) -> Result<ExitCode, String> {
+    let carafe = carafe_checkout(config);
+    let status = Status {
+        config: config_path.display().to_string(),
+        work: config.work.display().to_string(),
+        carafe_commit: git_commit(&carafe),
+        runtime_built: carafe
+            .join(DESKTOP)
+            .join("resources")
+            .join("carafe-runtime.bin")
+            .is_file(),
+        carafe: carafe.display().to_string(),
+        queue: queue_of(config).state(unix_now()),
+    };
+    if json {
+        print_json(&status)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    println!("lab file: {}", status.config);
+    println!("work: {}", status.work);
+    println!(
+        "carafe: {} at {}{}",
+        status.carafe,
+        status
+            .carafe_commit
+            .as_deref()
+            .unwrap_or("an unknown commit"),
+        if status.runtime_built {
+            ""
+        } else {
+            ", runtime not built"
+        }
+    );
+    match &status.queue.holder {
+        Some(holder) => println!(
+            "emulator: held by {} running {} (queue id {})",
+            holder.who, holder.what, holder.id
+        ),
+        None => println!("emulator: free"),
+    }
+    for (place, entry) in status.queue.waiting.iter().enumerate() {
+        println!(
+            "  waiting {}: {} running {} (queue id {})",
+            place + 1,
+            entry.who,
+            entry.what,
+            entry.id
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn show_games(config: &Config, json: bool) -> Result<ExitCode, String> {
+    let view = LabView::of(config);
+    if json {
+        print_json(&view)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    for game in &view.games {
+        let state = if game.enabled { "on " } else { "off" };
+        let sets = if game.sets.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", game.sets.join(", "))
+        };
+        println!(
+            "{state} {}  {} steps  {}{sets}",
+            game.name,
+            game.scenario.steps.len(),
+            game.folder
+        );
+    }
+    for (set, names) in &view.sets {
+        println!("set {set}: {}", names.join(", "));
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn show_runs(config: &Config, json: bool) -> Result<ExitCode, String> {
+    let runs = history::list(&config.work.join("runs"));
+    if json {
+        print_json(&runs)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    for run in &runs {
+        let [passed, warned, console, failed] = run.counts();
+        let state = if run.finished { "" } else { "  (not finished)" };
+        println!(
+            "{}  {}/{} games: {passed} passed, {warned} warned, {console} console, {failed} failed{state}",
+            run.dir,
+            run.games.len(),
+            run.planned.len()
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn stop_run(config: &Config, id: Option<&str>) -> Result<ExitCode, String> {
+    let queue = queue_of(config);
+    let id = match id {
+        Some(id) => id.to_owned(),
+        None => queue
+            .state(unix_now())
+            .holder
+            .map(|holder| holder.id)
+            .ok_or("no run holds the emulator")?,
+    };
+    queue.request_stop(&id)?;
+    println!("asked the run {id} to stop");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn print_json(value: &impl Serialize) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+    println!("{text}");
+    Ok(())
+}
+
+fn queue_of(config: &Config) -> Queue {
+    Queue::new(config.work.join("queue"))
+}
+
+fn git_commit(checkout: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(checkout)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 impl Lab {
@@ -169,16 +327,20 @@ impl Lab {
                 }
             })
             .collect();
-        self.execute(planned)
+        let what = match (set, &self.args.only) {
+            (_, Some(only)) => only.clone(),
+            (Some(set), None) => set.to_owned(),
+            (None, None) => "enabled games".to_owned(),
+        };
+        self.execute(planned, &what)
     }
 
     fn run_probes(mut self) -> Result<ExitCode, String> {
-        let builds = self.args.probes_dir.clone().unwrap_or_else(|| {
-            Path::new(REPOSITORY)
-                .join("tools")
-                .join("probes")
-                .join("build")
-        });
+        let builds = self
+            .args
+            .probes_dir
+            .clone()
+            .unwrap_or_else(|| repository().join("tools").join("probes").join("build"));
         let mut combinations = matrix::pairwise();
         if self.args.random > 0 {
             let seed = self.args.seed.unwrap_or_else(|| now().date_number());
@@ -201,7 +363,7 @@ impl Lab {
             let prepared = prepare_probe(&builds, &folder, run);
             planned.push(probe_plan(run, folder, prepared));
         }
-        self.execute(planned)
+        self.execute(planned, "probes")
     }
 
     fn wanted(&self, name: &str) -> bool {
@@ -211,7 +373,24 @@ impl Lab {
             .is_none_or(|only| name.eq_ignore_ascii_case(only))
     }
 
-    fn execute(&mut self, planned: Vec<Planned>) -> Result<ExitCode, String> {
+    fn execute(&mut self, planned: Vec<Planned>, what: &str) -> Result<ExitCode, String> {
+        let json = self.args.json;
+        let stop = CancelToken::new();
+        let holding = if self.args.build_only {
+            None
+        } else {
+            let who = self.args.who.as_deref().unwrap_or("command line");
+            let queue = Queue::new(self.work.join("queue"));
+            match wait_for_emulator(&queue, who, what, json)? {
+                Some(entry) => Some(Holding::start(queue, entry, stop.clone())),
+                None => {
+                    if !json {
+                        println!("stopped while waiting for the emulator");
+                    }
+                    return Ok(ExitCode::from(4));
+                }
+            }
+        };
         let started_at = now();
         let clock = RealClock(Instant::now());
         let emulator_label = if self.args.build_only {
@@ -224,7 +403,6 @@ impl Lab {
                 self.cpu.name()
             )
         };
-        let json = self.args.json;
         let lang = self.lang;
         let total = planned.len();
         let live = if json {
@@ -238,9 +416,16 @@ impl Lab {
             }
             Some(live)
         };
-        let stop = live
-            .as_ref()
-            .map_or_else(CancelToken::new, Live::stop_token);
+        if let Some(live) = &live {
+            let page = live.stop_token();
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !page.is_cancelled() && !stop.is_cancelled() {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                stop.cancel();
+            });
+        }
         let mut engine = Engine {
             emulator: &mut self.eden,
             packer: &self.packer,
@@ -257,6 +442,9 @@ impl Lab {
             stop,
         };
         let mut on_event = |event: &Event| {
+            if let (Event::RunStarted { dir, .. }, Some(holding)) = (event, &holding) {
+                holding.set_run_dir(dir);
+            }
             if json {
                 if let Ok(line) = serde_json::to_string(event) {
                     println!("{line}");
@@ -275,6 +463,7 @@ impl Lab {
             &clock,
             &mut on_event,
         )?;
+        drop(holding);
         if let Some(live) = live {
             live.finish();
             println!(
@@ -292,8 +481,64 @@ impl Lab {
     }
 }
 
+/// Puts the run in the emulator's queue and waits for its turn.
+///
+/// # Returns
+///
+/// The run's entry, which now holds the emulator, or `None` if someone asked the run to stop while it waited.
+fn wait_for_emulator(
+    queue: &Queue,
+    who: &str,
+    what: &str,
+    json: bool,
+) -> Result<Option<QueueEntry>, String> {
+    let mut entry = queue.join(who, what, std::process::id(), unix_now())?;
+    let mut shown = None;
+    loop {
+        if queue.stop_requested(&entry.id) {
+            queue.leave(&entry);
+            return Ok(None);
+        }
+        match queue.try_take(&mut entry, unix_now()) {
+            Ok(Turn::Taken) => return Ok(Some(entry)),
+            Ok(Turn::Wait { holder, ahead }) => {
+                if shown.as_ref() != Some(&(holder.clone(), ahead)) {
+                    let event = Event::Waiting {
+                        holder: holder.clone(),
+                        ahead,
+                    };
+                    if json {
+                        print_json_line(&event);
+                    } else {
+                        print_event(&event, 0);
+                    }
+                    shown = Some((holder, ahead));
+                }
+            }
+            Err(error) => {
+                queue.leave(&entry);
+                return Err(error);
+            }
+        }
+        std::thread::sleep(QUEUE_POLL);
+        queue.beat_waiting(&mut entry, unix_now())?;
+    }
+}
+
+fn print_json_line(value: &impl Serialize) {
+    if let Ok(line) = serde_json::to_string(value) {
+        println!("{line}");
+    }
+}
+
 fn print_event(event: &Event, total: usize) {
     match event {
+        Event::Waiting { holder, ahead } if holder.is_empty() => {
+            println!("waiting for the emulator: {ahead} runs ahead");
+        }
+        Event::Waiting { holder, ahead } => {
+            println!("waiting for the emulator: {holder} holds it, {ahead} runs ahead");
+        }
         Event::GameStarted { index, name } => println!("[{index}/{total}] {name}"),
         Event::BuildStage { stage } => println!("  {stage}"),
         Event::Built {
@@ -325,15 +570,12 @@ fn show_on_page(live: &Live, event: &Event, lang: Lang) {
     }
 }
 
-/// Returns the Carafe checkout the lab packs with: `carafe` in `lab.json`, relative to the repository, or the
-/// `external/carafe` submodule.
 fn carafe_checkout(config: &Config) -> PathBuf {
-    let repository = Path::new(REPOSITORY);
-    match &config.carafe {
-        Some(path) if path.is_absolute() => path.clone(),
-        Some(path) => repository.join(path),
-        None => repository.join("external").join("carafe"),
-    }
+    config.carafe_checkout(&repository())
+}
+
+fn repository() -> PathBuf {
+    config::tidy(Path::new(REPOSITORY))
 }
 
 fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> Planned {

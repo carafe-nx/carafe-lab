@@ -3,10 +3,12 @@
 use carafe_core::settings::SwitchButton;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use ts_rs::TS;
 
 /// A point in the launch the lab can wait for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum Milestone {
     /// Wine's virtual memory is ready.
     Wine,
@@ -19,8 +21,9 @@ pub enum Milestone {
 }
 
 /// One step of a scenario.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "step", rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
 pub enum Step {
     /// Starts the game in the emulator.
     Launch,
@@ -90,8 +93,9 @@ fn default_close_timeout() -> u32 {
 }
 
 /// A scenario: steps in order.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
 pub struct Scenario {
     /// The steps.
     pub steps: Vec<Step>,

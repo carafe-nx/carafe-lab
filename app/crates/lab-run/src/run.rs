@@ -6,8 +6,9 @@ use std::time::Duration;
 use carafe_core::TitleId;
 use carafe_core::cancel::CancelToken;
 use carafe_core::settings::{InputSettings, SwitchButton};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use ts_rs::TS;
 
 use lab_core::input_check::{self, PressCheck};
 use lab_core::milestones::{Exit, Launch, Stage};
@@ -146,8 +147,9 @@ pub trait Clock {
 }
 
 /// What a step found.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum Outcome {
     /// It went as expected.
     Pass,
@@ -162,8 +164,9 @@ pub enum Outcome {
 }
 
 /// What a step found, as written into the report.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct StepResult {
     /// The step.
     pub step: Step,

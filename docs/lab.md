@@ -48,23 +48,26 @@ is cut out of every message, log and report Lab writes.
 
 ## Games
 
-`cargo run --release -p lab-cli -- run <folder>` takes every folder inside `<folder>` as a game, the way the build wizard would: the
-largest game `.exe`, its product name, default settings. A file `<game folder>.lab.json` next to the game folder
-changes that; every field is optional:
+Every game is an entry of `games` in `lab.json`. Only `name` and `folder` are needed; the rest is taken the way the
+build wizard would take it: the largest game `.exe`, its product name, default settings.
 
 ```json
 {
+  "name": "Game",
+  "folder": "D:\\Games\\Game",
+  "enabled": true,
   "executable": "bin/game.exe",
   "title": "Game",
   "arch": "x86",
   "arguments": ["-windowed"],
   "settings": { "system": { "cpu": "box64" }, "input": { "mode": "keyboardMouse" } },
-  "scenario": { "steps": [ { "step": "launch" }, { "step": "waitFor", "milestone": "firstFrame", "timeout": 600 } ] },
-  "skip": false
+  "scenario": "scenarios/game.json"
 }
 ```
 
-`settings` is merged over the defaults in the shape of `carafe.json`'s `settings`. A game always gets the same
+`scenario` is a file relative to `lab.json` or the steps themselves: `{ "steps": [ … ] }`. `sets` names lists of
+games; `run <set>` runs a set's games even when they are disabled. `settings` is merged over the defaults in the shape
+of `carafe.json`'s `settings`. A game always gets the same
 Title ID from its folder name, so its data in the emulator is found again; its save data is removed before each run.
 
 Without a scenario a game runs the standard one: launch and wait for the first frame, press A and look for a change
@@ -101,14 +104,30 @@ save data is still there, close it.
 
 ## Results
 
-Each run gets `$CARAFE_BENCH/runs/<date>/`:
+Each run gets `<work>/runs/<date>/`:
 
 - `report.html` — games or probes, every step, screenshots, the button table of the input probe, the log lines that
   matter, what the emulator lacks;
 - `report.json` — the same for tools and for comparing runs;
+- `summary.json` — the run in short, rewritten after every game; `finished` is `false` while it goes;
+- `events.jsonl` — every event of the run, one JSON line each, the same as `run --json` prints;
 - a folder per game: screenshots and the logs of every launch (`launch-1/`, `launch-2/`).
 
-The exit code is 0 when nothing failed, 3 when something did.
+The exit code is 0 when nothing failed, 3 when something did, 4 when the run was stopped while it waited for the
+emulator.
+
+## The queue
+
+One run holds the emulator at a time; the others wait in `<work>/queue/` in the order they came, whoever started them:
+the window, Claude or a terminal. `--who <name>` names the run in the queue.
+
+- `status` — who holds the emulator and who waits, the Carafe checkout and its commit;
+- `games` — the games and sets of `lab.json`;
+- `runs` — past runs and the one going, newest first;
+- `stop [id]` — stops the run holding the emulator between steps, or takes a waiting run out of the queue by its id.
+
+`--json` makes `status`, `games` and `runs` print one JSON document and `run` print its events as JSON lines. A run
+whose process dies frees the emulator after 30 seconds.
 
 A step marked "for the console" failed because the emulator's log shows it does not implement something the
 runtime needs; check that game on the console.

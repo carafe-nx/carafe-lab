@@ -15,3 +15,4 @@ pub mod probes;
 pub mod redact;
 pub mod scenario;
 pub mod time;
+pub mod view;

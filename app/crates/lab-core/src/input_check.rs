@@ -4,14 +4,16 @@ use std::collections::BTreeSet;
 
 use carafe_core::settings::{InputMode, InputSettings, MOUSE_CODE_FIRST, SwitchButton};
 use serde::Serialize;
+use ts_rs::TS;
 
 const GAP_SECONDS: f64 = 0.6;
 const AXIS_THRESHOLD: i32 = 8000;
 const TRIGGER_THRESHOLD: u32 = 64;
 
 /// One thing the game can receive.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, TS)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "name")]
+#[ts(export)]
 pub enum Signal {
     /// An Xbox button, such as `A` or `Start`.
     Pad(String),
@@ -30,8 +32,9 @@ pub enum Signal {
 }
 
 /// What one button press was expected to give and what the probe saw.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct PressCheck {
     /// The Switch button.
     pub button: SwitchButton,
