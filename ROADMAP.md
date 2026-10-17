@@ -48,7 +48,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` Only changes larger than the spread between repeats are flagged
 - [ ] `feature` Thresholds: a game slower beyond its threshold (20 % by default) fails
 - [ ] `feature` A regression between two versions starts a bisection over Carafe's commits
-- [ ] `feature` Games that fail only sometimes get a rate ("hangs in 3 of 10")
 - [ ] `feature` Two runs compared, screenshots included
 
 ### 4. Scenarios and A/B
@@ -103,6 +102,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Games that fail only sometimes get a rate in the library ("failed 2 of 10"), build-only runs left out
 - [x] `feature` Every run stamped with the Carafe commit, runtime hash, lab commit and Eden image; settings per game; "run these games again"
 - [x] `feature` Plans: games ticked by hand × repeats, with launch count and time from past runs; `--games` and `--repeat` on the command line
 - [x] `feature` Library: a game is added by dropping its folder or with a button; each game shows its last result

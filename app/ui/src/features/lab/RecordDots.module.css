@@ -1,0 +1,41 @@
+.record {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--track);
+}
+
+.dots i.ok {
+  background: var(--ok);
+}
+
+.dots i.warn {
+  background: var(--warn);
+}
+
+.dots i.acc {
+  background: var(--accent);
+}
+
+.dots i.bad {
+  background: var(--danger);
+}
+
+.flaky {
+  color: var(--warn);
+  font-weight: 600;
+}

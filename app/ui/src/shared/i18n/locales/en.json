@@ -50,6 +50,7 @@
     "ownScenario_other": "its own, {{count}} steps",
     "standardScenario": "standard",
     "last": "Last result",
+    "record": "Recent runs",
     "run": "Run",
     "openFolder": "Game folder",
     "openRun": "To the run",
@@ -203,6 +204,10 @@
     "reused": "NSP already built",
     "built": "NSP built",
     "failed": "not built"
+  },
+  "record": {
+    "clean": "no failures in the last {{count}}",
+    "failed": "failed {{failed}} of {{total}}"
   },
   "who": {
     "window": "the window",

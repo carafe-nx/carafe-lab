@@ -34,12 +34,27 @@ export function lastResult(
   game: string,
 ): { run: RunSummary; outcome: Outcome; seconds: number } | null {
   for (const run of runs) {
-    const found = run.games.find((entry) => entry.name.toLowerCase() === game.toLowerCase());
+    const found = run.games.find(
+      (entry) => entry.name.toLowerCase() === game.toLowerCase() && entry.outcome !== "skip",
+    );
     if (found) {
       return { run, outcome: found.outcome, seconds: found.seconds };
     }
   }
   return null;
+}
+
+export function gameRecord(runs: RunSummary[], game: string, limit = 10): Outcome[] {
+  const outcomes: Outcome[] = [];
+  for (const run of runs) {
+    for (const entry of run.games) {
+      const counts = entry.name.toLowerCase() === game.toLowerCase() && entry.outcome !== "skip";
+      if (counts && outcomes.length < limit) {
+        outcomes.push(entry.outcome);
+      }
+    }
+  }
+  return outcomes;
 }
 
 export function lastSeconds(runs: RunSummary[], game: string): number | null {

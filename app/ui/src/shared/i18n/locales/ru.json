@@ -58,6 +58,7 @@
     "ownScenario_other": "свой, {{count}} шага",
     "standardScenario": "стандартный",
     "last": "Последний итог",
+    "record": "Последние прогоны",
     "run": "Запустить",
     "openFolder": "Папка игры",
     "openRun": "К прогону",
@@ -221,6 +222,10 @@
     "reused": "NSP уже собран",
     "built": "NSP собран",
     "failed": "не собрался"
+  },
+  "record": {
+    "clean": "без отказов в последних: {{count}}",
+    "failed": "не прошла в {{failed}} из {{total}}"
   },
   "who": {
     "window": "окно",

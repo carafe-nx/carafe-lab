@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { useLab } from "@/features/lab/LabProvider";
-import { lastResult, outcomeTone } from "@/features/lab/outcome";
+import { gameRecord, lastResult, outcomeTone } from "@/features/lab/outcome";
+import { RecordDots } from "@/features/lab/RecordDots";
 import { settingsSummary } from "@/features/lab/settingsSummary";
 import { StepLine } from "@/features/lab/StepLine";
 import type { GameView } from "@/shared/api/bindings/GameView";
@@ -182,6 +183,14 @@ function GameCard({ game, runs }: { game: GameView; runs: RunSummary[] }) {
             t("library.neverRun")
           )}
         </dd>
+        {last ? (
+          <>
+            <dt>{t("library.record")}</dt>
+            <dd>
+              <RecordDots outcomes={gameRecord(runs, game.name)} />
+            </dd>
+          </>
+        ) : null}
       </dl>
       {error ? <Notice tone="error">{error}</Notice> : null}
       <div className={styles.actions}>
