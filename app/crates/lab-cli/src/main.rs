@@ -527,6 +527,7 @@ impl Lab {
 
     fn screen(mut self, config: &Config, file: &Path) -> Result<ExitCode, String> {
         self.require_running(config)?;
+        self.eden.join_running();
         self.eden
             .screenshot(file)
             .map_err(|error| error.to_string())?;

@@ -1,9 +1,10 @@
 //! The Eden emulator in a Docker container: the [`Emulator`] the lab runs games in.
 //!
 //! The container runs Eden's Qt front end full screen on Xvfb. Input goes in as key presses of Eden's default
-//! keyboard layout, through the control channel when one Eden serves the run and through `xdotool` otherwise;
-//! pictures come out through ImageMagick's `import`, and Eden's data folder
-//! is a folder on the host, so logs and the SD card are read directly. `nand`, which holds the save data, lives in
+//! keyboard layout, through the control channel when one Eden serves the run and through `xdotool` otherwise.
+//! Pictures are the game's own frame, which Eden saves on the channel's `screenshot`, or ImageMagick's `import` of
+//! the screen without the channel. Eden's data folder is a folder on the host, so logs and the SD card are read
+//! directly. `nand`, which holds the save data, lives in
 //! a Docker volume instead: Eden checks the save's files thousands of times while a game starts, and through the
 //! host folder each check takes milliseconds. It is copied there before every launch and back when the lab
 //! reads the save.
@@ -39,6 +40,8 @@ const MEMORY_LIMIT: &str = "6g";
 const CPU_LIMIT: &str = "4";
 const NAND_VOLUME: &str = "carafe-lab-eden-nand";
 const SCREEN_FILE: &str = "lab-screen.png";
+const FRAME_FILE: &str = "lab-frame.png";
+const FRAME_WAIT: Duration = Duration::from_secs(5);
 const CONTAINER_END_FILE: &str = "container-end.log";
 const SESSION_FILE: &str = "session.log";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -638,6 +641,36 @@ impl Eden {
         Ok(())
     }
 
+    fn frame_shot(&mut self) -> Result<PathBuf, EmulatorError> {
+        let seen = self.session.as_ref().map_or(0, |session| session.seen);
+        let outside = self.user_dir.join("screenshots").join(FRAME_FILE);
+        let _ = fs::remove_file(&outside);
+        self.send(&format!("screenshot /work/user/screenshots/{FRAME_FILE}"))?;
+        let replies = self.wait_for_reply(seen, FRAME_WAIT, |text| {
+            text.starts_with("capturing") || text.starts_with("error")
+        })?;
+        if let Some(reply) = replies.iter().find(|reply| reply.text.starts_with("error")) {
+            return Err(EmulatorError::Control(format!(
+                "Eden took no picture: {}",
+                reply.text
+            )));
+        }
+        let deadline = Instant::now() + FRAME_WAIT;
+        let mut last_size = 0;
+        while Instant::now() < deadline {
+            let size = fs::metadata(&outside).map_or(0, |metadata| metadata.len());
+            if size > 0 && size == last_size {
+                return Ok(outside);
+            }
+            last_size = size;
+            thread::sleep(Duration::from_millis(200));
+        }
+        Err(EmulatorError::Control(format!(
+            "Eden wrote no picture in {} s",
+            FRAME_WAIT.as_secs()
+        )))
+    }
+
     fn hung(&self) -> Option<String> {
         self.session.as_ref()?;
         let from = self.perf_from?;
@@ -855,9 +888,19 @@ impl Emulator for Eden {
     }
 
     fn screenshot(&mut self, dest: &Path) -> Result<(), EmulatorError> {
-        let inside = format!("/work/user/screenshots/{SCREEN_FILE}");
-        self.exec(&format!("import -window root -display :1 png24:{inside}"))?;
-        let outside = self.user_dir.join("screenshots").join(SCREEN_FILE);
+        let frame = if self.session.is_some() {
+            self.frame_shot().ok()
+        } else {
+            None
+        };
+        let outside = match frame {
+            Some(file) => file,
+            None => {
+                let inside = format!("/work/user/screenshots/{SCREEN_FILE}");
+                self.exec(&format!("import -window root -display :1 png24:{inside}"))?;
+                self.user_dir.join("screenshots").join(SCREEN_FILE)
+            }
+        };
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(io)?;
         }

@@ -16,7 +16,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 - [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
-- [ ] `feature` Exact uncompressed screenshots for checks from Eden through the control channel
 - [ ] `feature` Video turned down or off during performance runs
 - [ ] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)
 
@@ -95,6 +94,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Screenshots are the game's own frame from Eden through the control channel, not a capture of the X screen
 - [x] `feature` Watchdog: an Eden silent for 45 s during a game is replaced; "clean start" runs a new Eden per launch
 - [x] `feature` Button presses through the control channel instead of xdotool
 - [x] `feature` The one Eden set up like the console: 4 cores, 4 GB, docked; firmware optional, chosen in the window
