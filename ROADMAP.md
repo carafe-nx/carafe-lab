@@ -1,7 +1,8 @@
 # Roadmap
 
-What's planned and what's done for Carafe Lab, without dates: the plan of [decision 3](docs/decisions/0003-carafe-lab.md)
-first, then the emulator's and the games' own bugs. Open items are in priority order; bold ones are in progress.
+What's planned and what's done for Carafe Lab, without dates: the app's plan of
+[decision 3](docs/decisions/0003-carafe-lab.md) in sections 1–5, then research and the emulator's and the games' own
+bugs, which are not the app. Open items are in priority order; bold ones are in progress.
 
 - `bug` — Lab or its Eden is broken
 - `game` — a specific game misbehaves in Lab
@@ -12,8 +13,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 1. The window and a run of many games
 
-- [ ] `bug` The input check still passes on OpenTTD: its title jumps between `first-frame` and `after-a` in every run
-- [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
+- [ ] `feature` Live video of the game in the window: the noVNC client library embedded as a canvas, not a separate page
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 
 ### 2. Logs
@@ -26,10 +26,10 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 3. Versions and history
 
+- [ ] **`feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats**
+- [ ] **`feature` Only changes larger than the spread between repeats are flagged**
+- [ ] **`feature` Thresholds: a game slower beyond its threshold (20 % by default) fails**
 - [ ] `feature` The runtime of every release built once from its tag and kept; plans can run "main against the last release"
-- [ ] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats
-- [ ] `feature` Only changes larger than the spread between repeats are flagged
-- [ ] `feature` Thresholds: a game slower beyond its threshold (20 % by default) fails
 - [ ] `feature` A regression between two versions starts a bisection over Carafe's commits
 
 ### 4. Scenarios and A/B
@@ -48,8 +48,9 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` "Rebuild with the current runtime" for a ready NSP whose game folder is in the library
 - [ ] `feature` The lab builds NSPs and a "check on the console" list; console verdicts go into the same history
 
-### Later
+### Research and later ideas (not the app)
 
+- [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
 - [ ] `research` Eden on Windows ARM64 with our patches and Vulkan on the Adreno: build, run OpenTTD and NFSU, compare with Docker
 - [ ] `feature` If Eden on Windows wins: video through Windows screen capture and the hardware H.264 encoder
 - [ ] `research` Does the guest's time stop while Eden is paused
@@ -58,9 +59,9 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `research` Ten minutes of live play in a run: pause, look, release the game with buttons held, pause again
 - [ ] `research` A small Qwen-VL as screen classifier, only if runs with Claude are too slow or too costly
 
+### Emulator and games (not the app)
 
-### Emulator and games
-
+- [ ] `bug` The input check still passes on OpenTTD: its title jumps between `first-frame` and `after-a` in every run
 - [ ] **`game` OpenTTD stands still for 20–110 s at start-up in 8 launches of 14, with both renderers and on the console too, so the cause is in the runtime (Carafe's roadmap). With the lock-wait fix 3 launches of 3 had no stall (first frame at 24–54 s), without it 3 of 3 stood still (80–111 s); threads spun in Wine's `spin_lock` at the addresses the cloud named, and the holder waited for newlib's malloc lock. Still unexplained: the counted malloc waits are short (at most 119 ms)**
 - [ ] `bug` Eden: OpenGL draws 9–15 fps; keeping a core's read area until the GPU writes to it (`0017`) cuts slow `OnCPURead` checks ~500 times and gave a peak of 25 fps; the temporary counters that measured it are archived
 - [ ] `bug` When the bench's timeout cuts a launch short, OpenTTD starts the next one without hardware acceleration (`hwaccel.dat`), so the second launch no longer measures OpenGL; a draft that clears it only after a launch the bench cut short before the first frame is in the cloud's `carafe-bench-fixes.zip` (`renderer_marker.rs`), not wired in
