@@ -6,12 +6,28 @@ import type { GameProblems } from "./bindings/GameProblems";
 import type { KeysState } from "./bindings/KeysState";
 import type { LabStatus } from "./bindings/LabStatus";
 import type { LabView } from "./bindings/LabView";
+import type { NspInfo } from "./bindings/NspInfo";
 import type { PerfSample } from "./bindings/PerfSample";
 import type { RunRequest } from "./bindings/RunRequest";
 import type { RunSummary } from "./bindings/RunSummary";
 import type { Scenario } from "./bindings/Scenario";
 import type { Screen } from "./bindings/Screen";
 import type { VersionStep } from "./bindings/VersionStep";
+
+const noRun: RunRequest = {
+  set: null,
+  only: null,
+  games: null,
+  repeat: null,
+  ab: null,
+  clean: null,
+  scenario: null,
+  video: null,
+  like: null,
+  nsp: null,
+  rebuild: null,
+  buildOnly: null,
+};
 
 export const api = {
   getStatus: () => invoke<LabStatus>("get_status"),
@@ -31,9 +47,14 @@ export const api = {
     video: "full" | "low" | "off" | null = null,
     like: string | null = null,
   ) => {
-    const request: RunRequest = { set, only, games, repeat, ab, clean, scenario, video, like };
+    const request: RunRequest = { ...noRun, set, only, games, repeat, ab, clean, scenario, video, like };
     return invoke<void>("start_run", { request });
   },
+  runReady: (nsp: string, rebuild: boolean, clean: boolean, scenario: string | null) => {
+    const request: RunRequest = { ...noRun, nsp, rebuild, clean, scenario };
+    return invoke<void>("start_run", { request });
+  },
+  readNsp: (path: string) => invoke<NspInfo>("read_nsp", { path }),
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),
   runScreenshots: (dir: string, game: string) => invoke<string[]>("run_screenshots", { dir, game }),
   addGame: (folder: string) => invoke<string>("add_game", { folder }),

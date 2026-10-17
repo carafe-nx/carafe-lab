@@ -15,12 +15,14 @@ use lab_core::config;
 use lab_core::emulator::Video;
 use lab_core::firmware;
 use lab_core::local::{self, KeysSource, LocalSettings};
+use lab_core::matrix;
 use lab_core::perf::{self, PerfSample};
 use lab_core::scenario::Scenario;
 use lab_core::versions::{self, VersionStep};
 use lab_core::view::LabView;
 use lab_run::history::{self, EVENTS_FILE, GameProblems, RunSummary};
 use lab_run::queue::{QueueState, unix_now};
+use lab_run::ready;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
@@ -236,6 +238,87 @@ pub struct RunRequest {
     pub video: Option<String>,
     /// The folder of a past run to repeat with the runtime and Eden image it ran with.
     pub like: Option<String>,
+    /// A ready NSP to run instead of the games of `lab.json`.
+    pub nsp: Option<String>,
+    /// Build the ready NSP again with the lab's runtime instead of running it as it is.
+    pub rebuild: Option<bool>,
+    /// Only build the NSPs, for the console.
+    pub build_only: Option<bool>,
+}
+
+/// What a ready NSP was built from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct NspInfo {
+    /// The NSP file.
+    pub path: String,
+    /// The game's title.
+    pub title: String,
+    /// Its Title ID.
+    pub title_id: String,
+    /// Its build number.
+    pub build_number: u32,
+    /// The runtime version inside it.
+    pub runtime_version: String,
+    /// Its settings in a few words.
+    pub settings: String,
+    /// The runtime's verbose traces are on.
+    pub verbose: bool,
+    /// The runtime's profiler is on.
+    pub profile: bool,
+    /// The game folder it was built from.
+    pub folder: String,
+    /// The folder is still there, so the NSP can be built again.
+    pub folder_found: bool,
+    /// The game of `lab.json` with the same folder, if there is one.
+    pub game: Option<String>,
+}
+
+/// Reads what the ready NSP at `path` was built from.
+///
+/// # Errors
+///
+/// [`CommandError`] when the file is not an NSP made by Carafe.
+#[tauri::command]
+pub async fn read_nsp(lab: State<'_, Arc<Lab>>, path: String) -> Result<NspInfo, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let nsp = ready::read(Path::new(&path))?;
+        let record = nsp.record;
+        let folder = PathBuf::from(&record.source.folder);
+        let game = lab.config().ok().and_then(|config| {
+            config
+                .games
+                .iter()
+                .find(|game| same_folder(&game.folder, &folder))
+                .map(|game| game.name.clone())
+        });
+        Ok(NspInfo {
+            path,
+            title: record.metadata.title.clone(),
+            title_id: record.title_id.to_string(),
+            build_number: record.build_number,
+            runtime_version: record.runtime_version.clone(),
+            settings: matrix::describe(&record.settings),
+            verbose: record.settings.debug.verbose,
+            profile: record.settings.debug.profile,
+            folder_found: folder.is_dir(),
+            folder: record.source.folder,
+            game,
+        })
+    })
+    .await
+}
+
+fn same_folder(one: &Path, other: &Path) -> bool {
+    let plain = |path: &Path| {
+        path.to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .replace('/', "\\")
+            .to_lowercase()
+    };
+    plain(one) == plain(other)
 }
 
 /// Starts `carafe-lab run` in its own process, so closing the window does not stop it, as `request` asks.
@@ -260,6 +343,9 @@ pub async fn start_run(
         scenario,
         video,
         like,
+        nsp,
+        rebuild,
+        build_only,
     } = request;
     blocking(move || {
         let work = lab.config()?.work;
@@ -297,6 +383,15 @@ pub async fn start_run(
                 return Err("not a run folder".into());
             }
             args.extend(["--like".to_owned(), like]);
+        }
+        if let Some(nsp) = nsp {
+            args.extend(["--nsp".to_owned(), nsp]);
+            if rebuild == Some(true) {
+                args.push("--rebuild".to_owned());
+            }
+        }
+        if build_only == Some(true) {
+            args.push("--build-only".to_owned());
         }
         args.extend(["--json", "--who", "window"].map(str::to_owned));
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;

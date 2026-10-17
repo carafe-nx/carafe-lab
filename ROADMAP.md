@@ -39,8 +39,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ### 5. Ready NSPs and the console
 
-- [ ] `feature` A ready NSP runs as it is, with the runtime version and settings read from inside
-- [ ] `feature` "Rebuild with the current runtime" for a ready NSP whose game folder is in the library
 - [ ] `feature` The lab builds NSPs and a "check on the console" list; console verdicts go into the same history
 
 ### Research and later ideas (not the app)
@@ -77,6 +75,9 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
 
 ## Done
+
+- [x] `feature` A ready NSP runs as it is, with the runtime version and settings read from inside
+- [x] `feature` "Rebuild with the current runtime" for a ready NSP whose game folder is in the library
 
 - [x] `feature` Clean-up: Eden crash dumps, stopped containers, old NSPs; a warning when space runs low
 

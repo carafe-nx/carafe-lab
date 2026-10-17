@@ -39,4 +39,16 @@ video: string | null,
 /**
  * The folder of a past run to repeat with the runtime and Eden image it ran with.
  */
-like: string | null, };
+like: string | null, 
+/**
+ * A ready NSP to run instead of the games of `lab.json`.
+ */
+nsp: string | null, 
+/**
+ * Build the ready NSP again with the lab's runtime instead of running it as it is.
+ */
+rebuild: boolean | null, 
+/**
+ * Only build the NSPs, for the console.
+ */
+buildOnly: boolean | null, };

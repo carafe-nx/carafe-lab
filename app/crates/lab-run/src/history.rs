@@ -6,7 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::engine::DETAILED;
+use crate::engine::{DETAILED, READY};
 use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::{Outcome, PROBLEMS_FILE};
 use lab_core::frames::FrameSummary;
@@ -363,7 +363,7 @@ pub fn version_performance(runs: &[RunSummary]) -> Vec<VersionPerf> {
             run.games
                 .iter()
                 .filter(|game| {
-                    ![VARIANT_A, VARIANT_B, DETAILED]
+                    ![VARIANT_A, VARIANT_B, DETAILED, READY]
                         .iter()
                         .any(|suffix| game.name.ends_with(suffix))
                 })

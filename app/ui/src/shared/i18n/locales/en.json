@@ -128,6 +128,25 @@
     "unknown": "without past runs: {{count}}",
     "launches": "Launches: {{launches}}"
   },
+  "ready": {
+    "title": "A ready NSP",
+    "hint": "An NSP made by Carafe runs as it is, with the runtime and settings inside it, or is built again with the lab's runtime and the same settings.",
+    "pick": "Choose an NSP",
+    "another": "Another NSP",
+    "runtime": "runtime {{version}}",
+    "game": "Game",
+    "build": "build {{number}}",
+    "titleId": "Title ID",
+    "settings": "Settings",
+    "verbose": "verbose traces",
+    "profile": "profiler",
+    "folder": "Game folder",
+    "folderGone": "{{folder}} — gone",
+    "asIs": "Run as it is",
+    "rebuild": "Rebuild with the current runtime",
+    "rebuildHint": "Builds the game again from its folder with the lab's runtime and the NSP's settings, then runs it",
+    "rebuildNoFolder": "The game folder is gone, so the NSP can only run as it is"
+  },
   "run": {
     "exited": "The run ended with an error (code {{code}})",
     "live": "Running · {{who}}",

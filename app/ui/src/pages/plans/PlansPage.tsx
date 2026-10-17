@@ -16,6 +16,7 @@ import controls from "@/shared/ui/controls.module.css";
 import styles from "@/shared/ui/lab.module.css";
 import { AbPlan } from "./AbPlan";
 import plans from "./PlansPage.module.css";
+import { ReadyPlan } from "./ReadyPlan";
 
 type Estimate = { launches: number; seconds: number; unknown: number };
 
@@ -56,6 +57,16 @@ export function PlansPage() {
       })
       .catch((reason: unknown) => setError(errorText(reason)));
   };
+  const startReady = (nsp: string, rebuild: boolean) => {
+    setError(null);
+    api
+      .runReady(nsp, rebuild, clean, scenario || null)
+      .then(() => {
+        status.refresh();
+        navigate("/run");
+      })
+      .catch((reason: unknown) => setError(errorText(reason)));
+  };
   return (
     <Page title={t("nav.plans")}>
       {lab.error ? <Notice tone="error">{lab.error}</Notice> : null}
@@ -78,6 +89,7 @@ export function PlansPage() {
       </div>
       <OwnPlan games={games} runs={runs.data ?? []} onStart={(chosen, repeat) => start(null, chosen, repeat)} />
       <AbPlan games={games} onStart={(game, overrides, repeat) => start(null, [game], repeat, overrides)} />
+      <ReadyPlan onStart={startReady} />
       <div className={plans.grid}>
         <PlanCard title={t("plans.enabled")} names={enabled} onStart={() => start(null)} />
         {sets.map(([set, names]) => (

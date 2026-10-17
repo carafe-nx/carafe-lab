@@ -32,9 +32,10 @@ use lab_core::time::Utc;
 use lab_core::versions;
 use lab_core::view::LabView;
 use lab_eden::Eden;
-use lab_run::engine::{Engine, Event, Planned};
+use lab_run::engine::{Engine, Event, NspSource, Planned, READY};
 use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
+use lab_run::ready::{self, ReadyNsp};
 use lab_run::report::{self, RunStamp};
 use lab_run::run::{Clock, Emulator, Outcome, StepResult, stage_name};
 use lab_run::tidy;
@@ -123,6 +124,10 @@ fn start(args: Args) -> Result<ExitCode, String> {
         Command::Stop { id } => return stop_run(&config, id.as_deref()),
         Command::Perf => return show_perf(&config, args.json),
         Command::Tidy => return tidy_runs(&config, args.apply, args.json),
+        Command::Nsp { file } => {
+            let file = file.as_deref().ok_or("nsp needs an NSP file")?;
+            return show_nsp(&config, file, args.json);
+        }
         _ => {}
     }
     let keys = console_files(args.keys.as_deref(), &config_path)?;
@@ -213,8 +218,51 @@ fn start(args: Args) -> Result<ExitCode, String> {
         | Command::Runs
         | Command::Stop { .. }
         | Command::Perf
+        | Command::Nsp { .. }
         | Command::Tidy => Ok(ExitCode::SUCCESS),
     }
+}
+
+fn show_nsp(config: &Config, file: &Path, json: bool) -> Result<ExitCode, String> {
+    let nsp = ready::read(file)?;
+    let record = &nsp.record;
+    let game = config
+        .games
+        .iter()
+        .find(|game| same_folder(&game.folder, &record.source.folder))
+        .map(|game| game.name.clone());
+    let folder_found = Path::new(&record.source.folder).is_dir();
+    if json {
+        print_json(&serde_json::json!({
+            "record": record,
+            "game": game,
+            "folderFound": folder_found,
+        }))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    println!(
+        "{} ({}), build {}",
+        record.metadata.title, record.title_id, record.build_number
+    );
+    println!("runtime {}", record.runtime_version);
+    println!("settings: {}", settings_label(&record.settings));
+    println!(
+        "debug: {}",
+        serde_json::to_string(&record.settings.debug).map_err(|error| error.to_string())?
+    );
+    println!(
+        "game folder: {} ({})",
+        record.source.folder,
+        if folder_found {
+            "found: --rebuild can build it again"
+        } else {
+            "gone: it runs only as it is"
+        }
+    );
+    if let Some(game) = game {
+        println!("in lab.json as {game}");
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, String> {
@@ -577,7 +625,76 @@ fn image_id(image: &str) -> Option<String> {
 }
 
 impl Lab {
+    fn run_ready(mut self, config: &Config) -> Result<ExitCode, String> {
+        if self.args.ab.is_some() {
+            return Err("--ab does not take ready NSPs".to_owned());
+        }
+        let repeat = self.args.repeat as usize;
+        let mut planned = Vec::new();
+        let mut names = Vec::new();
+        for path in &self.args.nsp {
+            let nsp = ready::read(path)?;
+            let game = config
+                .games
+                .iter()
+                .find(|game| same_folder(&game.folder, &nsp.record.source.folder));
+            let plan = self.plan_ready(game, nsp);
+            names.push(plan.name.clone());
+            planned.extend(std::iter::repeat_n(plan, repeat));
+        }
+        let mut what = names.join(", ");
+        if self.args.rebuild {
+            what = format!("rebuild {what}");
+        }
+        if repeat > 1 {
+            what = format!("{what} ×{repeat}");
+        }
+        self.execute(planned, &what)
+    }
+
+    fn plan_ready(&self, game: Option<&Game>, nsp: ReadyNsp) -> Planned {
+        let record = nsp.record.clone();
+        let name = game.map_or_else(|| record.metadata.title.clone(), |game| game.name.clone());
+        let scenario = self.scenario.clone().unwrap_or_else(|| {
+            game.map_or_else(
+                || Scenario::standard(self.timeout),
+                |game| game.scenario(self.timeout),
+            )
+        });
+        let threshold = game.map_or(versions::DEFAULT_THRESHOLD, |game| game.threshold);
+        let folder = PathBuf::from(&record.source.folder);
+        if self.args.rebuild {
+            return Planned {
+                entropy: 0,
+                name,
+                folder,
+                request: ready::rebuild_request(&nsp),
+                label: settings_label(&record.settings),
+                scenario,
+                threshold,
+                nsp: NspSource::Rebuild(Box::new(record)),
+            };
+        }
+        Planned {
+            entropy: 0,
+            name: format!("{name}{READY}"),
+            folder,
+            request: Err("a ready NSP runs as it is".to_owned()),
+            label: format!(
+                "runtime {} · {}",
+                record.runtime_version,
+                settings_label(&record.settings)
+            ),
+            scenario,
+            threshold,
+            nsp: NspSource::Ready(Box::new(nsp)),
+        }
+    }
+
     fn run_games(mut self, config: &Config, set: Option<&str>) -> Result<ExitCode, String> {
+        if !self.args.nsp.is_empty() {
+            return self.run_ready(config);
+        }
         let chosen = if self.args.games.is_empty() {
             config.select(set)
         } else {
@@ -654,6 +771,7 @@ impl Lab {
                 .clone()
                 .unwrap_or_else(|| game.scenario(self.timeout)),
             threshold: game.threshold,
+            nsp: NspSource::Build,
         }
     }
 
@@ -1046,6 +1164,7 @@ fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> 
         label: run.label.clone(),
         scenario: run.scenario.clone(),
         threshold: versions::DEFAULT_THRESHOLD,
+        nsp: NspSource::Build,
     }
 }
 
@@ -1148,6 +1267,15 @@ fn now() -> Utc {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
     Utc::from_unix(seconds)
+}
+
+fn same_folder(folder: &Path, recorded: &str) -> bool {
+    let plain = |text: &str| {
+        text.trim_end_matches(['\\', '/'])
+            .replace('/', "\\")
+            .to_lowercase()
+    };
+    plain(&folder.to_string_lossy()) == plain(recorded)
 }
 
 fn settings_label(settings: &AutorunSettings) -> String {

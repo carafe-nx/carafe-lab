@@ -26,9 +26,11 @@ Usage:
   carafe-lab screen <file.png>     saves the running game's screen
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
+  carafe-lab nsp <file> [--json]   what a ready NSP was built from: runtime version, settings, game folder
   carafe-lab tidy [--apply]        what keeping the runs folder small would do; --apply does it: the 10 newest runs
                                    stay whole, older failed runs get their logs compressed, older passing runs
-                                   lose their raw logs and timeline pictures
+                                   lose their raw logs and timeline pictures; NSPs the newest runs do not use,
+                                   Eden's crash dumps and stopped lab containers go
   carafe-lab help
 
 Options:
@@ -48,6 +50,10 @@ Options:
   --scenario <s>      every game runs this scenario: standard, or a file relative to lab.json
   --like <run>        run the games of this past run again with the runtime and Eden image it ran with;
                       every run keeps them from now on
+  --nsp <file>        run: a ready NSP made by Carafe instead of the games of lab.json, as it is, with the
+                      runtime and settings inside it; give it once for every NSP
+  --rebuild           with --nsp: build each NSP again from its game folder with the lab's runtime and the
+                      NSP's own settings
   --video <v>         full, low (about five pictures a second, for measuring) or off; default full
   --no-open           do not open the live page in the browser
   --json              print the run as JSON lines, one event each, without the live page;
@@ -102,6 +108,11 @@ pub enum Command {
     Perf,
     /// Show the running game's stages and the problems of its logs.
     Logs,
+    /// Show what a ready NSP was built from.
+    Nsp {
+        /// The NSP file.
+        file: Option<PathBuf>,
+    },
     /// Keep the runs folder small.
     Tidy,
     /// Print the help.
@@ -145,6 +156,10 @@ pub struct Args {
     pub no_retry: bool,
     /// `--like`: the folder of a past run to repeat with its own parts.
     pub like: Option<String>,
+    /// `--nsp`, once for every ready NSP to run.
+    pub nsp: Vec<PathBuf>,
+    /// `--rebuild`.
+    pub rebuild: bool,
     /// `--scenario`: `standard` or a scenario file relative to `lab.json`.
     pub scenario: Option<String>,
     /// `--video`.
@@ -199,6 +214,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("perf") => Command::Perf,
         Some("logs") => Command::Logs,
         Some("tidy") => Command::Tidy,
+        Some("nsp") => Command::Nsp { file: None },
         Some(other) => return Err(ArgsError::Command(other.to_owned())),
     };
     let mut parsed = Args {
@@ -219,6 +235,8 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         apply: false,
         no_retry: false,
         like: None,
+        nsp: Vec::new(),
+        rebuild: false,
         scenario: None,
         video: Video::Full,
         json: false,
@@ -274,6 +292,8 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             "--ab" => parsed.ab = Some(value("settings as JSON")?),
             "--scenario" => parsed.scenario = Some(value("standard or a scenario file")?),
             "--like" => parsed.like = Some(value("a run folder")?),
+            "--nsp" => parsed.nsp.push(PathBuf::from(value("an NSP file")?)),
+            "--rebuild" => parsed.rebuild = true,
             "--minutes" => parsed.minutes = number(arg, value("minutes")?, "minutes")?,
             "--hold" => {
                 let seconds: f64 = number(arg, value("seconds")?, "seconds")?;
@@ -310,7 +330,9 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 Command::Press { buttons } if buttons.is_none() => {
                     *buttons = Some(other.to_owned())
                 }
-                Command::Screen { file } if file.is_none() => *file = Some(PathBuf::from(other)),
+                Command::Screen { file } | Command::Nsp { file } if file.is_none() => {
+                    *file = Some(PathBuf::from(other))
+                }
                 _ => return Err(ArgsError::Option(other.to_owned())),
             },
         }

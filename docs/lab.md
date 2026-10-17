@@ -171,6 +171,13 @@ emulator.
 - Every run keeps what it ran with: the runtime archive as `<work>/runtimes/<hash>.bin`, once for each hash, and the
   Eden image under the tag `carafe-lab-eden-kept:<id>`. `run --like <run folder>`, or History's "Repeat exactly",
   runs that run's games again with them instead of the current ones; the games' settings come from `lab.json`.
+- A ready NSP made by Carafe carries its build record, `carafe.json`, unencrypted next to its NCAs, so the lab reads
+  its runtime version, settings and game folder without keys: `carafe-lab nsp <file>` prints them. `run --nsp <file>`
+  runs it as it is, as `<name> · NSP`: it is linked into `<work>/nsp/ready/<Title ID>.nsp`, since Eden names a game
+  by its file, and stays out of performance by version, which compares the lab's own builds. `--rebuild` builds it
+  again from its game folder with the lab's runtime and the NSP's own settings, keeping its Title ID. The game takes
+  the name, scenario and threshold of the `lab.json` game with the same folder, if there is one. The Plans screen has
+  the same under "A ready NSP".
 - The Versions screen shows, under the pass/fail matrix, each game's performance at each Carafe commit: the median
   and half the spread of its repeats for the time to the first frame, the median FPS, the worst hundredth of frames
   and the peak memory. A measure is marked better or worse than the commit before only when the difference is

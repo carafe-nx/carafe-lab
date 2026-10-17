@@ -4,6 +4,7 @@
 pub mod engine;
 pub mod history;
 pub mod queue;
+pub mod ready;
 pub mod report;
 pub mod run;
 pub mod tidy;

@@ -30,6 +30,7 @@ pub fn run() {
             commands::choose_keys,
             commands::forget_keys,
             commands::choose_firmware,
+            commands::read_nsp,
             commands::forget_firmware,
             commands::open_path,
             commands::read_screen,

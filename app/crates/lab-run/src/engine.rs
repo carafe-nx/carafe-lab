@@ -20,6 +20,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::history::{self, EVENTS_FILE, RunSummary, SUMMARY_FILE};
+use crate::ready::{self, ReadyNsp};
 use crate::report::{self, BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::{Clock, Emulator, LaunchRecord, Outcome, Runner, StepResult};
 
@@ -40,6 +41,28 @@ pub struct Planned {
     pub scenario: Scenario,
     /// The percentage the game may get slower by against the last Carafe version before it fails.
     pub threshold: u32,
+    /// Where its NSP comes from.
+    pub nsp: NspSource,
+}
+
+/// Where a planned game's NSP comes from.
+#[derive(Debug, Clone, Default)]
+pub enum NspSource {
+    /// Built from the request with the lab's runtime.
+    #[default]
+    Build,
+    /// A ready NSP, run as it is; the request is not used.
+    Ready(Box<ReadyNsp>),
+    /// Built again with the lab's runtime from the request made of this ready NSP's record, keeping its Title ID.
+    Rebuild(Box<BuildRecord>),
+}
+
+struct Built {
+    record: BuildRecord,
+    seconds: f64,
+    size_bytes: u64,
+    reused: bool,
+    nsp: PathBuf,
 }
 
 /// What the run is doing, for the window, the live page and `--json`.
@@ -165,6 +188,9 @@ pub struct Engine<'a> {
 /// Suffix of the name a failed game runs again under, with detailed logs.
 pub const DETAILED: &str = " · detailed";
 
+/// Suffix of the name a ready NSP runs under as it is, with the runtime inside it.
+pub const READY: &str = " · NSP";
+
 /// How a game failed, as far as its first failed step tells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Symptom {
@@ -210,9 +236,12 @@ impl Symptom {
 
 /// Returns `game` once more with detailed logs chosen by how `report` says it failed: the runtime's verbose traces
 /// always, its profiler for a game that never reached its first frame, the full DXVK HUD for a failed picture check;
-/// `None` when the game did not fail or could not be built.
+/// `None` when the game did not fail, could not be built or is a ready NSP run as it is.
 #[must_use]
 pub fn detailed(game: &Planned, report: &GameReport) -> Option<Planned> {
+    if matches!(game.nsp, NspSource::Ready(_)) {
+        return None;
+    }
     let symptom = Symptom::of(report)?;
     let mut request = game.request.as_ref().ok()?.clone();
     request.settings.debug.verbose = true;
@@ -229,6 +258,7 @@ pub fn detailed(game: &Planned, report: &GameReport) -> Option<Planned> {
         label: format!("{} · {}", game.label, symptom.label()),
         scenario: game.scenario.clone(),
         threshold: game.threshold,
+        nsp: game.nsp.clone(),
     })
 }
 
@@ -366,7 +396,13 @@ impl Engine<'_> {
             failure: None,
         };
         let built = self.build(game, nsp_dir, on_event);
-        let (record, seconds, size_bytes, reused) = match built {
+        let Built {
+            record,
+            seconds,
+            size_bytes,
+            reused,
+            nsp,
+        } = match built {
             Ok(built) => built,
             Err(error) => {
                 on_event(&Event::BuildFailed {
@@ -395,7 +431,6 @@ impl Engine<'_> {
                 dir: dir.display().to_string(),
             });
         }
-        let nsp = nsp_dir.join(format!("{}.nsp", record.title_id));
         let shared = RefCell::new(on_event);
         let baseline = history::baseline(
             &history::list(run_dir.parent().unwrap_or(run_dir)),
@@ -421,9 +456,24 @@ impl Engine<'_> {
         game: &Planned,
         nsp_dir: &Path,
         on_event: &mut dyn FnMut(&Event),
-    ) -> Result<(BuildRecord, f64, u64, bool), String> {
+    ) -> Result<Built, String> {
+        let previous = match &game.nsp {
+            NspSource::Build => None,
+            NspSource::Ready(ready) => {
+                let staged = ready::stage(ready, nsp_dir)
+                    .map_err(|error| format!("{}: {error}", ready.path.display()))?;
+                return Ok(Built {
+                    record: ready.record.clone(),
+                    seconds: 0.0,
+                    size_bytes: ready.size_bytes,
+                    reused: true,
+                    nsp: staged,
+                });
+            }
+            NspSource::Rebuild(record) => Some(record.as_ref()),
+        };
         let request = game.request.clone()?;
-        let record = wizard::plan(request, None, game.entropy, self.runtime_version)
+        let record = wizard::plan(request, previous, game.entropy, self.runtime_version)
             .map_err(|error| error.to_string())?;
         let key = build_key(&self.build_inputs, &record, &game.folder);
         let key_path = nsp_dir.join(format!("{}.build-key", record.title_id));
@@ -432,7 +482,13 @@ impl Engine<'_> {
             (&key, fs::read_to_string(&key_path), fs::metadata(&nsp_path))
             && kept.trim() == key
         {
-            return Ok((record, 0.0, nsp.len(), true));
+            return Ok(Built {
+                record,
+                seconds: 0.0,
+                size_bytes: nsp.len(),
+                reused: true,
+                nsp: nsp_path,
+            });
         }
         let _ = fs::remove_file(&key_path);
         let target = PackTarget {
@@ -456,12 +512,13 @@ impl Engine<'_> {
         if let Some(key) = key {
             let _ = fs::write(&key_path, key);
         }
-        Ok((
+        Ok(Built {
             record,
-            started.elapsed().as_secs_f64(),
-            stored.size_bytes,
-            false,
-        ))
+            seconds: started.elapsed().as_secs_f64(),
+            size_bytes: stored.size_bytes,
+            reused: false,
+            nsp: nsp_path,
+        })
     }
 }
 
@@ -617,6 +674,7 @@ mod tests {
             label: "dxvk".to_owned(),
             scenario: Scenario::standard(120),
             threshold: 20,
+            nsp: NspSource::Build,
         };
         let stalled = detailed(&planned, &failed_at(wait.clone(), "not reached in 120 s")).unwrap();
         assert_eq!(stalled.name, "G · detailed");

@@ -10,6 +10,7 @@ use flate2::write::GzEncoder;
 use serde::Serialize;
 
 use crate::history::{self, RunSummary};
+use crate::ready::READY_DIR;
 use crate::run::{Outcome, PROBLEMS_FILE, TIMELINE_DIR};
 
 /// How many of the newest runs keep everything as it is.
@@ -68,6 +69,7 @@ pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
         })
         .collect();
     let mut stale = stale_nsps(places.nsp, &used);
+    stale.extend(stale_nsps(&places.nsp.join(READY_DIR), &used));
     if let Some(dumps) = places.dumps {
         stale.extend(eden_dumps(dumps));
     }
