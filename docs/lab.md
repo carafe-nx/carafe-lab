@@ -223,6 +223,10 @@ emulator.
   is downloaded and the client is the same version as the server. "Take control" switches the same connection
   out of view-only and holds the scenario: while a person plays, no step starts and a milestone's wait does not count
   (`<work>/queue/hold`); "Hand the game back" lets it go on. A new run, or leaving the Run screen, lifts the hold.
+- While the game is in hand, "Record a scenario" scouts it: the window writes down every key of Eden's layout as the
+  Switch button it presses, with how long it was held and the pause before it, and "Mark a stage" adds a screenshot
+  there. Buttons pressed within 80 ms of each other become one press. "Save as the game's scenario" writes launch,
+  first frame, the recorded steps and close as the game's scenario file.
 - `run --games G --repeat <n> --ab '<settings>'` is an A/B run: G as it is (`G · A`) and with the settings merged over
   its own (`G · B`, in the shape of `carafe.json`'s `settings`), alternating. Each variant is its own NSP with its own
   Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame

@@ -212,6 +212,15 @@
     "stop": "Stop",
     "leave": "Leave the queue"
   },
+  "scout": {
+    "record": "Record a scenario",
+    "hint": "Play by hand: the lab writes your presses, with the pauses between, into the game's scenario after a launch and its first frame",
+    "mark": "Mark a stage",
+    "save": "Save as the game's scenario",
+    "cancel": "Stop recording",
+    "counts": "presses: {{presses}}, stages: {{marks}}",
+    "saved": "Saved as {{game}}'s scenario: {{file}}"
+  },
   "history": {
     "count_one": "{{count}} run",
     "count_other": "{{count}} runs",

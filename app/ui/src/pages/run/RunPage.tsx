@@ -6,6 +6,7 @@ import { outcomeTone, runPath } from "@/features/lab/outcome";
 import { FpsChart } from "@/features/lab/FpsChart";
 import { JoyCon } from "@/features/lab/JoyCon";
 import { LiveScreen } from "@/features/lab/LiveScreen";
+import { ScoutPanel } from "@/features/lab/ScoutPanel";
 import { StepLine } from "@/features/lab/StepLine";
 import { folderName, useRunEvents } from "@/features/lab/useRunEvents";
 import type { Event } from "@/shared/api/bindings/Event";
@@ -28,6 +29,14 @@ import run from "./RunPage.module.css";
 const LIT_MS = 1500;
 
 type GameState = { name: string; outcome: Outcome | null; current: boolean };
+
+const VARIANTS = [" · detailed", " · NSP", " · A", " · B"];
+
+function labGame(name: string | undefined): string | null {
+  if (!name) return null;
+  const variant = VARIANTS.find((suffix) => name.endsWith(suffix));
+  return variant ? name.slice(0, -variant.length) : name;
+}
 
 type Derived = {
   games: GameState[];
@@ -226,6 +235,7 @@ export function RunPage() {
               <span className={styles.muted}>{control ? t("run.controlHint") : t("run.watchHint")}</span>
             </div>
           ) : null}
+          {showLive && control ? <ScoutPanel game={labGame(derived.games.find((game) => game.current)?.name)} /> : null}
           {holder && !liveDir ? (
             <Notice tone="info">{t("run.preparing")}</Notice>
           ) : null}
