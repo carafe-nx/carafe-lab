@@ -65,9 +65,28 @@ pub struct GameReport {
     pub scenario: Option<ScenarioResult>,
     /// Milestone lines of every launch, for the report.
     pub log_excerpt: Vec<String>,
+    /// Why the game failed: its build's error or its first failed step; `None` when nothing failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
 }
 
 impl GameReport {
+    /// Returns why the game failed, in English: its build's error, or the first failed step with what it found;
+    /// `None` when nothing failed.
+    #[must_use]
+    pub fn failure_reason(&self) -> Option<String> {
+        if let BuildOutcome::Failed { error } = &self.build {
+            return Some(format!("the build failed: {error}"));
+        }
+        let step = self
+            .scenario
+            .as_ref()?
+            .steps
+            .iter()
+            .find(|step| step.outcome == Outcome::Fail)?;
+        Some(format!("{}: {}", step_title(step, Lang::En), step.detail))
+    }
+
     /// Returns the outcome of the game: a failed build fails it, otherwise the worst step decides.
     #[must_use]
     pub fn outcome(&self) -> Outcome {
@@ -661,6 +680,7 @@ mod tests {
                 emulator_gaps: Vec::new(),
             }),
             log_excerpt: vec!["[carafe-overlay] [CARAFE] loading screen hidden after 34 s: the game drew its picture".to_owned()],
+            failure: None,
         }
     }
 
@@ -682,7 +702,23 @@ mod tests {
             error: "no keys".to_owned(),
         };
         assert_eq!(game.outcome(), Outcome::Fail);
+        assert_eq!(
+            game.failure_reason().as_deref(),
+            Some("the build failed: no keys")
+        );
+        assert_eq!(passed("B").failure_reason(), None);
         assert_eq!(run(vec![game, passed("B")]).counts(), [1, 0, 0, 1]);
+    }
+
+    #[test]
+    fn the_first_failed_step_is_the_reason() {
+        let mut game = passed("A");
+        if let Some(scenario) = game.scenario.as_mut() {
+            scenario.steps[0].outcome = Outcome::Fail;
+            scenario.steps[0].detail = "the emulator crashed".to_owned();
+        }
+        let reason = game.failure_reason().unwrap();
+        assert!(reason.ends_with(": the emulator crashed"), "{reason}");
     }
 
     #[test]

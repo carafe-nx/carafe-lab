@@ -267,6 +267,7 @@ impl Engine<'_> {
             },
             scenario: None,
             log_excerpt: Vec::new(),
+            failure: None,
         };
         let built = self.build(game, nsp_dir, on_event);
         let (record, seconds, size_bytes, reused) = match built {
@@ -276,6 +277,7 @@ impl Engine<'_> {
                     error: error.clone(),
                 });
                 entry.build = BuildOutcome::Failed { error };
+                entry.failure = entry.failure_reason();
                 return entry;
             }
         };
@@ -308,6 +310,7 @@ impl Engine<'_> {
         });
         entry.log_excerpt = excerpt(&game_dir, &result.launches);
         entry.scenario = Some(result);
+        entry.failure = entry.failure_reason();
         entry
     }
 

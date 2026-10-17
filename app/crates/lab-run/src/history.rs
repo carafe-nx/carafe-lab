@@ -83,6 +83,9 @@ pub struct GameSummary {
     /// The frame times of its first launch in short; `None` when the emulator recorded none.
     #[serde(default)]
     pub frames: Option<FrameSummary>,
+    /// Why it failed, in English; `None` when nothing failed.
+    #[serde(default)]
+    pub failure: Option<String>,
 }
 
 /// What each variant of an A/B run gave and whether they differ.
@@ -265,6 +268,7 @@ impl RunSummary {
                     .as_ref()
                     .and_then(|scenario| scenario.launches.first())
                     .and_then(|launch| launch.frames),
+                failure: game.failure_reason(),
             })
             .collect();
         Self {
@@ -451,6 +455,7 @@ mod tests {
             resources: None,
             problems: None,
             frames: None,
+            failure: None,
         }
     }
 

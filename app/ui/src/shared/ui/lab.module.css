@@ -316,3 +316,8 @@
 .fresh {
   background: var(--accent-soft);
 }
+
+.failure {
+  color: var(--danger);
+  font-size: 13px;
+}

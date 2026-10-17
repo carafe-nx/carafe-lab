@@ -24,7 +24,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` One timeline of all log sources with one clock
 - [ ] `feature` Full logs compressed for failures and recent runs; a summary for older passing runs
 - [ ] `feature` Diagnostics as named flags instead of temporary patches
-- [ ] `feature` `report.json` with milestones, step times, frame times and the reason for a failure
 
 ### 3. Versions and history
 
@@ -87,6 +86,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` `report.json` with milestones, step times, frame times and the reason for a failure
 - [x] `feature` A screenshot every few seconds of a launch: a small picture every 10 s in `timeline/`
 - [x] `feature` Frame times of every frame, not only FPS: mean, worst hundredth and stutters per launch
 - [x] `feature` Error lines that the game's run before did not have are highlighted in History

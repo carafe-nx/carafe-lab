@@ -52,4 +52,8 @@ problems: ProblemCounts | null,
 /**
  * The frame times of its first launch in short; `None` when the emulator recorded none.
  */
-frames: FrameSummary | null, };
+frames: FrameSummary | null, 
+/**
+ * Why it failed, in English; `None` when nothing failed.
+ */
+failure: string | null, };
