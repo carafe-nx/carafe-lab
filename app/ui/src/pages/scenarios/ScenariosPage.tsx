@@ -10,7 +10,8 @@ import { Notice } from "@/shared/ui/Notice";
 import { Page } from "@/shared/ui/Page";
 import styles from "@/shared/ui/lab.module.css";
 import editor from "./ScenariosPage.module.css";
-import { NEW_STEPS, newStep, StepEditor } from "./StepEditor";
+import { ScenarioFlow } from "./ScenarioFlow";
+import { allShots, StepList } from "./StepEditor";
 
 export function ScenariosPage() {
   const { t } = useTranslation();
@@ -61,7 +62,7 @@ function Editor({ game, onSaved }: { game: GameView; onSaved: () => void }) {
     }
   }, [game.scenario.steps, dirty]);
 
-  const shots = steps.flatMap((step) => (step.step === "screenshot" ? [step.name] : []));
+  const shots = allShots(steps);
   const update = (next: Step[]) => {
     setSteps(next);
     setDirty(true);
@@ -77,13 +78,6 @@ function Editor({ game, onSaved }: { game: GameView; onSaved: () => void }) {
       })
       .catch((reason: unknown) => setNotice({ tone: "error", text: errorText(reason) }));
   };
-  const move = (index: number, offset: number) => {
-    const next = [...steps];
-    const [taken] = next.splice(index, 1);
-    if (taken) next.splice(index + offset, 0, taken);
-    update(next);
-  };
-
   return (
     <div className={styles.card}>
       <div className={styles.cardHead}>
@@ -108,28 +102,9 @@ function Editor({ game, onSaved }: { game: GameView; onSaved: () => void }) {
         </Button>
       </div>
       {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
-      <ol className={`${styles.steps} ${editor.steps}`}>
-        {steps.map((step, index) => (
-          <StepEditor
-            key={index}
-            step={step}
-            index={index}
-            count={steps.length}
-            shots={shots}
-            onChange={(changed) => update(steps.map((old, at) => (at === index ? changed : old)))}
-            onMove={(offset) => move(index, offset)}
-            onRemove={() => update(steps.filter((_, at) => at !== index))}
-          />
-        ))}
-      </ol>
-      <span className={styles.label}>{t("scenarios.add")}</span>
-      <div className={editor.palette}>
-        {NEW_STEPS.map((kind) => (
-          <Button key={kind} onClick={() => update([...steps, newStep(kind, steps)])}>
-            + {t(`steps.${kind}`)}
-          </Button>
-        ))}
-      </div>
+      <StepList steps={steps} shots={shots} onChange={update} />
+      <span className={styles.label}>{t("scenarios.flow")}</span>
+      <ScenarioFlow steps={steps} />
     </div>
   );
 }

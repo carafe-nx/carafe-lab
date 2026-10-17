@@ -15,10 +15,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 - [ ] **`feature` A regression between two versions starts a bisection over Carafe's commits**
 
-### 4. Scenarios and A/B
-
-- [ ] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
-
 ### Research and later ideas (not the app)
 
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes
@@ -53,6 +49,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
 
 ## Done
+
+- [x] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
 
 - [x] `feature` Scouting: play by hand, the lab records presses and milestones into a scenario
 

@@ -315,6 +315,7 @@ pub struct Runner<'a> {
     lab_lines: Vec<(Duration, String)>,
     hold: Option<PathBuf>,
     references: Option<PathBuf>,
+    branches: usize,
     last_glimpse: Duration,
     baseline: Option<VersionPerf>,
     threshold: u32,
@@ -352,6 +353,7 @@ impl<'a> Runner<'a> {
             lab_lines: Vec::new(),
             hold: None,
             references: None,
+            branches: 0,
             last_glimpse: started,
             baseline: None,
             threshold: versions::DEFAULT_THRESHOLD,
@@ -482,45 +484,7 @@ impl<'a> Runner<'a> {
             on_step(&result);
             steps.push(result);
         }
-        for step in &scenario.steps {
-            let independent = matches!(
-                step,
-                Step::Launch
-                    | Step::ExpectSave
-                    | Step::ExpectSaveKept
-                    | Step::ExpectPerformance { .. }
-            );
-            self.wait_while_held();
-            let result = if self.stopped() {
-                self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None)
-            } else if broken && !independent {
-                self.result(
-                    step,
-                    Outcome::Skip,
-                    "an earlier step failed".to_owned(),
-                    None,
-                )
-            } else {
-                self.step(step)
-            };
-            if matches!(step, Step::Launch) {
-                broken = false;
-            }
-            if result.outcome == Outcome::Fail {
-                broken = true;
-            }
-            self.lab_lines.push((
-                self.started + Duration::from_secs_f64(result.at),
-                format!(
-                    "{}: {:?}, {}",
-                    report::step_title(&result, Lang::En),
-                    result.outcome,
-                    result.detail
-                ),
-            ));
-            on_step(&result);
-            steps.push(result);
-        }
+        self.run_list(&scenario.steps, "", &mut steps, &mut broken, &mut on_step);
         if self.running {
             let _ = self.emulator.close(Duration::from_secs(30));
             self.running = false;
@@ -620,6 +584,12 @@ impl<'a> Runner<'a> {
             Step::ExpectInput => self.expect_input(step),
             Step::RandomPresses { seconds, seed } => self.random_presses(step, *seconds, *seed),
             Step::Close { timeout } => self.close(step, *timeout),
+            Step::Repeat { .. } | Step::IfScreen { .. } => self.result(
+                step,
+                Outcome::Skip,
+                "a block runs its own steps".to_owned(),
+                None,
+            ),
         }
     }
 
@@ -810,6 +780,166 @@ impl<'a> Runner<'a> {
             self.glimpse();
             self.clock.sleep(POLL);
         }
+    }
+
+    fn run_list(
+        &mut self,
+        list: &[Step],
+        suffix: &str,
+        steps: &mut Vec<StepResult>,
+        broken: &mut bool,
+        on_step: &mut dyn FnMut(&StepResult),
+    ) {
+        let taken = taken_names(list);
+        for original in list {
+            let step = renamed(original, &taken, suffix);
+            self.wait_while_held();
+            let held_back = if self.stopped() {
+                Some("the run was stopped")
+            } else if *broken
+                && !matches!(
+                    step,
+                    Step::Launch
+                        | Step::ExpectSave
+                        | Step::ExpectSaveKept
+                        | Step::ExpectPerformance { .. }
+                )
+            {
+                Some("an earlier step failed")
+            } else {
+                None
+            };
+            match (&step, held_back) {
+                (
+                    Step::Repeat {
+                        times,
+                        steps: inner,
+                    },
+                    None,
+                ) => {
+                    for round in 1..=*times {
+                        self.run_list(inner, &format!("{suffix}-{round}"), steps, broken, on_step);
+                        if *broken || self.stopped() {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                (
+                    Step::IfScreen {
+                        reference,
+                        tolerance,
+                        then,
+                        otherwise,
+                    },
+                    None,
+                ) => {
+                    self.branches += 1;
+                    let file = format!("if-{}{suffix}.png", self.branches);
+                    let (result, shows) = self.look(&step, &file, reference, *tolerance);
+                    self.record(result, steps, broken, on_step);
+                    let branch = if shows { then } else { otherwise };
+                    self.run_list(branch, suffix, steps, broken, on_step);
+                    continue;
+                }
+                _ => {}
+            }
+            let result = match held_back {
+                Some(why) => self.result(&step, Outcome::Skip, why.to_owned(), None),
+                None => self.step(&step),
+            };
+            if matches!(step, Step::Launch) {
+                *broken = false;
+            }
+            self.record(result, steps, broken, on_step);
+        }
+    }
+
+    fn record(
+        &mut self,
+        result: StepResult,
+        steps: &mut Vec<StepResult>,
+        broken: &mut bool,
+        on_step: &mut dyn FnMut(&StepResult),
+    ) {
+        if result.outcome == Outcome::Fail {
+            *broken = true;
+        }
+        self.lab_lines.push((
+            self.started + Duration::from_secs_f64(result.at),
+            format!(
+                "{}: {:?}, {}",
+                report::step_title(&result, Lang::En),
+                result.outcome,
+                result.detail
+            ),
+        ));
+        on_step(&result);
+        steps.push(result);
+    }
+
+    fn look(
+        &mut self,
+        step: &Step,
+        file: &str,
+        reference: &str,
+        tolerance: f32,
+    ) -> (StepResult, bool) {
+        if let Err(error) = self.emulator.screenshot(&self.dir.join(file)) {
+            let detail = format!("no picture of the screen ({error}), so the other branch");
+            return (self.result(step, Outcome::Warn, detail, None), false);
+        }
+        match self.matches_reference(file, reference, tolerance) {
+            Ok((true, difference)) => {
+                let detail = format!("shows {reference} (difference {difference:.1})");
+                (
+                    self.result(step, Outcome::Pass, detail, Some(file.to_owned())),
+                    true,
+                )
+            }
+            Ok((false, difference)) => {
+                let detail = format!("does not show {reference} (difference {difference:.1})");
+                (
+                    self.result(step, Outcome::Pass, detail, Some(file.to_owned())),
+                    false,
+                )
+            }
+            Err(why) => {
+                let detail = format!("{why}, so the other branch");
+                (
+                    self.result(step, Outcome::Warn, detail, Some(file.to_owned())),
+                    false,
+                )
+            }
+        }
+    }
+
+    fn matches_reference(
+        &self,
+        file: &str,
+        reference: &str,
+        tolerance: f32,
+    ) -> Result<(bool, f64), String> {
+        let plain = Path::new(reference)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+        let path = self
+            .references
+            .as_ref()
+            .filter(|_| plain)
+            .map(|dir| dir.join(reference))
+            .ok_or_else(|| format!("{reference} is not a path in the references folder"))?;
+        let read = |path: &Path| {
+            std::fs::read(path)
+                .ok()
+                .and_then(|png| Thumbnail::from_png(&png).ok())
+        };
+        let expected =
+            read(&path).ok_or_else(|| format!("no reference picture {reference} yet"))?;
+        let now =
+            read(&self.dir.join(file)).ok_or_else(|| "the screenshot does not read".to_owned())?;
+        let difference = now.difference(&expected).mean;
+        Ok((difference <= f64::from(tolerance), difference))
     }
 
     fn expect_screen(
@@ -1284,6 +1414,53 @@ fn collect_logs(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+fn taken_names(list: &[Step]) -> Vec<String> {
+    list.iter()
+        .filter_map(|step| match step {
+            Step::Screenshot { name } | Step::ExpectScreen { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn renamed(step: &Step, taken: &[String], suffix: &str) -> Step {
+    if suffix.is_empty() {
+        return step.clone();
+    }
+    let name = |name: &String| {
+        if taken.contains(name) {
+            format!("{name}{suffix}")
+        } else {
+            name.clone()
+        }
+    };
+    match step {
+        Step::Screenshot { name: shot } => Step::Screenshot { name: name(shot) },
+        Step::ExpectScreen {
+            name: shot,
+            reference,
+            tolerance,
+        } => Step::ExpectScreen {
+            name: name(shot),
+            reference: reference.clone(),
+            tolerance: *tolerance,
+        },
+        Step::ExpectPattern { name: shot } => Step::ExpectPattern { name: name(shot) },
+        Step::ExpectChange {
+            from,
+            to,
+            soft,
+            quiet,
+        } => Step::ExpectChange {
+            from: name(from),
+            to: name(to),
+            soft: *soft,
+            quiet: quiet.iter().map(|[a, b]| [name(a), name(b)]).collect(),
+        },
+        other => other.clone(),
+    }
+}
+
 fn describe_exit(exit: Option<Exit>) -> String {
     match exit {
         Some(Exit::Code(code)) => format!("exit code 0x{code:08x}"),
@@ -1554,6 +1731,56 @@ mod tests {
         drop(stepping);
         let emulator = std::rc::Rc::try_unwrap(shared).ok().unwrap().into_inner();
         (result, emulator)
+    }
+
+    #[test]
+    fn a_repeat_numbers_its_screenshots_and_a_missing_reference_takes_the_other_branch() {
+        let scenario = Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::Repeat {
+                    times: 2,
+                    steps: vec![Step::Screenshot {
+                        name: "shot".to_owned(),
+                    }],
+                },
+                Step::IfScreen {
+                    reference: "none/missing.png".to_owned(),
+                    tolerance: 12.0,
+                    then: vec![Step::Wait { seconds: 1.0 }],
+                    otherwise: vec![Step::Wait { seconds: 2.0 }],
+                },
+                Step::Close { timeout: 10 },
+            ],
+        };
+        let (result, _) = run(FakeEmulator::default(), &scenario);
+        let shots: Vec<&str> = result
+            .steps
+            .iter()
+            .filter_map(|step| match &step.step {
+                Step::Screenshot { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shots, ["shot-1", "shot-2"]);
+        let branch = result
+            .steps
+            .iter()
+            .find(|step| matches!(step.step, Step::IfScreen { .. }))
+            .unwrap();
+        assert_eq!(branch.outcome, Outcome::Warn);
+        assert!(
+            result
+                .steps
+                .iter()
+                .any(|step| step.step == Step::Wait { seconds: 2.0 })
+        );
+        assert!(
+            !result
+                .steps
+                .iter()
+                .any(|step| step.step == Step::Wait { seconds: 1.0 })
+        );
     }
 
     fn waiting(timeout: u32) -> Scenario {

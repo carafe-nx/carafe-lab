@@ -122,6 +122,12 @@ save data is still there, close it.
   stay out of the repository.
 - `randomPresses` — `seconds`, `seed`: presses random buttons for that long, each held 50–500 ms with 0.1–1 s
   between; fails when the game crashes or ends. The same seed presses the same buttons again.
+- `repeat` — `times`, `steps`: runs the steps that many times; screenshots taken inside get `-1`, `-2`… after
+  their names, and comparisons inside follow them. A failure stops the repeat.
+- `ifScreen` — `reference`, `tolerance`, `then`, `otherwise`: takes a picture of the screen (`if-<n>.png`) and runs
+  `then` when it shows the reference picture, `otherwise` when it does not or there is no reference yet; the step
+  itself does not fail. Blocks nest, need a running game and neither launch nor close it. The Scenarios screen edits
+  the blocks in place and draws the scenario as a flowchart under the steps.
 - `close` — asks the game to close and waits `timeout` seconds; then stops it. Lab sends Eden SIGUSR1, and
   Eden closes the software the way the HOME Menu does, without asking (`patches/eden/0025`): a hotkey cannot do
   this, because without a window manager Qt matches no shortcut.

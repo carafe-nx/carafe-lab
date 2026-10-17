@@ -497,6 +497,11 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "No slower than the last version",
             )
             .to_owned(),
+        Step::Repeat { times, .. } => format!("{} ×{times}", lang.pick("Повтор", "Repeat")),
+        Step::IfScreen { reference, .. } => format!(
+            "{} {reference}?",
+            lang.pick("Если на экране", "If the screen shows")
+        ),
         Step::RandomPresses { seconds, .. } => format!(
             "{} {seconds} {}",
             lang.pick("Случайные нажатия", "Random presses for"),

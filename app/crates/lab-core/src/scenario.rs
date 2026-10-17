@@ -111,6 +111,30 @@ pub enum Step {
         #[ts(type = "number")]
         seed: u64,
     },
+    /// Runs `steps` `times` times in a row; the screenshots taken inside get `-1`, `-2`… after their names.
+    #[serde(rename_all = "camelCase")]
+    Repeat {
+        /// How many times.
+        times: u32,
+        /// The steps, which neither launch nor close the game.
+        steps: Vec<Step>,
+    },
+    /// Looks at the screen and runs `then` when it shows what the reference picture shows, `otherwise` when it does
+    /// not; neither branch fails the step.
+    #[serde(rename_all = "camelCase")]
+    IfScreen {
+        /// The reference picture, a path in the `references` folder next to `lab.json`.
+        reference: String,
+        /// The mean brightness difference, 0–255, the screen may have from the reference.
+        #[serde(default = "default_tolerance")]
+        tolerance: f32,
+        /// The steps when the screen shows it.
+        #[serde(default)]
+        then: Vec<Step>,
+        /// The steps when it does not.
+        #[serde(default)]
+        otherwise: Vec<Step>,
+    },
     /// Asks the game to close the way the HOME Menu does, and waits for it to end.
     #[serde(rename_all = "camelCase")]
     Close {
@@ -122,6 +146,9 @@ pub enum Step {
 
 /// The longest [`Step::RandomPresses`], in seconds.
 pub const MAX_RANDOM_SECONDS: u32 = 3600;
+
+/// The most times a [`Step::Repeat`] runs its steps.
+pub const MAX_REPEAT: u32 = 1000;
 
 fn default_tolerance() -> f32 {
     12.0
@@ -194,11 +221,27 @@ impl Scenario {
     ///
     /// The first [`ScenarioError`] found; step numbers count from one.
     pub fn check(&self) -> Result<(), ScenarioError> {
-        let mut running = false;
-        let mut screenshots: Vec<&str> = Vec::new();
-        let mut remembered = false;
-        for (index, step) in self.steps.iter().enumerate() {
-            let number = index + 1;
+        check_steps(&self.steps, &mut Checking::default(), false)
+    }
+}
+
+#[derive(Default)]
+struct Checking<'a> {
+    running: bool,
+    screenshots: Vec<&'a str>,
+    remembered: bool,
+    number: usize,
+}
+
+fn check_steps<'a>(
+    steps: &'a [Step],
+    state: &mut Checking<'a>,
+    in_block: bool,
+) -> Result<(), ScenarioError> {
+    {
+        for step in steps {
+            state.number += 1;
+            let number = state.number;
             let needs_game = matches!(
                 step,
                 Step::WaitFor { .. }
@@ -207,19 +250,45 @@ impl Scenario {
                     | Step::Close { .. }
                     | Step::RandomPresses { .. }
                     | Step::ExpectScreen { .. }
+                    | Step::Repeat { .. }
+                    | Step::IfScreen { .. }
                     | Step::ExpectInput
             );
-            if needs_game && !running {
+            if needs_game && !state.running {
                 return Err(ScenarioError::NotRunning(number));
             }
+            if in_block && matches!(step, Step::Launch | Step::Close { .. }) {
+                return Err(ScenarioError::Format(format!(
+                    "step {number} launches or closes the game inside a block"
+                )));
+            }
+            let running = &mut state.running;
+            let screenshots = &mut state.screenshots;
+            let remembered = &mut state.remembered;
             match step {
+                Step::Repeat { times, steps } => {
+                    if *times == 0 || *times > MAX_REPEAT {
+                        return Err(ScenarioError::Format(format!(
+                            "step {number} repeats {times} times; 1 to {MAX_REPEAT} are allowed"
+                        )));
+                    }
+                    check_steps(steps, state, true)?;
+                    continue;
+                }
+                Step::IfScreen {
+                    then, otherwise, ..
+                } => {
+                    check_steps(then, state, true)?;
+                    check_steps(otherwise, state, true)?;
+                    continue;
+                }
                 Step::Launch => {
-                    if running {
+                    if *running {
                         return Err(ScenarioError::AlreadyRunning(number));
                     }
-                    running = true;
+                    *running = true;
                 }
-                Step::Close { .. } => running = false,
+                Step::Close { .. } => *running = false,
                 Step::Wait { seconds } => check_time(*seconds, true, number)?,
                 Step::RandomPresses { seconds, .. }
                     if *seconds == 0 || *seconds > MAX_RANDOM_SECONDS =>
@@ -255,16 +324,18 @@ impl Scenario {
                 Step::ExpectPattern { name } if !screenshots.contains(&name.as_str()) => {
                     return Err(ScenarioError::UnknownScreenshot(number, name.clone()));
                 }
-                Step::ExpectSave => remembered = true,
-                Step::ExpectSaveKept if !remembered => {
+                Step::ExpectSave => *remembered = true,
+                Step::ExpectSaveKept if !*remembered => {
                     return Err(ScenarioError::NothingRemembered(number));
                 }
                 _ => {}
             }
         }
-        Ok(())
     }
+    Ok(())
+}
 
+impl Scenario {
     /// Returns the scenario for a game that has none of its own.
     ///
     /// It launches the game and waits for the first frame, presses A and looks for a change on the screen
@@ -405,6 +476,35 @@ mod tests {
     #[test]
     fn the_standard_scenario_is_valid() {
         assert_eq!(Scenario::standard(600).check(), Ok(()));
+    }
+
+    #[test]
+    fn blocks_need_a_running_game_and_neither_launch_nor_close_it() {
+        let json = r#"{ "steps": [
+            { "step": "launch" },
+            { "step": "repeat", "times": 3, "steps": [
+                { "step": "press", "buttons": ["A"] },
+                { "step": "ifScreen", "reference": "game/menu.png",
+                  "then": [{ "step": "screenshot", "name": "menu" }],
+                  "otherwise": [{ "step": "wait", "seconds": 1 }] }
+            ] },
+            { "step": "close" }
+        ] }"#;
+        let scenario = Scenario::parse(json).unwrap();
+        assert!(matches!(&scenario.steps[1], Step::Repeat { times: 3, steps } if steps.len() == 2));
+        let closing = r#"{ "steps": [ { "step": "launch" },
+            { "step": "repeat", "times": 2, "steps": [{ "step": "close" }] } ] }"#;
+        assert!(matches!(
+            Scenario::parse(closing),
+            Err(ScenarioError::Format(_))
+        ));
+        let never = r#"{ "steps": [ { "step": "launch" }, { "step": "repeat", "times": 0, "steps": [] } ] }"#;
+        assert!(matches!(
+            Scenario::parse(never),
+            Err(ScenarioError::Format(_))
+        ));
+        let early = r#"{ "steps": [ { "step": "repeat", "times": 2, "steps": [] } ] }"#;
+        assert_eq!(Scenario::parse(early), Err(ScenarioError::NotRunning(1)));
     }
 
     #[test]

@@ -16,7 +16,7 @@ const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "expectChange",
   "expectPattern", "expectScreen", "expectInput", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
-  "close",
+  "repeat", "ifScreen", "close",
 ];
 
 export function newStep(kind: Step["step"], steps: Step[]): Step {
@@ -48,6 +48,10 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "expectPerformance" };
     case "randomPresses":
       return { step: "randomPresses", seconds: 60, seed: 1 };
+    case "repeat":
+      return { step: "repeat", times: 3, steps: [{ step: "press", buttons: ["A"], hold: 0.15 }] };
+    case "ifScreen":
+      return { step: "ifScreen", reference: "", tolerance: 12, then: [], otherwise: [] };
     case "close":
       return { step: "close", timeout: 60 };
   }
@@ -84,7 +88,108 @@ export function StepEditor({ step, index, count, shots, onChange, onMove, onRemo
           ✕
         </Button>
       </span>
+      {step.step === "repeat" ? (
+        <div className={styles.nested}>
+          <StepList steps={step.steps} shots={shots} nested onChange={(steps) => onChange({ ...step, steps })} />
+        </div>
+      ) : null}
+      {step.step === "ifScreen" ? (
+        <div className={styles.nested}>
+          <span className={styles.branch}>{t("scenarios.then")}</span>
+          <StepList steps={step.then} shots={shots} nested onChange={(then) => onChange({ ...step, then })} />
+          <span className={styles.branch}>{t("scenarios.otherwise")}</span>
+          <StepList
+            steps={step.otherwise}
+            shots={shots}
+            nested
+            onChange={(otherwise) => onChange({ ...step, otherwise })}
+          />
+        </div>
+      ) : null}
     </li>
+  );
+}
+
+const OUTSIDE_BLOCKS: Step["step"][] = ["launch", "close"];
+
+export function allShots(steps: Step[]): string[] {
+  return steps.flatMap((step) => {
+    switch (step.step) {
+      case "screenshot":
+      case "expectScreen":
+        return [step.name];
+      case "repeat":
+        return allShots(step.steps);
+      case "ifScreen":
+        return [...allShots(step.then), ...allShots(step.otherwise)];
+      default:
+        return [];
+    }
+  });
+}
+
+type StepListProps = {
+  steps: Step[];
+  shots: string[];
+  nested?: boolean;
+  onChange: (steps: Step[]) => void;
+};
+
+export function StepList({ steps, shots, nested = false, onChange }: StepListProps) {
+  const { t } = useTranslation();
+  const move = (index: number, offset: number) => {
+    const next = [...steps];
+    const [taken] = next.splice(index, 1);
+    if (taken) next.splice(index + offset, 0, taken);
+    onChange(next);
+  };
+  const kinds = nested ? NEW_STEPS.filter((kind) => !OUTSIDE_BLOCKS.includes(kind)) : NEW_STEPS;
+  return (
+    <>
+      <ol className={styles.steps}>
+        {steps.map((step, index) => (
+          <StepEditor
+            key={index}
+            step={step}
+            index={index}
+            count={steps.length}
+            shots={shots}
+            onChange={(changed) => onChange(steps.map((old, at) => (at === index ? changed : old)))}
+            onMove={(offset) => move(index, offset)}
+            onRemove={() => onChange(steps.filter((_, at) => at !== index))}
+          />
+        ))}
+      </ol>
+      {nested ? (
+        <select
+          className={styles.select}
+          aria-label={t("scenarios.add")}
+          value=""
+          onChange={(event) => {
+            const kind = event.target.value as Step["step"];
+            if (kind) onChange([...steps, newStep(kind, steps)]);
+          }}
+        >
+          <option value="">+ {t("scenarios.add")}</option>
+          {kinds.map((kind) => (
+            <option key={kind} value={kind}>
+              {t(`steps.${kind}`)}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <>
+          <span className={styles.addLabel}>{t("scenarios.add")}</span>
+          <div className={styles.palette}>
+            {kinds.map((kind) => (
+              <Button key={kind} onClick={() => onChange([...steps, newStep(kind, steps)])}>
+                + {t(`steps.${kind}`)}
+              </Button>
+            ))}
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -282,6 +387,28 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
           <span>{t("scenarios.sec")}</span>
           <label htmlFor={`${id}-seed`}>{t("steps.seed")}</label>
           <NumberInput id={`${id}-seed`} value={step.seed} onChange={(seed) => onChange({ ...step, seed })} />
+        </>
+      );
+    case "repeat":
+      return (
+        <>
+          <NumberInput id={`${id}-times`} value={step.times} onChange={(times) => onChange({ ...step, times })} />
+          <span>{t("scenarios.times")}</span>
+        </>
+      );
+    case "ifScreen":
+      return (
+        <>
+          <label htmlFor={`${id}-reference`}>{t("steps.reference")}</label>
+          <input
+            id={`${id}-reference`}
+            className={styles.text}
+            placeholder="openttd/menu.png"
+            value={step.reference}
+            onChange={(event) => onChange({ ...step, reference: event.target.value.trim() })}
+          />
+          <label htmlFor={`${id}-tolerance`}>{t("steps.tolerance")}</label>
+          <NumberInput id={`${id}-tolerance`} value={step.tolerance} onChange={(tolerance) => onChange({ ...step, tolerance })} />
         </>
       );
     default:

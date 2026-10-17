@@ -29,7 +29,7 @@ export function StepLine({ step, aside }: { step: Step; aside?: ReactNode }) {
   );
 }
 
-function StepParams({ step }: { step: Step }) {
+export function StepParams({ step }: { step: Step }) {
   const { t } = useTranslation();
   const params: string[] = [];
   switch (step.step) {
@@ -61,6 +61,12 @@ function StepParams({ step }: { step: Step }) {
       break;
     case "expectPerformance":
       params.push(step.threshold === undefined ? t("steps.gameThreshold") : `${step.threshold} %`);
+      break;
+    case "repeat":
+      params.push(`×${step.times}`);
+      break;
+    case "ifScreen":
+      params.push(step.reference || "—");
       break;
     case "randomPresses":
       params.push(t("units.seconds", { count: step.seconds }));

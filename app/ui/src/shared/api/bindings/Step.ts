@@ -74,7 +74,31 @@ seconds: number,
 /**
  * The seed of the presses, so a run that broke the game can press the same again.
  */
-seed: number, } | { "step": "close", 
+seed: number, } | { "step": "repeat", 
+/**
+ * How many times.
+ */
+times: number, 
+/**
+ * The steps, which neither launch nor close the game.
+ */
+steps: Array<Step>, } | { "step": "ifScreen", 
+/**
+ * The reference picture, a path in the `references` folder next to `lab.json`.
+ */
+reference: string, 
+/**
+ * The mean brightness difference, 0–255, the screen may have from the reference.
+ */
+tolerance: number, 
+/**
+ * The steps when the screen shows it.
+ */
+then: Array<Step>, 
+/**
+ * The steps when it does not.
+ */
+otherwise: Array<Step>, } | { "step": "close", 
 /**
  * Seconds to wait for the game to end before it is stopped by force.
  */
