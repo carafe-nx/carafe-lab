@@ -1,7 +1,6 @@
 //! `carafe-lab`: builds games and the probe programs, runs them in Eden and writes the report.
 
 mod cli;
-mod live;
 mod releases;
 
 use std::fs;
@@ -10,7 +9,6 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cli::{Args, Command};
-use crate::live::Live;
 use carafe_core::cancel::CancelToken;
 use carafe_core::metadata::Metadata;
 use carafe_core::ports::FolderInspector;
@@ -48,8 +46,6 @@ use serde::Serialize;
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
 const DESKTOP: &str = "app/crates/carafe-desktop";
-const PAGE_IDLE: Duration = Duration::from_secs(60);
-const PAGE_LONGEST: Duration = Duration::from_secs(30 * 60);
 const QUEUE_POLL: Duration = Duration::from_secs(2);
 const PERF_WINDOW_MS: u64 = 10_000;
 const LOG_PROBLEMS_SHOWN: usize = 15;
@@ -374,7 +370,7 @@ fn try_commit(
             "--runtime",
         ])
         .arg(&runtime)
-        .args(["--no-retry", "--no-open", "--json", "--who", "bisect"]);
+        .args(["--no-retry", "--json", "--who", "bisect"]);
     let Ok(output) = command.output() else {
         return bisect::Verdict::Skip;
     };
@@ -1177,27 +1173,6 @@ impl Lab {
         };
         let lang = self.lang;
         let total = planned.len();
-        let live = if json {
-            None
-        } else {
-            let live = Live::start(lang, &started_at.minutes(), total, !self.args.build_only)?;
-            live.watch_presses(self.eden.press_log());
-            println!("live page: {}", live.url());
-            if !self.args.no_open {
-                open_in_browser(&live.url());
-            }
-            Some(live)
-        };
-        if let Some(live) = &live {
-            let page = live.stop_token();
-            let stop = stop.clone();
-            std::thread::spawn(move || {
-                while !page.is_cancelled() && !stop.is_cancelled() {
-                    std::thread::sleep(Duration::from_millis(500));
-                }
-                stop.cancel();
-            });
-        }
         let stamp = RunStamp {
             carafe_commit: git_commit_with_changes(&self.carafe),
             runtime_hash: file_hash(&self.runtime),
@@ -1252,9 +1227,6 @@ impl Lab {
             } else {
                 print_event(event, total);
             }
-            if let Some(live) = &live {
-                show_on_page(live, event, lang);
-            }
         };
         let report = engine.run(
             planned,
@@ -1264,14 +1236,6 @@ impl Lab {
             &mut on_event,
         )?;
         drop(holding);
-        if let Some(live) = live {
-            live.finish();
-            println!(
-                "the live page stays up; close it with its button or the tab, or press Ctrl+C"
-            );
-            let closed = live.wait_for_close(PAGE_IDLE, PAGE_LONGEST);
-            println!("live page closed: {closed:?}");
-        }
         let [_, _, _, failed] = report.counts();
         Ok(if failed == 0 {
             ExitCode::SUCCESS
@@ -1354,20 +1318,9 @@ fn print_event(event: &Event, total: usize) {
         Event::BuildFailed { error } => println!("  build failed: {error}"),
         Event::Step { step } => print_step(step),
         Event::Reached { stage } => println!("  reached: {}", lab_run::run::stage_name(*stage)),
-        Event::Stopped { left } => println!("stopped from the live page; {left} games left out"),
+        Event::Stopped { left } => println!("stopped; {left} games left out"),
         Event::RunFinished { report, .. } => println!("report: {report}"),
         Event::RunStarted { .. } | Event::LaunchLogs { .. } | Event::GameFinished { .. } => {}
-    }
-}
-
-fn show_on_page(live: &Live, event: &Event, lang: Lang) {
-    match event {
-        Event::RunStarted { dir, .. } => live.set_run_dir(Path::new(dir)),
-        Event::GameStarted { index, name } => live.begin_game(*index, name),
-        Event::LaunchLogs { dir } => live.begin_run(Path::new(dir)),
-        Event::Step { step } => live.step(step, lang),
-        Event::GameFinished { outcome, .. } => live.end_game(*outcome),
-        _ => {}
     }
 }
 
@@ -1467,19 +1420,6 @@ fn console_files(argument: Option<&Path>, config_path: &Path) -> Result<PathBuf,
             "no console files to pack with: choose them in the window's Emulator screen or in Carafe, or pass --keys"
                 .to_owned()
         })
-}
-
-fn open_in_browser(url: &str) {
-    let opened = if cfg!(windows) {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()
-    } else {
-        std::process::Command::new("xdg-open").arg(url).spawn()
-    };
-    if opened.is_err() {
-        println!("open {url} in a browser to watch the run");
-    }
 }
 
 fn hacbrewpack_name() -> &'static str {

@@ -82,7 +82,7 @@ struct Built {
     nsp: PathBuf,
 }
 
-/// What the run is doing, for the window, the live page and `--json`.
+/// What the run is doing, for the window, the terminal and `--json`.
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase", tag = "event")]
 #[ts(export)]

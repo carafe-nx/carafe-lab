@@ -69,9 +69,8 @@ Options:
   --rebuild           with --nsp: build each NSP again from its game folder with the lab's runtime and the
                       NSP's own settings
   --video <v>         full, low (about five pictures a second, for measuring) or off; default full
-  --no-open           do not open the live page in the browser
-  --json              print the run as JSON lines, one event each, without the live page;
-                      status, games and runs print one JSON document
+  --json              print the run as JSON lines, one event each; status, games and runs print one JSON
+                      document
   --who <name>        who starts the run, shown in the queue; default: command line
   --minutes <n>       play: minutes to keep the game running
   --hold <s>          press: seconds to hold the buttons
@@ -202,8 +201,6 @@ pub struct Args {
     pub json: bool,
     /// `--who`.
     pub who: Option<String>,
-    /// `--no-open`.
-    pub no_open: bool,
     /// `--random`.
     pub random: usize,
     /// `--seed`.
@@ -282,7 +279,6 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         video: Video::Full,
         json: false,
         who: None,
-        no_open: false,
         random: 0,
         seed: None,
         probes_dir: None,
@@ -371,7 +367,6 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 parsed.diagnostics = diagnostics::parse_list(&value("diagnostics")?)
                     .map_err(|_| ArgsError::Value(arg.clone(), "names such as verbose,stacks"))?;
             }
-            "--no-open" => parsed.no_open = true,
             "--json" => parsed.json = true,
             other if other.starts_with("--") => return Err(ArgsError::Option(other.to_owned())),
             other => match &mut parsed.command {
@@ -415,7 +410,7 @@ mod tests {
     #[test]
     fn run_takes_a_set_and_overrides() {
         let parsed = parse(&args(
-            "run quick --gpu software --lang en --only OpenTTD --timeout 900 --no-open",
+            "run quick --gpu software --lang en --only OpenTTD --timeout 900",
         ))
         .unwrap();
         assert_eq!(
@@ -428,7 +423,6 @@ mod tests {
         assert_eq!(parsed.lang, Some(Lang::En));
         assert_eq!(parsed.only.as_deref(), Some("OpenTTD"));
         assert_eq!(parsed.timeout, Some(900));
-        assert!(parsed.no_open);
     }
 
     #[test]

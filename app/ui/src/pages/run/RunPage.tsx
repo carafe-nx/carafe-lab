@@ -4,10 +4,10 @@ import { useNavigate } from "react-router";
 import { useLab } from "@/features/lab/LabProvider";
 import { outcomeTone, runPath } from "@/features/lab/outcome";
 import { FpsChart } from "@/features/lab/FpsChart";
-import { JoyCon } from "@/features/lab/JoyCon";
 import { LiveScreen } from "@/features/lab/LiveScreen";
 import { ScoutPanel } from "@/features/lab/ScoutPanel";
 import { StepLine } from "@/features/lab/StepLine";
+import { SwitchDevice } from "@/features/lab/SwitchDevice";
 import { folderName, useRunEvents } from "@/features/lab/useRunEvents";
 import type { Event } from "@/shared/api/bindings/Event";
 import type { Outcome } from "@/shared/api/bindings/Outcome";
@@ -210,19 +210,15 @@ export function RunPage() {
           ))}
         </div>
         <div className={run.column}>
-          <div className={run.switch}>
-            <JoyCon side="left" lit={lit} />
-            <div className={run.screen}>
-              {showLive ? (
-                <LiveScreen key={`${liveDir}-${launches}-${reloads}`} control={control} title={t("run.screen")} />
-              ) : screen.data ? (
-                <img src={screen.data.url} alt={t("run.screen")} />
-              ) : (
-                <span>{t("run.noScreen")}</span>
-              )}
-            </div>
-            <JoyCon side="right" lit={lit} />
-          </div>
+          <SwitchDevice lit={lit}>
+            {showLive ? (
+              <LiveScreen key={`${liveDir}-${launches}-${reloads}`} control={control} title={t("run.screen")} />
+            ) : screen.data ? (
+              <img src={screen.data.url} alt={t("run.screen")} />
+            ) : (
+              <span>{t("run.noScreen")}</span>
+            )}
+          </SwitchDevice>
           {showLive ? (
             <div className={styles.actions}>
               <Button variant={control ? "primary" : "default"} onClick={() => takeControl(!control)}>

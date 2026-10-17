@@ -12,7 +12,7 @@ up is [docs/lab.md](docs/lab.md).
   - `lab-run` — a run: the steps of a scenario against the `Emulator` trait, the report, the history of runs and the
     queue for the emulator.
   - `lab-eden` — the `Emulator` for Eden in Docker.
-  - `lab-cli` — the command line `carafe-lab` and the live page; the composition root of a run.
+  - `lab-cli` — the command line `carafe-lab`; the composition root of a run.
   - `lab-desktop` — the Tauri window. It reads the lab through the crates and starts runs as `carafe-lab run --json`
     in their own process, so a run outlives the window.
   - `ui/` — React in Carafe's style: `app/` (shell, routes), `pages/`, `features/lab/`, `shared/` (api with ts-rs

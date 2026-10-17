@@ -430,7 +430,7 @@
     "command line": "the command line"
   },
   "scenarios": {
-    "hint": "The steps the lab takes in a game. Changes are saved to the game's scenario file in scenarios/.",
+    "hint": "The steps the lab takes in a game. Changes are saved to the game's scenario file in the work folder.",
     "saved": "Saved to {{file}}",
     "reset": "Undo changes",
     "flow": "Flowchart",

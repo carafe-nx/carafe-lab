@@ -1,0 +1,88 @@
+.device {
+  position: relative;
+  width: min(100%, 1100px);
+  aspect-ratio: 251 / 124;
+  margin-inline: auto;
+}
+
+.device svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.shell {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 0.9;
+}
+
+.fixed {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 0.6;
+  transition:
+    fill 120ms,
+    stroke 120ms;
+}
+
+.key {
+  fill: var(--panel-solid);
+  stroke: var(--text);
+  stroke-width: 0.7;
+  transition:
+    fill 120ms,
+    stroke 120ms;
+}
+
+.ring {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 0.7;
+  transition: stroke 120ms;
+}
+
+.keyText {
+  fill: var(--text);
+  font: 700 3.6px var(--font);
+  text-anchor: middle;
+  transition: fill 120ms;
+}
+
+.on .key,
+.on .fixed {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.on .ring {
+  stroke: var(--accent);
+}
+
+.on .keyText {
+  fill: var(--panel-solid);
+}
+
+.screen {
+  position: absolute;
+  left: calc(49.5 / 251 * 100%);
+  top: calc(24 / 124 * 100%);
+  width: calc(152 / 251 * 100%);
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  background: #000;
+  border-radius: 2px;
+  overflow: hidden;
+  color: #a99ba2;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.screen img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}

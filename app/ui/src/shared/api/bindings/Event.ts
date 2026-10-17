@@ -4,7 +4,7 @@ import type { Stage } from "./Stage";
 import type { StepResult } from "./StepResult";
 
 /**
- * What the run is doing, for the window, the live page and `--json`.
+ * What the run is doing, for the window, the terminal and `--json`.
  */
 export type Event = { "event": "waiting", 
 /**

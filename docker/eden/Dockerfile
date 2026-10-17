@@ -11,7 +11,6 @@ COPY --from=scripts xwatch.c /tmp/xwatch.c
 RUN gcc -O2 -Wall -o /usr/local/bin/xwatch /tmp/xwatch.c -lX11 -lXext && rm /tmp/xwatch.c
 COPY eden /opt/eden/bin/eden
 COPY --from=scripts run-eden.sh /usr/local/bin/run-eden
-COPY --from=scripts carafe.html /usr/share/novnc/carafe.html
 RUN chmod +x /opt/eden/bin/eden /usr/local/bin/run-eden \
     && echo "v0.2.1+carafe-lab $(uname -m)" > /opt/eden/carafe-version
 

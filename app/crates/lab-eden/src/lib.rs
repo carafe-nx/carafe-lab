@@ -19,7 +19,6 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -101,7 +100,6 @@ pub struct Eden {
     settings: BTreeMap<String, String>,
     title: Option<TitleId>,
     ended: Option<String>,
-    presses: PressLog,
     one_eden: bool,
     fresh: bool,
     session: Option<Session>,
@@ -143,32 +141,6 @@ pub fn replies_after(text: &str, after: u64) -> Vec<Reply> {
         .collect()
 }
 
-/// The buttons the lab pressed lately, shared with the live page.
-#[derive(Debug, Clone, Default)]
-pub struct PressLog(Arc<Mutex<Vec<(String, Instant)>>>);
-
-impl PressLog {
-    /// Shortest time a press stays visible, so that a page polling once a second sees it.
-    pub const SHOWN_AT_LEAST: Duration = Duration::from_millis(1200);
-
-    /// Records that `buttons`, by their names in `lab.json` such as `A` or `ZL`, are held for `hold`.
-    pub fn record(&self, buttons: &[String], hold: Duration) {
-        let until = Instant::now() + hold.max(Self::SHOWN_AT_LEAST);
-        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        held.retain(|(name, _)| !buttons.contains(name));
-        held.extend(buttons.iter().map(|name| (name.clone(), until)));
-    }
-
-    /// Returns the names of the buttons held now.
-    #[must_use]
-    pub fn held(&self) -> Vec<String> {
-        let now = Instant::now();
-        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        held.retain(|(_, until)| *until > now);
-        held.iter().map(|(name, _)| name.clone()).collect()
-    }
-}
-
 impl Eden {
     /// Creates the emulator.
     ///
@@ -190,7 +162,6 @@ impl Eden {
             settings: BTreeMap::new(),
             title: None,
             ended: None,
-            presses: PressLog::default(),
             one_eden: false,
             fresh: false,
             session: None,
@@ -253,12 +224,6 @@ impl Eden {
     pub fn with_settings(mut self, settings: BTreeMap<String, String>) -> Self {
         self.settings = settings;
         self
-    }
-
-    /// Returns the log of the buttons this emulator presses, for the live page.
-    #[must_use]
-    pub fn press_log(&self) -> PressLog {
-        self.presses.clone()
     }
 
     /// Joins the one Eden another process started, so presses go through its control channel and the logs read are
@@ -1003,8 +968,6 @@ impl Emulator for Eden {
     }
 
     fn press(&mut self, buttons: &[SwitchButton], hold: Duration) -> Result<(), EmulatorError> {
-        let names: Vec<String> = buttons.iter().map(|&button| button_name(button)).collect();
-        self.presses.record(&names, hold);
         let keys: Vec<&str> = buttons.iter().map(|&button| eden_key(button)).collect();
         let keys = keys.join(" ");
         if let Some(seen) = self.session.as_ref().map(|session| session.seen) {
@@ -1076,8 +1039,6 @@ impl Emulator for Eden {
                 Closed::Forced
             });
         }
-        self.presses
-            .record(&["HOME".to_owned()], PressLog::SHOWN_AT_LEAST);
         if let Some(booted_at) = self.session.as_ref().map(|session| session.booted_at) {
             if self.stopped_since_boot() {
                 return Ok(if self.shut_down() {
@@ -1293,17 +1254,6 @@ pub fn button_name(button: SwitchButton) -> String {
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_default()
-}
-
-/// Returns every button with the key of Eden's default keyboard layout that presses it, as a JSON object from
-/// key to button name, for the live page to light up the buttons a viewer presses.
-#[must_use]
-pub fn eden_keys_json() -> String {
-    let pairs: serde_json::Map<String, serde_json::Value> = SwitchButton::ALL
-        .iter()
-        .map(|&button| (eden_key(button).to_owned(), button_name(button).into()))
-        .collect();
-    serde_json::Value::Object(pairs).to_string()
 }
 
 /// Returns the key of Eden's default keyboard layout that presses `button`.
