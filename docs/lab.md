@@ -85,7 +85,8 @@ build wizard would take it: the largest game `.exe`, its product name, default s
 }
 ```
 
-`scenario` is a file relative to `lab.json` or the steps themselves: `{ "steps": [ … ] }`. `sets` names lists of
+`scenario` is a file relative to `lab.json` or the steps themselves: `{ "steps": [ … ] }`. Scenario files, like
+`lab.json`, are your own: git ignores `scenarios/`. `sets` names lists of
 games; `run <set>` runs a set's games even when they are disabled. `settings` is merged over the defaults in the shape
 of `carafe.json`'s `settings`. A game always gets the same
 Title ID from its folder name, so its data in the emulator is found again; its save data is removed before each run.

@@ -17,7 +17,8 @@ up is [docs/lab.md](docs/lab.md).
     in their own process, so a run outlives the window.
   - `ui/` — React in Carafe's style: `app/` (shell, routes), `pages/`, `features/lab/`, `shared/` (api with ts-rs
     bindings, i18n, theme, controls). Types come from Rust through ts-rs: `npm run bindings`.
-- `scenarios/` — scenario files a game in `lab.json` names with `"scenario": "scenarios/…"`.
+- `scenarios/` — scenario files a game in `lab.json` names with `"scenario": "scenarios/…"`; like `lab.json` they are
+  each developer's own, and git ignores them.
 - `patches/eden/`, `patches/mesa/` — Lab's changes to Eden and to Mesa, applied in name order when each is built.
 - `external/eden`, `external/mesa`, `external/carafe` — git submodules pinned to exact commits (Mesa shallow, at its
   release tag). They are never edited: Eden's and Mesa's changes go into `patches/`, Carafe's into Carafe's own
