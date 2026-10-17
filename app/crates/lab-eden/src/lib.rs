@@ -29,6 +29,7 @@ use lab_core::emulator::{EdenCpu, Gpu, Video};
 use lab_core::firmware;
 use lab_core::perf::{self, PerfSample};
 pub use lab_core::redact::redact;
+use lab_core::resources::{self, ResourceSample};
 use sha2::{Digest, Sha256};
 
 use lab_run::run::{Closed, Emulator, EmulatorError, GameLogs, SaveFile};
@@ -44,6 +45,7 @@ const FRAME_FILE: &str = "lab-frame.png";
 const FRAME_WAIT: Duration = Duration::from_secs(5);
 const CONTAINER_END_FILE: &str = "container-end.log";
 const SESSION_FILE: &str = "session.log";
+const RESOURCES_FILE: &str = "resources.log";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_GRACE: Duration = Duration::from_secs(15);
@@ -557,11 +559,13 @@ impl Eden {
         }
         self.prepare()?;
         self.remove_container();
+        let _ = fs::remove_file(self.user_dir.join("log").join(RESOURCES_FILE));
         self.push_nand()?;
         self.ended = None;
         let mut args = self.container_args(dir);
         args.push(format!("/nsp/{name}"));
         docker_owned(&args)?;
+        self.perf_from = Some(unix_millis());
         self.wait_for_window()
     }
 
@@ -623,6 +627,7 @@ impl Eden {
         self.session = None;
         self.prepare()?;
         self.remove_container();
+        let _ = fs::remove_file(self.user_dir.join("log").join(RESOURCES_FILE));
         self.push_nand()?;
         self.ended = None;
         let control = self.control_dir();
@@ -989,7 +994,16 @@ impl Emulator for Eden {
         let emulator_log = self.user_dir.join("log").join("eden_log.txt");
         if emulator_log.is_file() {
             fs::create_dir_all(dest).map_err(io)?;
-            fs::copy(&emulator_log, dest.join("eden_log.txt")).map_err(io)?;
+            fs::write(dest.join("eden_log.txt"), self.emulator_log()).map_err(io)?;
+        }
+        let readings = self.launch_resources();
+        if !readings.is_empty() {
+            fs::create_dir_all(dest).map_err(io)?;
+            let lines: String = readings
+                .iter()
+                .map(|sample| format!("{} {} {}\n", sample.at, sample.memory, sample.cpu_usec))
+                .collect();
+            fs::write(dest.join(RESOURCES_FILE), lines).map_err(io)?;
         }
         let container_end = self.user_dir.join("log").join(CONTAINER_END_FILE);
         if container_end.is_file() {
@@ -1053,6 +1067,14 @@ impl Emulator for Eden {
             Some(session) => text.get(session.log_from..).unwrap_or(&text).to_owned(),
             None => text,
         }
+    }
+
+    fn launch_resources(&self) -> Vec<ResourceSample> {
+        let Some(from) = self.perf_from else {
+            return Vec::new();
+        };
+        let text = read_text(&self.user_dir.join("log").join(RESOURCES_FILE));
+        resources::since(&resources::parse(&text), from)
     }
 
     fn launch_perf(&self) -> Vec<PerfSample> {

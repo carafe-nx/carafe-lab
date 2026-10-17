@@ -14,6 +14,8 @@ use lab_core::input_check::{self, PressCheck};
 use lab_core::milestones::{Exit, Launch, Stage};
 use lab_core::perf::{self, PerfSample, PerfSummary};
 use lab_core::picture::{self, Change, PatternCheck, Thumbnail};
+use lab_core::problems::{self, Problem, ProblemCounts};
+use lab_core::resources::{self, ResourceSample, ResourceSummary};
 use lab_core::scenario::{Milestone, Scenario, Step};
 
 const POLL: Duration = Duration::from_millis(500);
@@ -146,6 +148,12 @@ pub trait Emulator {
     fn launch_perf(&self) -> Vec<PerfSample> {
         Vec::new()
     }
+
+    /// Returns the emulator's memory and processor readings since the current or last launch started; empty when it
+    /// does not tell them.
+    fn launch_resources(&self) -> Vec<ResourceSample> {
+        Vec::new()
+    }
 }
 
 /// Time for the runner: real in a run, simulated in tests.
@@ -206,6 +214,12 @@ pub struct LaunchRecord {
     /// The emulator's performance while the game drew; `None` when the emulator does not tell it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub perf: Option<PerfSummary>,
+    /// The container's peak memory and processor use over the launch; `None` when the emulator does not tell it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ResourceSummary>,
+    /// Error and warning lines in the launch's logs, listed in its `problems.json`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problems: Option<ProblemCounts>,
 }
 
 /// Everything a scenario found for one game.
@@ -536,6 +550,8 @@ impl<'a> Runner<'a> {
             launch: Launch::default(),
             logs: format!("launch-{number}"),
             perf: None,
+            resources: None,
+            problems: None,
         });
         self.launch_open = true;
         self.pressed.clear();
@@ -788,8 +804,10 @@ impl<'a> Runner<'a> {
             }
             _ => None,
         };
+        record.resources = resources::summarize(&self.emulator.launch_resources());
         let dest = self.dir.join(&record.logs);
         let _ = self.emulator.take_logs(self.title, &dest);
+        record.problems = write_problems(&dest);
     }
 
     fn result(
@@ -806,6 +824,50 @@ impl<'a> Runner<'a> {
             at: (self.clock.now() - self.started).as_secs_f64(),
             screenshot,
             presses: Vec::new(),
+        }
+    }
+}
+
+/// Name of the file in a launch's log folder that lists the errors and warnings of its logs.
+pub const PROBLEMS_FILE: &str = "problems.json";
+
+fn write_problems(dir: &Path) -> Option<ProblemCounts> {
+    let mut files = Vec::new();
+    collect_logs(dir, &mut files);
+    if files.is_empty() {
+        return None;
+    }
+    files.sort();
+    let found: Vec<Problem> = files
+        .iter()
+        .flat_map(|file| {
+            let name = file
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let text = std::fs::read(file)
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .unwrap_or_default();
+            problems::problems(problems::source_of(&name), &text)
+        })
+        .collect();
+    let json = serde_json::to_string_pretty(&found).ok()?;
+    std::fs::write(dir.join(PROBLEMS_FILE), format!("{json}\n")).ok()?;
+    Some(problems::count(&found))
+}
+
+fn collect_logs(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
+        if path.is_dir() {
+            collect_logs(&path, files);
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "log" || extension == "txt")
+        {
+            files.push(path);
         }
     }
 }

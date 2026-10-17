@@ -18,7 +18,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ### 2. Logs
 
-- [ ] `feature` Every launch: Eden, runtime, Wine errors, DXVK and Mesa warnings; CPU and memory every second
 - [ ] `feature` Frame times of every frame, not only FPS; a screenshot every few seconds
 - [ ] `feature` After a failure the game runs again with detailed logs chosen by the symptom
 - [ ] `feature` On a hang: backtraces of all the game's threads through the gdb stub before the watchdog stops it
@@ -91,6 +90,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Every launch: Eden, runtime, Wine errors, DXVK and Mesa warnings; CPU and memory every second
 - [x] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)
 - [x] `feature` Video turned down (`--video low`, A/B from the window) or off during performance runs
 - [x] `feature` Plans: a scenario chosen for the whole plan instead of each game's own

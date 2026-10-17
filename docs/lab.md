@@ -135,7 +135,11 @@ Each run gets `<work>/runs/<date>/`:
 - `report.json` — the same for tools and for comparing runs;
 - `summary.json` — the run in short, rewritten after every game; `finished` is `false` while it goes;
 - `events.jsonl` — every event of the run, one JSON line each, the same as `run --json` prints;
-- a folder per game: screenshots and the logs of every launch (`launch-1/`, `launch-2/`).
+- a folder per game: screenshots and the logs of every launch (`launch-1/`, `launch-2/`). Each launch folder has
+  Eden's log of that launch only, `resources.log` (the container's memory without the file cache and its processor
+  time, once a second) and `problems.json`: the error and warning lines of Eden, the runtime, Wine, DXVK and Mesa,
+  lines that differ only in numbers counted as one. `summary.json` keeps the peak memory, the processor use and the
+  counts for the History screen.
 
 Together they are the run's dataset: every press in `events.jsonl` has its buttons, hold and time, every screenshot
 step its file, time and outcome, and every check the pictures it compared and its verdict.

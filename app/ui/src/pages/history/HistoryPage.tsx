@@ -201,6 +201,19 @@ function RunCard({ run }: { run: RunSummary }) {
                   {t("fps.summary", { median: Math.round(game.perf.medianFps), low: Math.round(game.perf.lowFps) })}
                 </span>
               ) : null}
+              {game.resources ? (
+                <span className={styles.muted}>
+                  {t("resources.summary", {
+                    memory: (game.resources.peakMemoryMb / 1024).toFixed(1),
+                    cpu: Math.round(game.resources.cpuPercent),
+                  })}
+                </span>
+              ) : null}
+              {game.problems ? (
+                <span className={styles.muted}>
+                  {t("resources.problems", { errors: game.problems.errors, warnings: game.problems.warnings })}
+                </span>
+              ) : null}
             </span>
             <Chip tone={outcomeTone(game.outcome)}>{t(`outcome.${game.outcome}`)}</Chip>
           </div>

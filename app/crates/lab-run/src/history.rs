@@ -9,6 +9,8 @@ use ts_rs::TS;
 use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::Outcome;
 use lab_core::perf::PerfSummary;
+use lab_core::problems::ProblemCounts;
+use lab_core::resources::ResourceSummary;
 
 /// The summary every run keeps next to its report and rewrites after every game.
 pub const SUMMARY_FILE: &str = "summary.json";
@@ -71,6 +73,12 @@ pub struct GameSummary {
     /// The emulator's performance during its first launch; `None` when the emulator did not tell it.
     #[serde(default)]
     pub perf: Option<PerfSummary>,
+    /// The container's peak memory and processor use during its first launch; `None` when not measured.
+    #[serde(default)]
+    pub resources: Option<ResourceSummary>,
+    /// Error and warning lines in the logs of all its launches; `None` when no logs were read.
+    #[serde(default)]
+    pub problems: Option<ProblemCounts>,
 }
 
 /// What each variant of an A/B run gave and whether they differ.
@@ -233,6 +241,21 @@ impl RunSummary {
                     .as_ref()
                     .and_then(|scenario| scenario.launches.first())
                     .and_then(|launch| launch.perf),
+                resources: game
+                    .scenario
+                    .as_ref()
+                    .and_then(|scenario| scenario.launches.first())
+                    .and_then(|launch| launch.resources),
+                problems: game.scenario.as_ref().and_then(|scenario| {
+                    scenario
+                        .launches
+                        .iter()
+                        .filter_map(|launch| launch.problems)
+                        .reduce(|sum, counts| ProblemCounts {
+                            errors: sum.errors + counts.errors,
+                            warnings: sum.warnings + counts.warnings,
+                        })
+                }),
             })
             .collect();
         Self {
@@ -345,6 +368,8 @@ mod tests {
             dir: String::new(),
             first_frame,
             perf: None,
+            resources: None,
+            problems: None,
         }
     }
 

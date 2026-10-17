@@ -86,7 +86,15 @@ if [ "${CARAFE_VIDEO:-full}" != off ]; then
     websockify --web /usr/share/novnc 6080 127.0.0.1:5900 >/tmp/websockify.log 2>&1 &
 fi
 
-mkdir -p /work/user
+mkdir -p /work/user/log
+(
+    while :; do
+        printf '%s %s %s\n' "$(date +%s%3N)" \
+            "$(awk '$1 == "anon" || $1 == "shmem" { sum += $2 } END { print sum }' /sys/fs/cgroup/memory.stat)" \
+            "$(sed -n 's/^usage_usec //p' /sys/fs/cgroup/cpu.stat)"
+        sleep 1
+    done >>/work/user/log/resources.log 2>/dev/null
+) &
 cd /work
 eden=/opt/eden/bin/eden
 [ -x /opt/eden/AppRun ] && eden=/opt/eden/AppRun

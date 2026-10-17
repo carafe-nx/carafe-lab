@@ -296,6 +296,10 @@
     "fpsLower": "B has {{percent}}% fewer frames per second",
     "fpsNoise": "The FPS difference is within the spread of the repeats"
   },
+  "resources": {
+    "summary": "memory up to {{memory}} GB · processor {{cpu}}% of one core",
+    "problems": "in the logs: {{errors}} errors, {{warnings}} warnings"
+  },
   "fps": {
     "title": "Frames per second",
     "now": "{{fps}} fps · speed {{speed}}%",
