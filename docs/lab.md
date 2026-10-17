@@ -137,6 +137,9 @@ Each run gets `<work>/runs/<date>/`:
 - `events.jsonl` — every event of the run, one JSON line each, the same as `run --json` prints;
 - a folder per game: screenshots and the logs of every launch (`launch-1/`, `launch-2/`).
 
+Together they are the run's dataset: every press in `events.jsonl` has its buttons, hold and time, every screenshot
+step its file, time and outcome, and every check the pictures it compared and its verdict.
+
 The exit code is 0 when nothing failed, 3 when something did, 4 when the run was stopped while it waited for the
 emulator.
 
