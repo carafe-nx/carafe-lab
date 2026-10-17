@@ -8,8 +8,10 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use carafe_core::icon::data_url;
-use carafe_core::ports::{KeysChecker, KeysReport};
+use carafe_core::ports::{FolderInspector, KeysChecker, KeysReport};
+use carafe_folder::DiskFolderInspector;
 use carafe_keys::FileKeysChecker;
+use lab_core::config;
 use lab_core::local::{self, KeysSource, LocalSettings};
 use lab_core::view::LabView;
 use lab_run::history::{self, EVENTS_FILE, RunSummary};
@@ -181,6 +183,46 @@ pub async fn start_run(
         detached::spawn(&lab.cli(), &args, lab.repository(), &log_path)?;
         std::thread::spawn(move || watch_exit(&app, &log_path));
         Ok(())
+    })
+    .await
+}
+
+/// Adds the game in `folder` to `lab.json` under a name made from the folder's.
+///
+/// # Returns
+///
+/// The name the game got.
+///
+/// # Errors
+///
+/// [`CommandError`] when the folder has no Windows game, `lab.json` is broken or cannot be written.
+#[tauri::command]
+pub async fn add_game(lab: State<'_, Arc<Lab>>, folder: String) -> Result<String, CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let report = DiskFolderInspector
+            .inspect(&folder)
+            .map_err(|error| CommandError::from(error.to_string()))?;
+        if report.executables.is_empty() {
+            return Err("the folder has no Windows game: no .exe inside".into());
+        }
+        let config_path = lab.config_path();
+        let text = fs::read_to_string(&config_path).map_err(|error| error.to_string())?;
+        let taken: Vec<String> = lab
+            .config()?
+            .games
+            .into_iter()
+            .map(|game| game.name)
+            .collect();
+        let folder = PathBuf::from(folder);
+        let name = config::game_name_for(&folder, &taken);
+        let base = lab.repository().to_path_buf();
+        let updated = config::add_game(&text, &name, &folder, |file| {
+            fs::read_to_string(base.join(file)).map_err(|error| error.to_string())
+        })
+        .map_err(|error| error.to_string())?;
+        fs::write(&config_path, updated).map_err(|error| error.to_string())?;
+        Ok(name)
     })
     .await
 }

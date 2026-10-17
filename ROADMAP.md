@@ -17,11 +17,10 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` Button presses through the control channel instead of xdotool
 - [ ] `feature` Watchdog: a hang during a game (not only at close) restarts Eden; "clean start" switch
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
-- [ ] `feature` Loader: emulator status in the title bar, start-up stages on the Run screen, a fix for each failing stage
-- [ ] `feature` Library: add a game by dropping its folder; tags, notes, last result, link to a ROADMAP item
+- [ ] `feature` Loader: start-up stages on the Run screen, a fix for each failing stage
+- [ ] `feature` Library: tags, notes, link to a ROADMAP item
 - [ ] `feature` Plans: games × scenario × repeats, with launch count and time
-- [ ] `feature` Run screen: queue, the game in a Switch frame with lit buttons, milestones, FPS, log tail
-- [ ] `feature` Live video of the game in the window: the noVNC client library embedded as a canvas, not a separate page
+- [ ] `feature` Run screen: lit buttons on the Switch frame, milestones, FPS
 - [ ] `feature` Exact uncompressed screenshots for checks from Eden through the control channel
 - [ ] `feature` Video turned down or off during performance runs
 - [ ] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)
@@ -104,6 +103,9 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Library: a game is added by dropping its folder or with a button; each game shows its last result
+- [x] `feature` Live picture of the game in the Switch frame of the Run screen, view only or with keys sent to the game
+- [x] `feature` Run screen: queue with stop, the run's games, the current game's steps, the event log; title bar shows who holds the emulator
 - [x] `feature` One Eden for the whole run through a control channel (`0046`: boot, stop, screenshot, quit); a crashed or hung Eden is replaced and its end recorded
 - [x] `feature` Console files chosen in the window's Emulator screen, kept in `lab.local.json` outside git; Carafe's choice when none
 - [x] `feature` Tauri window in Carafe's style: Library, Plans, Run, History, Emulator, Scenarios

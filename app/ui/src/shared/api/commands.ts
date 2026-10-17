@@ -14,6 +14,7 @@ export const api = {
   runEvents: (dir: string, from: number) => invoke<Event[]>("run_events", { dir, from }),
   startRun: (set: string | null, only: string | null) => invoke<void>("start_run", { set, only }),
   stopRun: (id: string | null) => invoke<void>("stop_run", { id }),
+  addGame: (folder: string) => invoke<string>("add_game", { folder }),
   chooseKeys: (path: string) => invoke<KeysState>("choose_keys", { path }),
   forgetKeys: () => invoke<KeysState>("forget_keys"),
   openPath: (path: string) => invoke<void>("open_path", { path }),

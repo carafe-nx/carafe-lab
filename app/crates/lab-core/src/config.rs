@@ -465,6 +465,78 @@ fn merge(base: &mut Value, overrides: &Value) {
     }
 }
 
+/// Returns a game name for `folder` that `lab.json` accepts and no game in `taken` has, ignoring case: the folder's
+/// name with every other character turned into a space, followed by a number when the name is taken.
+#[must_use]
+pub fn game_name_for(folder: &Path, taken: &[String]) -> String {
+    let raw = folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    let base = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let base = if base.is_empty() {
+        "Game".to_owned()
+    } else {
+        base
+    };
+    let free = |name: &str| !taken.iter().any(|seen| seen.eq_ignore_ascii_case(name));
+    if free(&base) {
+        return base;
+    }
+    (2..)
+        .map(|number| format!("{base} {number}"))
+        .find(|name| free(name))
+        .unwrap_or(base)
+}
+
+/// Returns the text of `lab.json` with the game `name` in `folder` added at the end of `games`; everything else keeps
+/// its order. `read` reads scenario files, as for [`Config::parse_with`].
+///
+/// # Errors
+///
+/// [`ConfigError`] when the text or the result is not a valid lab file, such as a name that is taken.
+pub fn add_game(
+    text: &str,
+    name: &str,
+    folder: &Path,
+    read: impl Fn(&str) -> Result<String, String>,
+) -> Result<String, ConfigError> {
+    let mut value: Value =
+        serde_json::from_str(text).map_err(|error| ConfigError::Format(error.to_string()))?;
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| ConfigError::Format("the lab file is not an object".to_owned()))?;
+    let games = root
+        .entry("games")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| ConfigError::Format("games is not a list".to_owned()))?;
+    let mut game = serde_json::Map::new();
+    game.insert("name".to_owned(), Value::String(name.to_owned()));
+    game.insert(
+        "folder".to_owned(),
+        Value::String(folder.display().to_string()),
+    );
+    games.push(Value::Object(game));
+    let updated = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&value)
+            .map_err(|error| ConfigError::Format(error.to_string()))?
+    );
+    Config::parse_with(&updated, read)?;
+    Ok(updated)
+}
+
 fn valid_name(name: &str) -> bool {
     !name.trim().is_empty()
         && name
@@ -578,6 +650,31 @@ mod tests {
             config(scenario, ""),
             Err(ConfigError::Scenario(..))
         ));
+    }
+
+    #[test]
+    fn a_dropped_folder_gets_a_free_name() {
+        let taken = vec!["OpenTTD".to_owned(), "Game".to_owned()];
+        assert_eq!(
+            game_name_for(Path::new("D:\\Games\\Need for Speed: U2 (GOG)"), &taken),
+            "Need for Speed U2 GOG"
+        );
+        assert_eq!(
+            game_name_for(Path::new("D:\\Games\\openttd"), &taken),
+            "openttd 2"
+        );
+        assert_eq!(game_name_for(Path::new("D:\\Games\\!!!"), &taken), "Game 2");
+    }
+
+    #[test]
+    fn a_game_is_added_at_the_end_and_the_rest_keeps_its_order() {
+        let text = r#"{"work": "W:\\lab", "gpu": "wsl", "games": [{"name": "A", "folder": "D:\\A"}], "sets": {}}"#;
+        let updated = add_game(text, "B", Path::new("D:\\B"), |_| Err("none".to_owned())).unwrap();
+        let config = Config::parse(&updated).unwrap();
+        let names: Vec<&str> = config.games.iter().map(|game| game.name.as_str()).collect();
+        assert_eq!(names, ["A", "B"]);
+        assert!(updated.find("\"work\"").unwrap() < updated.find("\"games\"").unwrap());
+        assert!(add_game(text, "a", Path::new("D:\\A2"), |_| Err("none".to_owned())).is_err());
     }
 
     #[test]

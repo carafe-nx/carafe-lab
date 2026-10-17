@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open } from "@tauri-apps/plugin-dialog";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { useLab } from "@/features/lab/LabProvider";
@@ -20,11 +22,68 @@ export function LibraryPage() {
   const { t } = useTranslation();
   const { lab, runs } = useLab();
   const [picked, setPicked] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const games = lab.data?.games ?? [];
   const selected = games.find((game) => game.name === picked) ?? games[0] ?? null;
+  const refreshLab = lab.refresh;
+
+  const add = useCallback(
+    async (folders: string[]) => {
+      for (const folder of folders) {
+        try {
+          const name = await api.addGame(folder);
+          setNotice({ tone: "info", text: t("library.added", { name }) });
+          setPicked(name);
+        } catch (reason) {
+          setNotice({ tone: "error", text: errorText(reason) });
+        }
+      }
+      refreshLab();
+    },
+    [refreshLab, t],
+  );
+
+  useEffect(() => {
+    let active = true;
+    const pending = getCurrentWebview().onDragDropEvent((event) => {
+      if (!active) return;
+      if (event.payload.type === "enter" || event.payload.type === "over") {
+        setDragging(true);
+      } else if (event.payload.type === "leave") {
+        setDragging(false);
+      } else if (event.payload.type === "drop") {
+        setDragging(false);
+        void add(event.payload.paths);
+      }
+    });
+    return () => {
+      active = false;
+      void pending.then((unlisten) => unlisten());
+    };
+  }, [add]);
+
+  const choose = async () => {
+    const folder = await open({ directory: true, multiple: false, title: t("library.add") });
+    if (typeof folder === "string") {
+      await add([folder]);
+    }
+  };
+
+  const aside = (
+    <>
+      <span className={styles.muted}>{t("library.count", { count: games.length })}</span>
+      <Button onClick={() => void choose()}>
+        <Icon name="plus" size={14} />
+        {t("library.add")}
+      </Button>
+    </>
+  );
   return (
-    <Page title={t("nav.library")} aside={<span className={styles.muted}>{t("library.count", { count: games.length })}</span>}>
+    <Page title={t("nav.library")} aside={aside}>
       {lab.error ? <Notice tone="error">{lab.error}</Notice> : null}
+      {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
+      <div className={dragging ? `${styles.drop} ${styles.dropActive}` : styles.drop}>{t("library.drop")}</div>
       <div className={styles.split}>
         <div className={styles.list}>
           {games.length === 0 && !lab.error ? <div className={styles.empty}>{t("library.empty")}</div> : null}

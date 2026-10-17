@@ -19,6 +19,7 @@ lab-core = { workspace = true }
 lab-run = { workspace = true }
 lab-eden = { workspace = true }
 carafe-core = { workspace = true }
+carafe-folder = { workspace = true }
 carafe-keys = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

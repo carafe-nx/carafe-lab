@@ -21,6 +21,7 @@ pub fn run() {
             commands::run_events,
             commands::start_run,
             commands::stop_run,
+            commands::add_game,
             commands::choose_keys,
             commands::forget_keys,
             commands::open_path,
