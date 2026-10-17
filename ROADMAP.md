@@ -19,7 +19,6 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `research` Software or WSL GPU for the one emulator: run the set in both and keep the one that misreports less
 - [ ] `feature` Library: tags, notes, link to a ROADMAP item
 - [ ] `feature` Plans: a scenario chosen for the whole plan instead of each game's own
-- [ ] `feature` Run screen: lit buttons on the Switch frame
 - [ ] `feature` Exact uncompressed screenshots for checks from Eden through the control channel
 - [ ] `feature` Video turned down or off during performance runs
 - [ ] `feature` Every screenshot with its verdict and every button press is kept with the run (the future dataset)
@@ -35,7 +34,7 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 - [ ] `feature` Error lines that the previous version did not have are highlighted
 - [ ] `feature` Full logs compressed for failures and recent runs; a summary for older passing runs
 - [ ] `feature` Diagnostics as named flags instead of temporary patches
-- [ ] `feature` Tools for Claude, one call each: screenshot, press, wait, logs, milestones
+- [ ] `feature` Tools for Claude, one call each: the running game's logs and milestones
 - [ ] `feature` `report.json` with milestones, step times, frame times and the reason for a failure
 
 ### 3. Versions and history
@@ -99,6 +98,8 @@ first, then the emulator's and the games' own bugs. Open items are in priority o
 
 ## Done
 
+- [x] `feature` Tools for Claude, one call each: `play`, `press`, `screen`, `perf`
+- [x] `feature` Run screen: the scenario's button presses light up on the Switch frame's Joy-Con
 - [x] `feature` Compatibility by version: games × Carafe commits with the last result, failures and FPS; where a game broke is marked
 - [x] `feature` FPS from Eden (`0047`): a live chart on the Run screen, median and worst-tenth FPS of each launch in the report and history
 - [x] `feature` A/B of a game setting: variants alternate, the run ends with a verdict on the first frame that counts only differences beyond the spread

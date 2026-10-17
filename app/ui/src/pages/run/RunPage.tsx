@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { useLab } from "@/features/lab/LabProvider";
 import { outcomeTone, runPath } from "@/features/lab/outcome";
 import { FpsChart } from "@/features/lab/FpsChart";
+import { JoyCon } from "@/features/lab/JoyCon";
 import { StepLine } from "@/features/lab/StepLine";
 import { folderName, useRunEvents } from "@/features/lab/useRunEvents";
 import type { Event } from "@/shared/api/bindings/Event";
@@ -11,6 +12,7 @@ import type { Outcome } from "@/shared/api/bindings/Outcome";
 import type { Stage } from "@/shared/api/bindings/Stage";
 import type { QueueEntry } from "@/shared/api/bindings/QueueEntry";
 import type { StepResult } from "@/shared/api/bindings/StepResult";
+import type { SwitchButton } from "@/shared/api/bindings/SwitchButton";
 import { api, errorText } from "@/shared/api/commands";
 import { usePolling } from "@/shared/api/usePolling";
 import { Button } from "@/shared/ui/Button";
@@ -23,6 +25,7 @@ import styles from "@/shared/ui/lab.module.css";
 import run from "./RunPage.module.css";
 
 const LIVE_SCREEN = "http://127.0.0.1:6080/carafe.html";
+const LIT_MS = 1500;
 
 type GameState = { name: string; outcome: Outcome | null; current: boolean };
 
@@ -122,6 +125,19 @@ export function RunPage() {
   const perf = usePolling(() => api.livePerf(90), live ? 2000 : 0);
   const [control, setControl] = useState(false);
   const [reloads, setReloads] = useState(0);
+  const [lit, setLit] = useState<SwitchButton[]>([]);
+  const seen = useRef(0);
+  useEffect(() => {
+    const fresh = events.slice(seen.current);
+    seen.current = events.length;
+    if (!live) return;
+    const press = [...fresh].reverse().find((event) => event.event === "step" && event.step.step.step === "press");
+    if (press?.event === "step" && press.step.step.step === "press") {
+      setLit(press.step.step.buttons);
+      const timer = window.setTimeout(() => setLit([]), LIT_MS);
+      return () => window.clearTimeout(timer);
+    }
+  }, [events, live]);
   const launches = events.filter(
     (event) => event.event === "step" && event.step.step.step === "launch" && event.step.outcome === "pass",
   ).length;
@@ -174,7 +190,7 @@ export function RunPage() {
         </div>
         <div className={run.column}>
           <div className={run.switch}>
-            <span className={run.joyLeft} />
+            <JoyCon side="left" lit={lit} />
             <div className={run.screen}>
               {showLive ? (
                 <iframe
@@ -188,7 +204,7 @@ export function RunPage() {
                 <span>{t("run.noScreen")}</span>
               )}
             </div>
-            <span className={run.joyRight} />
+            <JoyCon side="right" lit={lit} />
           </div>
           {showLive ? (
             <div className={styles.actions}>
