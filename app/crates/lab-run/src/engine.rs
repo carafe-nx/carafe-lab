@@ -10,11 +10,12 @@ use std::time::{Instant, UNIX_EPOCH};
 use carafe_core::BuildRecord;
 use carafe_core::cancel::CancelToken;
 use carafe_core::ports::{BuildProgress, PackTarget, Packer};
+use carafe_core::settings::DxvkHud;
 use carafe_core::wizard::{self, BuildRequest};
 use lab_core::lang::Lang;
 use lab_core::milestones::Stage;
 use lab_core::redact::redact;
-use lab_core::scenario::Scenario;
+use lab_core::scenario::{Scenario, Step};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -155,8 +156,80 @@ pub struct Engine<'a> {
     pub stamp: RunStamp,
     /// Only build the NSPs.
     pub build_only: bool,
+    /// Runs a game that failed once more, with detailed logs chosen by how it failed.
+    pub retry_failed: bool,
     /// Stops the run between games and the current scenario between steps.
     pub stop: CancelToken,
+}
+
+/// Suffix of the name a failed game runs again under, with detailed logs.
+pub const DETAILED: &str = " · detailed";
+
+/// How a game failed, as far as its first failed step tells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Symptom {
+    /// It never reached its first frame: a hang or a stall at start-up.
+    NoFirstFrame,
+    /// The game process crashed.
+    Crashed,
+    /// A picture check failed: a black screen, the wrong picture, no change.
+    Picture,
+    /// Anything else, the emulator's own end among it.
+    Other,
+}
+
+impl Symptom {
+    /// Returns how `game` failed; `None` when it did not fail or its build did.
+    #[must_use]
+    pub fn of(game: &GameReport) -> Option<Self> {
+        let step = game
+            .scenario
+            .as_ref()?
+            .steps
+            .iter()
+            .find(|step| step.outcome == Outcome::Fail)?;
+        Some(match &step.step {
+            Step::WaitFor { .. } if step.detail.starts_with("the game crashed") => Self::Crashed,
+            Step::WaitFor { .. } if step.detail.starts_with("the emulator") => Self::Other,
+            Step::WaitFor { .. } => Self::NoFirstFrame,
+            Step::ExpectChange { .. } | Step::ExpectPattern { .. } | Step::Screenshot { .. } => {
+                Self::Picture
+            }
+            _ => Self::Other,
+        })
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::NoFirstFrame => "verbose traces and the profiler",
+            Self::Crashed | Self::Other => "verbose traces",
+            Self::Picture => "verbose traces and the full DXVK HUD",
+        }
+    }
+}
+
+/// Returns `game` once more with detailed logs chosen by how `report` says it failed: the runtime's verbose traces
+/// always, its profiler for a game that never reached its first frame, the full DXVK HUD for a failed picture check;
+/// `None` when the game did not fail or could not be built.
+#[must_use]
+pub fn detailed(game: &Planned, report: &GameReport) -> Option<Planned> {
+    let symptom = Symptom::of(report)?;
+    let mut request = game.request.as_ref().ok()?.clone();
+    request.settings.debug.verbose = true;
+    match symptom {
+        Symptom::NoFirstFrame => request.settings.debug.profile = true,
+        Symptom::Picture => request.settings.graphics.hud = DxvkHud::Full,
+        Symptom::Crashed | Symptom::Other => {}
+    }
+    Some(Planned {
+        name: format!("{}{DETAILED}", game.name),
+        folder: game.folder.clone(),
+        request: Ok(request),
+        entropy: game.entropy,
+        label: format!("{} · {}", game.label, symptom.label()),
+        scenario: game.scenario.clone(),
+        threshold: game.threshold,
+    })
 }
 
 impl Engine<'_> {
@@ -187,7 +260,7 @@ impl Engine<'_> {
             games: Vec::new(),
         };
         let total = planned.len();
-        let names: Vec<String> = planned.iter().map(|game| game.name.clone()).collect();
+        let mut names: Vec<String> = planned.iter().map(|game| game.name.clone()).collect();
         let mut events = OpenOptions::new()
             .create(true)
             .append(true)
@@ -218,10 +291,31 @@ impl Engine<'_> {
                 name: entry.name.clone(),
                 outcome: entry.outcome(),
             });
+            let again = if self.retry_failed && !self.build_only {
+                detailed(&game, &entry)
+            } else {
+                None
+            };
             report.games.push(entry);
             report.seconds = clock.now().as_secs_f64();
             write_report(&run_dir, &report, self.lang)?;
             write_summary(&run_dir, &report, &names, false)?;
+            if let Some(again) = again.filter(|_| !self.stop.is_cancelled()) {
+                names.push(again.name.clone());
+                on_event(&Event::GameStarted {
+                    index: index + 1,
+                    name: again.name.clone(),
+                });
+                let entry = self.one_game(&again, &run_dir, &nsp_dir, clock, &mut on_event);
+                on_event(&Event::GameFinished {
+                    name: entry.name.clone(),
+                    outcome: entry.outcome(),
+                });
+                report.games.push(entry);
+                report.seconds = clock.now().as_secs_f64();
+                write_report(&run_dir, &report, self.lang)?;
+                write_summary(&run_dir, &report, &names, false)?;
+            }
         }
         if !self.build_only {
             self.emulator.finish();
@@ -480,6 +574,81 @@ mod tests {
         );
     }
 
+    fn failed_at(step: Step, detail: &str) -> GameReport {
+        GameReport {
+            name: "G".to_owned(),
+            title: "G".to_owned(),
+            title_id: String::new(),
+            dir: "G".to_owned(),
+            settings: String::new(),
+            build: BuildOutcome::Built {
+                seconds: 1.0,
+                size_bytes: 1,
+            },
+            scenario: Some(crate::run::ScenarioResult {
+                steps: vec![StepResult {
+                    step,
+                    outcome: Outcome::Fail,
+                    detail: detail.to_owned(),
+                    at: 1.0,
+                    screenshot: None,
+                    presses: Vec::new(),
+                }],
+                launches: Vec::new(),
+                save: Vec::new(),
+                emulator_gaps: Vec::new(),
+            }),
+            log_excerpt: Vec::new(),
+            failure: None,
+        }
+    }
+
+    #[test]
+    fn a_failed_game_runs_again_with_logs_chosen_by_how_it_failed() {
+        let wait = Step::WaitFor {
+            milestone: lab_core::scenario::Milestone::FirstFrame,
+            timeout: 120,
+        };
+        let planned = Planned {
+            name: "G".to_owned(),
+            folder: PathBuf::from("D:\\Games\\Game"),
+            request: Ok(sample_request()),
+            entropy: 1,
+            label: "dxvk".to_owned(),
+            scenario: Scenario::standard(120),
+            threshold: 20,
+        };
+        let stalled = detailed(&planned, &failed_at(wait.clone(), "not reached in 120 s")).unwrap();
+        assert_eq!(stalled.name, "G · detailed");
+        let settings = &stalled.request.as_ref().unwrap().settings;
+        assert!(settings.debug.verbose && settings.debug.profile);
+        let crashed = detailed(
+            &planned,
+            &failed_at(wait, "the game crashed (exit code 0xc0000005)"),
+        )
+        .unwrap();
+        assert!(!crashed.request.as_ref().unwrap().settings.debug.profile);
+        let black = detailed(
+            &planned,
+            &failed_at(
+                Step::Screenshot {
+                    name: "menu".to_owned(),
+                },
+                "black",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            black.request.as_ref().unwrap().settings.graphics.hud,
+            DxvkHud::Full
+        );
+        let mut passed = failed_at(Step::Launch, "");
+        if let Some(scenario) = passed.scenario.as_mut() {
+            scenario.steps[0].outcome = Outcome::Pass;
+        }
+        assert!(detailed(&planned, &passed).is_none());
+    }
+
     #[test]
     fn folder_names_keep_only_safe_characters() {
         assert_eq!(safe_name("Need for Speed: U2"), "Need_for_Speed__U2");
@@ -496,7 +665,11 @@ mod tests {
     }
 
     fn sample_record() -> BuildRecord {
-        let request = BuildRequest {
+        wizard::plan(sample_request(), None, 1, "dev").unwrap()
+    }
+
+    fn sample_request() -> BuildRequest {
+        BuildRequest {
             title_id: None,
             source: carafe_core::record::GameSource {
                 folder: "D:\\Games\\Game".to_owned(),
@@ -508,7 +681,6 @@ mod tests {
             metadata: carafe_core::metadata::Metadata::new("Game".to_owned()),
             settings: carafe_core::settings::AutorunSettings::default(),
             icon: None,
-        };
-        wizard::plan(request, None, 1, "dev").unwrap()
+        }
     }
 }

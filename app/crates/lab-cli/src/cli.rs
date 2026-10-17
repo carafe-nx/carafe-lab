@@ -44,6 +44,7 @@ Options:
                       alternating, --repeat times each; the run ends with a verdict
   --build-only        build the NSPs and stop
   --clean             a new Eden for every launch instead of one for the whole run
+  --no-retry          do not run a failed game again with detailed logs (A/B runs and probes never do)
   --scenario <s>      every game runs this scenario: standard, or a file relative to lab.json
   --like <run>        run the games of this past run again with the runtime and Eden image it ran with;
                       every run keeps them from now on
@@ -140,6 +141,8 @@ pub struct Args {
     pub clean: bool,
     /// `--apply`.
     pub apply: bool,
+    /// `--no-retry`.
+    pub no_retry: bool,
     /// `--like`: the folder of a past run to repeat with its own parts.
     pub like: Option<String>,
     /// `--scenario`: `standard` or a scenario file relative to `lab.json`.
@@ -214,6 +217,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         build_only: false,
         clean: false,
         apply: false,
+        no_retry: false,
         like: None,
         scenario: None,
         video: Video::Full,
@@ -295,6 +299,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             "--build-only" => parsed.build_only = true,
             "--clean" => parsed.clean = true,
             "--apply" => parsed.apply = true,
+            "--no-retry" => parsed.no_retry = true,
             "--no-open" => parsed.no_open = true,
             "--json" => parsed.json = true,
             other if other.starts_with("--") => return Err(ArgsError::Option(other.to_owned())),

@@ -839,6 +839,7 @@ impl Lab {
             emulator_label,
             stamp,
             build_only: self.args.build_only,
+            retry_failed: !self.args.no_retry && self.args.ab.is_none() && what != "probes",
             stop,
         };
         let mut on_event = |event: &Event| {

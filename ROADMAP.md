@@ -18,7 +18,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ### 2. Logs
 
-- [ ] `feature` After a failure the game runs again with detailed logs chosen by the symptom
 - [ ] `feature` On a hang: backtraces of all the game's threads through the gdb stub before the watchdog stops it
 - [ ] `feature` On a crash: registers, stack and module map, without Eden's full crash dump
 - [ ] `feature` One timeline of all log sources with one clock
@@ -80,6 +79,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `feature` After a failure the game runs again with detailed logs chosen by the symptom (`· detailed`)
 - [x] `feature` Performance by version: first frame, median FPS, worst 1 % of frames, peak memory, over repeats
 - [x] `feature` Only changes larger than the spread between repeats are flagged
 - [x] `feature` Thresholds: a game slower beyond its threshold (20 % by default) fails (`expectPerformance`)

@@ -172,6 +172,11 @@ emulator.
   and half the spread of its repeats for the time to the first frame, the median FPS, the worst hundredth of frames
   and the peak memory. A measure is marked better or worse than the commit before only when the difference is
   larger than the spread of both; with a single repeat the spread is unknown and nothing is marked.
+- A game that fails runs once more right after, as `<name> · detailed`, with detailed logs chosen by how it failed:
+  the runtime's verbose traces always (they add `stdout.txt`, `stderr.txt` and `stdin.txt` to the launch's logs),
+  its profiler (`[PROF]` lines) when the game never reached its first frame, the full DXVK HUD when a picture check
+  failed. `--no-retry` turns it off; A/B runs and probes never retry. The detailed run is left out of performance by
+  version.
 - `--video low` sends the live picture at about five frames a second, `--video off` sends none (`CARAFE_VIDEO` in
   the container), so the video takes little or nothing from the game while it is measured; A/B runs from the window
   use `low`.

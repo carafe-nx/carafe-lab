@@ -6,6 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::engine::DETAILED;
 use crate::report::{BuildOutcome, GameReport, RunReport, RunStamp};
 use crate::run::{Outcome, PROBLEMS_FILE};
 use lab_core::frames::FrameSummary;
@@ -361,7 +362,11 @@ pub fn version_performance(runs: &[RunSummary]) -> Vec<VersionPerf> {
         .flat_map(|(run, commit)| {
             run.games
                 .iter()
-                .filter(|game| !game.name.ends_with(VARIANT_A) && !game.name.ends_with(VARIANT_B))
+                .filter(|game| {
+                    ![VARIANT_A, VARIANT_B, DETAILED]
+                        .iter()
+                        .any(|suffix| game.name.ends_with(suffix))
+                })
                 .filter(|game| game.first_frame.is_some())
                 .map(move |game| (game.name.as_str(), commit, sample_of(game)))
         })
