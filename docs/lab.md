@@ -137,6 +137,16 @@ emulator.
   uncommitted changes), the first 12 hex digits of the runtime archive's SHA-256, the lab's commit and the Eden image.
   The window compares two runs side by side, their screenshots of the same steps included.
 
+## Hands on
+
+For Claude and for quick looks, one call each:
+
+- `play <game>` builds the game if needed, launches it and keeps it running for `--minutes` (30 by default) or until
+  `stop`; it holds the emulator in the queue like any run;
+- `press <A+ZR>` presses buttons together in the running game, `--hold <s>` long;
+- `screen <file.png>` saves the running game's screen;
+- `perf` prints the median and worst-tenth FPS and the speed over the last 10 seconds; `--json` prints the readings.
+
 ## The queue
 
 One run holds the emulator at a time; the others wait in `<work>/queue/` in the order they came, whoever started them:

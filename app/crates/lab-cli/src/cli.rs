@@ -1,6 +1,7 @@
 //! The command line of `carafe-lab`.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -19,6 +20,11 @@ Usage:
   carafe-lab games [--json]        the games and sets of lab.json
   carafe-lab runs [--json]         past runs and the one going, newest first
   carafe-lab stop [id]             stops the run holding the emulator, or the run with this queue id
+  carafe-lab play <game>           launches the game and keeps it running for --minutes (default 30) or
+                                   until stop, for hands or for the commands below
+  carafe-lab press <A+B…>          presses buttons together in the running game; --hold <s>, default 0.15
+  carafe-lab screen <file.png>     saves the running game's screen
+  carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab help
 
 Options:
@@ -37,6 +43,8 @@ Options:
   --json              print the run as JSON lines, one event each, without the live page;
                       status, games and runs print one JSON document
   --who <name>        who starts the run, shown in the queue; default: command line
+  --minutes <n>       play: minutes to keep the game running
+  --hold <s>          press: seconds to hold the buttons
   --random <n>        probes: add n random combinations to the pairwise set
   --seed <n>          probes: seed of the random combinations; default: the date
   --probes-dir <dir>  probes: folder with i686/ and x86_64/ builds; default: tools/probes/build
@@ -65,6 +73,23 @@ pub enum Command {
         /// The queue id of the run; `None` means the run holding the emulator.
         id: Option<String>,
     },
+    /// Launch a game and keep it running.
+    Play {
+        /// The game's name in `lab.json`.
+        game: Option<String>,
+    },
+    /// Press buttons in the running game.
+    Press {
+        /// The buttons, joined with `+`.
+        buttons: Option<String>,
+    },
+    /// Save the running game's screen.
+    Screen {
+        /// Where to save the picture.
+        file: Option<PathBuf>,
+    },
+    /// Show the emulator's recent performance.
+    Perf,
     /// Print the help.
     Help,
 }
@@ -92,6 +117,10 @@ pub struct Args {
     pub repeat: u32,
     /// `--ab`: the settings of variant B, as JSON.
     pub ab: Option<String>,
+    /// `--minutes`.
+    pub minutes: u32,
+    /// `--hold`, in milliseconds.
+    pub hold_ms: u32,
     /// `--build-only`.
     pub build_only: bool,
     /// `--json`.
@@ -138,6 +167,10 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("games") => Command::Games,
         Some("runs") => Command::Runs,
         Some("stop") => Command::Stop { id: None },
+        Some("play") => Command::Play { game: None },
+        Some("press") => Command::Press { buttons: None },
+        Some("screen") => Command::Screen { file: None },
+        Some("perf") => Command::Perf,
         Some(other) => return Err(ArgsError::Command(other.to_owned())),
     };
     let mut parsed = Args {
@@ -151,6 +184,8 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         games: Vec::new(),
         repeat: 1,
         ab: None,
+        minutes: 30,
+        hold_ms: 150,
         build_only: false,
         json: false,
         who: None,
@@ -198,6 +233,17 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                     .collect();
             }
             "--ab" => parsed.ab = Some(value("settings as JSON")?),
+            "--minutes" => parsed.minutes = number(arg, value("minutes")?, "minutes")?,
+            "--hold" => {
+                let seconds: f64 = number(arg, value("seconds")?, "seconds")?;
+                if !(0.01..=60.0).contains(&seconds) {
+                    return Err(ArgsError::Value(arg.clone(), "seconds from 0.01 to 60"));
+                }
+                parsed.hold_ms = Duration::from_secs_f64(seconds)
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u32::MAX);
+            }
             "--repeat" => {
                 let times: u32 = number(arg, value("a count")?, "a count from 1 to 100")?;
                 if !(1..=100).contains(&times) {
@@ -216,6 +262,11 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             other => match &mut parsed.command {
                 Command::Run { set } if set.is_none() => *set = Some(other.to_owned()),
                 Command::Stop { id } if id.is_none() => *id = Some(other.to_owned()),
+                Command::Play { game } if game.is_none() => *game = Some(other.to_owned()),
+                Command::Press { buttons } if buttons.is_none() => {
+                    *buttons = Some(other.to_owned())
+                }
+                Command::Screen { file } if file.is_none() => *file = Some(PathBuf::from(other)),
                 _ => return Err(ArgsError::Option(other.to_owned())),
             },
         }
@@ -293,6 +344,30 @@ mod tests {
             parse(&args("run --repeat 0")),
             Err(ArgsError::Value(..))
         ));
+    }
+
+    #[test]
+    fn claude_plays_presses_and_looks() {
+        assert_eq!(
+            parse(&args("play NFSU_menu --minutes 10")).unwrap().command,
+            Command::Play {
+                game: Some("NFSU_menu".to_owned())
+            }
+        );
+        let press = parse(&args("press A+ZR --hold 0.5")).unwrap();
+        assert_eq!(
+            press.command,
+            Command::Press {
+                buttons: Some("A+ZR".to_owned())
+            }
+        );
+        assert_eq!(press.hold_ms, 500);
+        assert_eq!(
+            parse(&args("screen shot.png")).unwrap().command,
+            Command::Screen {
+                file: Some(PathBuf::from("shot.png"))
+            }
+        );
     }
 
     #[test]

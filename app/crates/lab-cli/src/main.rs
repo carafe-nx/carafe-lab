@@ -14,7 +14,7 @@ use carafe_core::cancel::CancelToken;
 use carafe_core::metadata::Metadata;
 use carafe_core::ports::FolderInspector;
 use carafe_core::record::GameSource;
-use carafe_core::settings::{AutorunSettings, InputMode};
+use carafe_core::settings::{AutorunSettings, InputMode, SwitchButton};
 use carafe_core::wizard::BuildRequest;
 use carafe_folder::DiskFolderInspector;
 use carafe_pack::HacBrewPacker;
@@ -23,7 +23,9 @@ use lab_core::emulator::{EdenCpu, Gpu};
 use lab_core::lang::Lang;
 use lab_core::local::{self, LocalSettings};
 use lab_core::matrix;
+use lab_core::perf;
 use lab_core::probes::{self, ProbeRun};
+use lab_core::scenario::{Milestone, Scenario, Step};
 use lab_core::time::Utc;
 use lab_core::view::LabView;
 use lab_eden::Eden;
@@ -31,7 +33,7 @@ use lab_run::engine::{Engine, Event, Planned};
 use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
 use lab_run::report::{self, RunStamp};
-use lab_run::run::{Clock, Outcome, StepResult};
+use lab_run::run::{Clock, Emulator, Outcome, StepResult};
 use serde::Serialize;
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
@@ -39,6 +41,7 @@ const DESKTOP: &str = "app/crates/carafe-desktop";
 const PAGE_IDLE: Duration = Duration::from_secs(60);
 const PAGE_LONGEST: Duration = Duration::from_secs(30 * 60);
 const QUEUE_POLL: Duration = Duration::from_secs(2);
+const PERF_WINDOW_MS: u64 = 10_000;
 const RUNTIME_VERSION: &str = match option_env!("CARAFE_RUNTIME_VERSION") {
     Some(version) => version,
     None => "dev",
@@ -104,6 +107,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         Command::Games => return show_games(&config, args.json),
         Command::Runs => return show_runs(&config, args.json),
         Command::Stop { id } => return stop_run(&config, id.as_deref()),
+        Command::Perf => return show_perf(&config, args.json),
         _ => {}
     }
     let keys = console_files(args.keys.as_deref(), &config_path)?;
@@ -149,10 +153,58 @@ fn start(args: Args) -> Result<ExitCode, String> {
         }
         Command::Run { set } => lab.run_games(&config, set.as_deref()),
         Command::Probes => lab.run_probes(),
-        Command::Help | Command::Status | Command::Games | Command::Runs | Command::Stop { .. } => {
-            Ok(ExitCode::SUCCESS)
+        Command::Play { game } => {
+            let game = game.ok_or("play needs a game's name from lab.json")?;
+            lab.play(&config, &game)
         }
+        Command::Press { buttons } => {
+            let buttons = buttons.ok_or("press needs buttons, such as A or A+ZR")?;
+            lab.press(&config, &buttons)
+        }
+        Command::Screen { file } => {
+            let file = file.ok_or("screen needs a file to save the picture to")?;
+            lab.screen(&config, &file)
+        }
+        Command::Help
+        | Command::Status
+        | Command::Games
+        | Command::Runs
+        | Command::Stop { .. }
+        | Command::Perf => Ok(ExitCode::SUCCESS),
     }
+}
+
+fn show_perf(config: &Config, json: bool) -> Result<ExitCode, String> {
+    let text = fs::read_to_string(
+        config
+            .work
+            .join("eden")
+            .join("user")
+            .join("control")
+            .join("stats"),
+    )
+    .unwrap_or_default();
+    let samples = perf::parse_stats(&text);
+    let newest = samples.last().map_or(0, |sample| sample.at);
+    let recent: Vec<_> = samples
+        .into_iter()
+        .filter(|sample| sample.at + PERF_WINDOW_MS >= newest)
+        .collect();
+    if json {
+        print_json(&recent)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    match perf::summarize(&recent) {
+        Some(summary) => println!(
+            "{:.0} fps median, {:.0} fps worst tenth, speed {:.0}% over {} readings",
+            summary.median_fps,
+            summary.low_fps,
+            summary.median_speed * 100.0,
+            summary.samples
+        ),
+        None => println!("no game is drawing"),
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 #[derive(Serialize)]
@@ -418,6 +470,64 @@ impl Lab {
             label: settings_label(settings),
             scenario: game.scenario(self.timeout),
         }
+    }
+
+    fn play(mut self, config: &Config, name: &str) -> Result<ExitCode, String> {
+        let game = config
+            .pick(&[name.to_owned()])
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .next()
+            .ok_or("no such game")?;
+        let mut planned = self.plan(game, game.name.clone(), &game.settings);
+        planned.scenario = Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::WaitFor {
+                    milestone: Milestone::FirstFrame,
+                    timeout: self.timeout,
+                },
+                Step::Wait {
+                    seconds: self.args.minutes as f32 * 60.0,
+                },
+            ],
+        };
+        let what = format!("play {}", game.name);
+        self.execute(vec![planned], &what)
+    }
+
+    fn require_running(&self, config: &Config) -> Result<(), String> {
+        if queue_of(config).state(unix_now()).holder.is_none() {
+            return Err("no game is running: start one with carafe-lab play <game>".to_owned());
+        }
+        Ok(())
+    }
+
+    fn press(mut self, config: &Config, buttons: &str) -> Result<ExitCode, String> {
+        self.require_running(config)?;
+        let buttons: Vec<SwitchButton> = buttons
+            .split('+')
+            .map(|name| {
+                serde_json::from_value(serde_json::Value::String(name.trim().to_uppercase()))
+                    .map_err(|_| format!("{name} is not a Switch button"))
+            })
+            .collect::<Result<_, _>>()?;
+        self.eden
+            .press(
+                &buttons,
+                Duration::from_millis(u64::from(self.args.hold_ms)),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn screen(mut self, config: &Config, file: &Path) -> Result<ExitCode, String> {
+        self.require_running(config)?;
+        self.eden
+            .screenshot(file)
+            .map_err(|error| error.to_string())?;
+        println!("{}", file.display());
+        Ok(ExitCode::SUCCESS)
     }
 
     fn run_probes(mut self) -> Result<ExitCode, String> {
