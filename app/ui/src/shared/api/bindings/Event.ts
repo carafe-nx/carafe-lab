@@ -34,7 +34,11 @@ name: string, } | { "event": "buildStage",
 /**
  * The stage, as Carafe names it.
  */
-stage: string, } | { "event": "built", 
+stage: string, 
+/**
+ * Seconds since the build started; `None` for a note after the build.
+ */
+at?: number, } | { "event": "built", 
 /**
  * The game's Title ID.
  */

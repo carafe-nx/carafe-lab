@@ -155,7 +155,9 @@ Each run gets `<work>/runs/<date>/`:
 - `report.json` — the same for tools and for comparing runs;
 - `summary.json` — the run in short, rewritten after every game; `finished` is `false` while it goes;
 - `events.jsonl` — every event of the run, one JSON line each, the same as `run --json` prints;
-- a folder per game: screenshots and the logs of every launch (`launch-1/`, `launch-2/`). Each launch folder has
+- a folder per game: `build.log` (every line of its NSP build, hacBrewPack's included, with the seconds since the
+  build started; the stage events carry the same seconds), screenshots and the logs of every launch (`launch-1/`,
+  `launch-2/`). hacBrewPack writes its lines in blocks, so a line's time is when its block came. Each launch folder has
   Eden's log of that launch only, `frametimes.csv` (the time of every frame in milliseconds, without the waits for
   the display, from Eden's `record_frame_times`; the loading screen counts too), `resources.log` (the container's
   memory without the file cache and its processor time, once a second), `timeline/` (a 640×360 picture of the

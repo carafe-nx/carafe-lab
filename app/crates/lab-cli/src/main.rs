@@ -1317,7 +1317,11 @@ fn print_event(event: &Event, total: usize) {
             println!("waiting for the emulator: {holder} holds it, {ahead} runs ahead");
         }
         Event::GameStarted { index, name } => println!("[{index}/{total}] {name}"),
-        Event::BuildStage { stage } => println!("  {stage}"),
+        Event::BuildStage {
+            stage,
+            at: Some(at),
+        } => println!("  {stage}  at {at:.1} s"),
+        Event::BuildStage { stage, at: None } => println!("  {stage}"),
         Event::Built {
             title_id,
             seconds,

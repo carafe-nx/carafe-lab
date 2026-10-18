@@ -74,6 +74,9 @@ pub struct Alternate<'a> {
 /// The folder inside the NSP folder for the NSPs built with the other runtime of an A/B run.
 pub const ALTERNATE_DIR: &str = "alternate";
 
+/// The file in a game's run folder with every line of its NSP build, each with the seconds since the build started.
+pub const BUILD_LOG_FILE: &str = "build.log";
+
 struct Built {
     record: BuildRecord,
     seconds: f64,
@@ -115,6 +118,10 @@ pub enum Event {
     BuildStage {
         /// The stage, as Carafe names it.
         stage: String,
+        /// Seconds since the build started; `None` for a note after the build.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        at: Option<f64>,
     },
     /// The NSP is ready.
     #[serde(rename_all = "camelCase")]
@@ -436,7 +443,7 @@ impl Engine<'_> {
             log_excerpt: Vec::new(),
             failure: None,
         };
-        let built = self.build(game, nsp_dir, on_event);
+        let built = self.build(game, nsp_dir, &game_dir, on_event);
         let Built {
             record,
             seconds,
@@ -469,6 +476,7 @@ impl Engine<'_> {
             if fs::hard_link(&nsp, &kept).is_err() {
                 on_event(&Event::BuildStage {
                     stage: format!("the NSP stays only in {}", nsp.display()),
+                    at: None,
                 });
             }
             return entry;
@@ -505,6 +513,7 @@ impl Engine<'_> {
         &self,
         game: &Planned,
         nsp_dir: &Path,
+        game_dir: &Path,
         on_event: &mut dyn FnMut(&Event),
     ) -> Result<Built, String> {
         let previous = match &game.nsp {
@@ -569,16 +578,32 @@ impl Engine<'_> {
         };
         let started = Instant::now();
         let mut last_stage = None;
-        let mut progress = |update: BuildProgress| {
-            if last_stage != Some(update.stage) {
-                last_stage = Some(update.stage);
-                on_event(&Event::BuildStage {
-                    stage: format!("{:?}", update.stage),
-                });
-            }
-        };
-        let stored = packer
-            .pack(&record, None, &target, &CancelToken::new(), &mut progress)
+        let mut log = String::new();
+        let packed = packer.pack(
+            &record,
+            None,
+            &target,
+            &CancelToken::new(),
+            &mut |update: BuildProgress| {
+                let at = started.elapsed().as_secs_f64();
+                let stage = format!("{:?}", update.stage);
+                if last_stage != Some(update.stage) {
+                    last_stage = Some(update.stage);
+                    on_event(&Event::BuildStage {
+                        stage: stage.clone(),
+                        at: Some(at),
+                    });
+                }
+                if let Some(line) = &update.log {
+                    log.push_str(&format!(
+                        "{at:8.2} s  {stage:<8}  {}\n",
+                        redact(line, self.keys)
+                    ));
+                }
+            },
+        );
+        let _ = fs::write(game_dir.join(BUILD_LOG_FILE), &log);
+        let stored = packed
             .map_err(|error| redact(&format!("{error} ({})", game.folder.display()), self.keys))?;
         if let Some(key) = key {
             let _ = fs::write(&key_path, key);

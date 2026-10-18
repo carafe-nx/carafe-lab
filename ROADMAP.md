@@ -12,6 +12,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 ## Planned
 
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
+- [ ] `bug` "No slower than the last version" compares runs of different scenarios, such as a hands-on session in the menu against the standard one
 
 ### Research and later ideas (not the app)
 
