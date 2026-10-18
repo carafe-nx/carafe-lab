@@ -1,6 +1,9 @@
 <div align="center">
 
-# Carafe Lab
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/github/banner-dark.png">
+  <img src="assets/github/banner-light.png" alt="Carafe Lab" width="645">
+</picture>
 
 **Checks the games Carafe builds, in an emulator, between releases**
 

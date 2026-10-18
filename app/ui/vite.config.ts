@@ -10,12 +10,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
-      "@assets": fileURLToPath(new URL("../../external/carafe/assets", import.meta.url)),
+      "@assets": fileURLToPath(new URL("../../assets", import.meta.url)),
     },
   },
   server: {
     fs: {
-      allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL("../../external/carafe/assets", import.meta.url))],
+      allow: [searchForWorkspaceRoot(process.cwd()), fileURLToPath(new URL("../../assets", import.meta.url))],
     },
     port: 1430,
     strictPort: true,

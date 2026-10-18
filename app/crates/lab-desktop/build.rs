@@ -1,6 +1,6 @@
 //! Prepares the Tauri context: configuration, icons, permissions.
 
 fn main() {
-    println!("cargo:rerun-if-changed=../../../external/carafe/assets/logo/icon.ico");
+    println!("cargo:rerun-if-changed=../../../assets/logo/icon.ico");
     tauri_build::build();
 }

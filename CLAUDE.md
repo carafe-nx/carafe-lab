@@ -24,6 +24,8 @@ up is [docs/lab.md](docs/lab.md).
 - `docker/` — `eden-build` (Eden's build image and scripts), `mesa-build` and `mesa-d3d12` (Mesa for the PC's GPU:
   its build image, its build script and the image of the built files), `eden` (the run image).
 - `tools/` — probe programs, `eden-gdb.sh`, Playwright page viewers.
+- `assets/` — static images, each stored once: `logo/` (the flask and the app icon, Carafe's), `github/` (the README
+  banner).
 - `docs/` — decisions and research. Rules for keeping them are in `docs/README.md`.
 - `build/` — everything built and every run; never committed.
 

@@ -18,7 +18,7 @@
     "types": ["vite/client"],
     "paths": {
       "@/*": ["./src/*"],
-      "@assets/*": ["../../external/carafe/assets/*"]
+      "@assets/*": ["../../assets/*"]
     }
   },
   "include": ["src"]

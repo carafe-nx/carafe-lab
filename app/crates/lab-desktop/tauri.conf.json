@@ -24,6 +24,6 @@
   },
   "bundle": {
     "active": false,
-    "icon": ["../../../external/carafe/assets/logo/icon.ico"]
+    "icon": ["../../../assets/logo/icon.ico"]
   }
 }
