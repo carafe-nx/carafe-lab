@@ -18,6 +18,7 @@ pub mod matrix;
 pub mod milestones;
 pub mod perf;
 pub mod picture;
+pub mod pointer_check;
 pub mod probes;
 pub mod problems;
 pub mod redact;

@@ -21,6 +21,8 @@ pub enum Probe {
     D3d12,
     /// Draws the pattern with OpenGL.
     Gl,
+    /// Switches DirectDraw to 1024×768 full screen and logs the mouse moves in its window.
+    Screen,
 }
 
 impl Probe {
@@ -34,6 +36,7 @@ impl Probe {
             Self::D3d11 => "d3d11",
             Self::D3d12 => "d3d12",
             Self::Gl => "gl",
+            Self::Screen => "screen",
         }
     }
 }
@@ -137,6 +140,26 @@ pub fn input_runs(first_frame_timeout: u32) -> Vec<ProbeRun> {
         .collect()
 }
 
+/// Returns the screen probe run: a 32-bit program in the keyboard and mouse mode, whose picture is fitted into the
+/// console's screen and centred, as for a game at 1024×768.
+#[must_use]
+pub fn screen_runs(first_frame_timeout: u32) -> Vec<ProbeRun> {
+    let mut settings = AutorunSettings::default();
+    settings.input.mode = InputMode::KeyboardMouse;
+    let arch = Arch::X86;
+    vec![ProbeRun {
+        name: format!("probe-screen-{}", arch_name(arch)),
+        probe: Probe::Screen,
+        arch,
+        settings,
+        label: format!(
+            "1024×768, mouse on the right stick · screen {}",
+            arch_name(arch)
+        ),
+        scenario: Scenario::screen_probe(first_frame_timeout),
+    }]
+}
+
 /// Returns the folder name of a bitness in the probe builds: `i686` or `x86_64`.
 #[must_use]
 pub fn build_dir(arch: Arch) -> &'static str {
@@ -197,6 +220,7 @@ mod tests {
         let mut names: Vec<String> = graphics_runs(&matrix::pairwise(), 600)
             .into_iter()
             .chain(input_runs(600))
+            .chain(screen_runs(600))
             .map(|run| run.name)
             .collect();
         let count = names.len();
@@ -219,5 +243,14 @@ mod tests {
             assert_eq!(run.probe, Probe::Input);
         }
         assert_eq!(runs[2].settings.input.pad[0].codes, vec![2]);
+    }
+
+    #[test]
+    fn the_screen_probe_moves_the_mouse_with_the_stick() {
+        let runs = screen_runs(600);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].settings.validate(), Ok(()));
+        assert_eq!(runs[0].settings.input.mode, InputMode::KeyboardMouse);
+        assert_eq!(runs[0].probe, Probe::Screen);
     }
 }

@@ -113,6 +113,7 @@ save data is still there, close it.
   between the pairs.
 - `expectPattern` — `name`: a screenshot of a graphics probe.
 - `expectInput` — the input probe's log against the bindings of the build.
+- `expectPointer` — the screen probe's log: the mouse moves reached every edge of its window.
 - `expectSave` — the game has written save data; remembered for `expectSaveKept`.
 - `expectSaveKept` — the remembered save data is still there and unchanged.
 - `expectPerformance` — the first launch's time to the first frame and median FPS against the game at the newest
@@ -142,6 +143,9 @@ save data is still there, close it.
 - the input probe logs what Wine hands it — Xbox controller state, keys, mouse — and Lab presses every Switch
   button and compares the log with the bindings: the controller with default bindings, keyboard and mouse with a
   chord, and the controller with A and B swapped;
+- the screen probe switches DirectDraw to 1024×768 full screen, as Heroes of Might and Magic IV does, so the
+  console shows its picture fitted and centred; Lab takes the mouse to two opposite corners with the right stick in
+  the keyboard and mouse mode and checks that the probe's window got moves at all four edges;
 - the graphics probes draw four coloured quadrants with GDI, Direct3D 9, 11, 12 or OpenGL, 32 and 64 bit, under a
   pairwise set of graphics and system settings: every pair of values of any two settings appears at least once
   (25 runs instead of 746,496 combinations). `--random <n>` adds random combinations for a long run.

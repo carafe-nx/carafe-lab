@@ -76,6 +76,8 @@ pub enum Step {
     },
     /// Checks the input probe's log: every single-button press since the launch gave what the build's bindings say.
     ExpectInput,
+    /// Checks the screen probe's log: the mouse moves reached every edge of its window.
+    ExpectPointer,
     /// Checks that the game has written its save data and remembers it for [`Step::ExpectSaveKept`].
     ExpectSave,
     /// Checks that the save data remembered by [`Step::ExpectSave`] is still there and unchanged.
@@ -253,6 +255,7 @@ fn check_steps<'a>(
                     | Step::Repeat { .. }
                     | Step::IfScreen { .. }
                     | Step::ExpectInput
+                    | Step::ExpectPointer
             );
             if needs_game && !state.running {
                 return Err(ScenarioError::NotRunning(number));
@@ -458,6 +461,42 @@ impl Scenario {
         ]);
         Self { steps }
     }
+
+    /// Returns the scenario for the screen probe: the right stick takes the mouse to the top left corner and then to
+    /// the bottom right one, then the probe's log is checked.
+    #[must_use]
+    pub fn screen_probe(first_frame_timeout: u32) -> Self {
+        let mut steps = vec![
+            Step::Launch,
+            Step::WaitFor {
+                milestone: Milestone::FirstFrame,
+                timeout: first_frame_timeout,
+            },
+            Step::Wait { seconds: 3.0 },
+        ];
+        for button in [
+            SwitchButton::RLeft,
+            SwitchButton::RUp,
+            SwitchButton::RRight,
+            SwitchButton::RDown,
+        ] {
+            steps.push(Step::Press {
+                buttons: vec![button],
+                hold: 8.0,
+            });
+            steps.push(Step::Wait { seconds: 1.0 });
+        }
+        steps.extend([
+            Step::Screenshot {
+                name: "corner".to_owned(),
+            },
+            Step::ExpectPointer,
+            Step::Close {
+                timeout: default_close_timeout(),
+            },
+        ]);
+        Self { steps }
+    }
 }
 
 fn check_time(seconds: f32, zero_allowed: bool, number: usize) -> Result<(), ScenarioError> {
@@ -518,6 +557,7 @@ mod tests {
             .filter(|step| matches!(step, Step::Press { .. }))
             .count();
         assert_eq!(presses, SwitchButton::ALL.len());
+        assert_eq!(Scenario::screen_probe(600).check(), Ok(()));
     }
 
     #[test]

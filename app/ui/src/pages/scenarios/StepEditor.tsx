@@ -15,7 +15,7 @@ const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"
 
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "expectChange",
-  "expectPattern", "expectScreen", "expectInput", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
+  "expectPattern", "expectScreen", "expectInput", "expectPointer", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
   "repeat", "ifScreen", "close",
 ];
 
@@ -40,6 +40,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "expectScreen", name: `screen-${shots.length + 1}`, reference: "", tolerance: 12 };
     case "expectInput":
       return { step: "expectInput" };
+    case "expectPointer":
+      return { step: "expectPointer" };
     case "expectSave":
       return { step: "expectSave" };
     case "expectSaveKept":

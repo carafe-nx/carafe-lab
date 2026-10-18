@@ -18,6 +18,7 @@ use lab_core::lang::Lang;
 use lab_core::milestones::{Exit, Launch, Stage};
 use lab_core::perf::{self, PerfSample, PerfSummary};
 use lab_core::picture::{self, Change, PatternCheck, Thumbnail};
+use lab_core::pointer_check;
 use lab_core::problems::{self, Problem, ProblemCounts};
 use lab_core::resources::{self, ResourceSample, ResourceSummary};
 use lab_core::scenario::{Milestone, Scenario, Step};
@@ -44,6 +45,9 @@ const EXPECTED_GAPS: [&str; 1] = ["unimplemented svcgetinfo id=0x000000000000fde
 
 /// Name of the log the input probe writes.
 pub const PROBE_INPUT_LOG: &str = "probe-input.log";
+
+/// Name of the log the screen probe writes.
+pub const PROBE_SCREEN_LOG: &str = "probe-screen.log";
 
 /// An error of the emulator or of the files around it.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -582,6 +586,7 @@ impl<'a> Runner<'a> {
             }
             Step::ExpectPattern { name } => self.expect_pattern(step, name),
             Step::ExpectInput => self.expect_input(step),
+            Step::ExpectPointer => self.expect_pointer(step),
             Step::RandomPresses { seconds, seed } => self.random_presses(step, *seconds, *seed),
             Step::Close { timeout } => self.close(step, *timeout),
             Step::Repeat { .. } | Step::IfScreen { .. } => self.result(
@@ -661,6 +666,28 @@ impl<'a> Runner<'a> {
         };
         result.presses = presses;
         result
+    }
+
+    fn expect_pointer(&mut self, step: &Step) -> StepResult {
+        let Some(log) = self.emulator.find_file(self.title, PROBE_SCREEN_LOG) else {
+            return self.result(
+                step,
+                Outcome::Fail,
+                format!("the probe wrote no {PROBE_SCREEN_LOG}"),
+                None,
+            );
+        };
+        match pointer_check::check(&log) {
+            Ok(reach) if reach.ok() => {
+                let detail = format!("the mouse reached every edge: {}", reach.describe());
+                self.result(step, Outcome::Pass, detail, None)
+            }
+            Ok(reach) => {
+                let detail = format!("the mouse stopped short of an edge: {}", reach.describe());
+                self.result(step, Outcome::Fail, detail, None)
+            }
+            Err(error) => self.result(step, Outcome::Fail, error, None),
+        }
     }
 
     fn launch(&mut self, step: &Step) -> StepResult {
@@ -1606,7 +1633,7 @@ mod tests {
             self.emulator_log.clone()
         }
         fn find_file(&self, _title: TitleId, name: &str) -> Option<String> {
-            (name == PROBE_INPUT_LOG)
+            matches!(name, PROBE_INPUT_LOG | PROBE_SCREEN_LOG)
                 .then(|| self.probe_log.clone())
                 .flatten()
         }
@@ -2125,6 +2152,36 @@ mod tests {
         };
         let (result, _) = run(emulator, &input_scenario());
         assert_eq!(result.steps[4].outcome, Outcome::Fail);
+    }
+
+    fn pointer_scenario() -> Scenario {
+        Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::WaitFor {
+                    milestone: Milestone::FirstFrame,
+                    timeout: 60,
+                },
+                Step::ExpectPointer,
+                Step::Close { timeout: 10 },
+            ],
+        }
+    }
+
+    #[test]
+    fn the_screen_probe_log_shows_how_far_the_mouse_got() {
+        let reached = "0.400 size 1024x768\n2.000 move client 0,0\n9.000 move client 1023,767\n";
+        let short = "0.400 size 1024x768\n2.000 move client 0,0\n9.000 move client 920,767\n";
+        for (log, outcome) in [(reached, Outcome::Pass), (short, Outcome::Fail)] {
+            let emulator = FakeEmulator {
+                script: VecDeque::from(vec![first_frame()]),
+                probe_log: Some(log.to_owned()),
+                ..FakeEmulator::default()
+            };
+            let (result, _) = run(emulator, &pointer_scenario());
+            let check = &result.steps[2];
+            assert_eq!(check.outcome, outcome, "{}", check.detail);
+        }
     }
 
     #[test]

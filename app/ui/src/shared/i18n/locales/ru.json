@@ -98,6 +98,7 @@
     "expectChange": "Экран изменился",
     "expectPattern": "Картинка пробы",
     "expectInput": "Кнопки дошли",
+    "expectPointer": "Мышь дошла до краёв",
     "expectSave": "Есть сохранение",
     "expectSaveKept": "Сохранение на месте",
     "expectPerformance": "Не медленнее прошлой версии",

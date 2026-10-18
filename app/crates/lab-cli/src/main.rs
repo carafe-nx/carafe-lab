@@ -1129,6 +1129,7 @@ impl Lab {
         }
         let mut runs = probes::input_runs(self.timeout);
         runs.extend(probes::graphics_runs(&combinations, self.timeout));
+        runs.extend(probes::screen_runs(self.timeout));
         if !self.args.json {
             println!(
                 "probes: {} runs, {} of them pairwise over {} combinations",

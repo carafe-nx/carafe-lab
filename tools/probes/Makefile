@@ -1,5 +1,5 @@
 OUT ?= $(CURDIR)/build
-PROBES := input gdi d3d9 d3d11 d3d12 gl
+PROBES := input gdi d3d9 d3d11 d3d12 gl screen
 ARCHES := i686 x86_64
 
 LIBS_input :=
@@ -8,6 +8,7 @@ LIBS_d3d9 := -ld3d9
 LIBS_d3d11 := -ld3d11 -ldxgi -ldxguid
 LIBS_d3d12 := -ld3d12 -ldxgi -ldxguid
 LIBS_gl := -lopengl32 -lgdi32
+LIBS_screen := -lddraw -ldxguid
 
 EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe))
 

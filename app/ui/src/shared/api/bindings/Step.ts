@@ -50,7 +50,7 @@ quiet?: Array<[string, string]>, } | { "step": "expectPattern",
 /**
  * The picture.
  */
-name: string, } | { "step": "expectInput" } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
+name: string, } | { "step": "expectInput" } | { "step": "expectPointer" } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
 /**
  * The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
  */

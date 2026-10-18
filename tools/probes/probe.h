@@ -61,7 +61,7 @@ static void probe_open_log(const char *name)
     probe_log("probe %s ready, %d-bit, log %s", name, (int)(sizeof(void *) * 8), probe_log_file ? path : "none");
 }
 
-static HWND probe_window(const char *title, WNDPROC proc)
+static inline HWND probe_window(const char *title, WNDPROC proc)
 {
     WNDCLASSA klass = {0};
     RECT rect = {0, 0, PROBE_WIDTH, PROBE_HEIGHT};

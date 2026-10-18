@@ -482,6 +482,12 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "Buttons reached the game as bound",
             )
             .to_owned(),
+        Step::ExpectPointer => lang
+            .pick(
+                "Мышь дошла до краёв окна",
+                "The mouse reached the window's edges",
+            )
+            .to_owned(),
         Step::ExpectSave => lang
             .pick("Игра записала сохранение", "The game wrote save data")
             .to_owned(),

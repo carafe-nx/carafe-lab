@@ -88,6 +88,7 @@
     "expectChange": "Screen changed",
     "expectPattern": "Probe picture",
     "expectInput": "Buttons arrived",
+    "expectPointer": "Mouse reached the edges",
     "expectSave": "Save data written",
     "expectSaveKept": "Save data kept",
     "expectPerformance": "No slower than the last version",
