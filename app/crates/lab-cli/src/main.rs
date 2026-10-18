@@ -238,6 +238,12 @@ fn start(args: Args) -> Result<ExitCode, String> {
             let buttons = buttons.ok_or("press needs buttons, such as A or A+ZR")?;
             lab.press(&config, &buttons)
         }
+        Command::Tap { x, y } => {
+            let (x, y) = x
+                .zip(y)
+                .ok_or("tap needs a point: x and y on the 1280×720 screen")?;
+            lab.tap(&config, x, y)
+        }
         Command::Screen { file } => {
             let file = file.ok_or("screen needs a file to save the picture to")?;
             lab.screen(&config, &file)
@@ -1090,6 +1096,13 @@ impl Lab {
                 problem.count, problem.source, problem.text
             );
         }
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn tap(mut self, config: &Config, x: u32, y: u32) -> Result<ExitCode, String> {
+        self.require_running(config)?;
+        self.eden.join_running();
+        self.eden.tap(x, y).map_err(|error| error.to_string())?;
         Ok(ExitCode::SUCCESS)
     }
 

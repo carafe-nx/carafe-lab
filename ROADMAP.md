@@ -11,6 +11,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Planned
 
+- [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
+
 ### Research and later ideas (not the app)
 
 - [ ] `research` Eden with a real firmware folder: does every game still pass, what changes

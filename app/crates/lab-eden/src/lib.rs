@@ -226,6 +226,18 @@ impl Eden {
         self
     }
 
+    /// Taps the screen at a point the way a finger would: Eden takes a click on its window for a touch.
+    ///
+    /// # Errors
+    ///
+    /// The emulator's container cannot run the click.
+    pub fn tap(&mut self, x: u32, y: u32) -> Result<(), EmulatorError> {
+        self.exec(&format!(
+            "xdotool mousemove {x} {y} mousedown 1 && sleep 0.1 && xdotool mouseup 1"
+        ))
+        .map(|_| ())
+    }
+
     /// Joins the one Eden another process started, so presses go through its control channel and the logs read are
     /// those of the game it booted last.
     ///

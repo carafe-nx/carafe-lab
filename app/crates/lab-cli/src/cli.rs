@@ -24,6 +24,7 @@ Usage:
   carafe-lab play <game>           launches the game and keeps it running for --minutes (default 30) or
                                    until stop, for hands or for the commands below
   carafe-lab press <A+B…>          presses buttons together in the running game; --hold <s>, default 0.15
+  carafe-lab tap <x> <y>           taps the running game's screen at a point of 1280×720, as a finger would
   carafe-lab screen <file.png>     saves the running game's screen
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
@@ -111,6 +112,13 @@ pub enum Command {
     Press {
         /// The buttons, joined with `+`.
         buttons: Option<String>,
+    },
+    /// Tap the running game's screen.
+    Tap {
+        /// The point across the 1280×720 screen.
+        x: Option<u32>,
+        /// The point down the 1280×720 screen.
+        y: Option<u32>,
     },
     /// Save the running game's screen.
     Screen {
@@ -241,6 +249,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("stop") => Command::Stop { id: None },
         Some("play") => Command::Play { game: None },
         Some("press") => Command::Press { buttons: None },
+        Some("tap") => Command::Tap { x: None, y: None },
         Some("screen") => Command::Screen { file: None },
         Some("perf") => Command::Perf,
         Some("logs") => Command::Logs,
@@ -380,6 +389,14 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 Command::Press { buttons } if buttons.is_none() => {
                     *buttons = Some(other.to_owned())
                 }
+                Command::Tap { x, y } if x.is_none() || y.is_none() => {
+                    let value = number(other, other.to_owned(), "a whole number of pixels")?;
+                    if x.is_none() {
+                        *x = Some(value);
+                    } else {
+                        *y = Some(value);
+                    }
+                }
                 Command::Screen { file } | Command::Nsp { file } if file.is_none() => {
                     *file = Some(PathBuf::from(other))
                 }
@@ -490,6 +507,14 @@ mod tests {
             }
         );
         assert_eq!(press.hold_ms, 500);
+        assert_eq!(
+            parse(&args("tap 640 120")).unwrap().command,
+            Command::Tap {
+                x: Some(640),
+                y: Some(120)
+            }
+        );
+        assert!(parse(&args("tap left 120")).is_err());
         assert_eq!(
             parse(&args("screen shot.png")).unwrap().command,
             Command::Screen {
