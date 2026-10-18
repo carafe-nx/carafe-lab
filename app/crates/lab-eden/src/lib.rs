@@ -1287,9 +1287,10 @@ pub fn eden_key(button: SwitchButton) -> &'static str {
     }
 }
 
-/// Returns Eden's `qt-config.ini` for the lab: the console's four cores and 4 GB, docked, full screen, no update
-/// check, no stop confirmation, no controller applet, audio through SDL's dummy driver, the processor mode `cpu`, and
-/// the renderer `gpu` can drive — OpenGL on Mesa's Direct3D 12 driver through WSL2, Vulkan on Mesa's software driver.
+/// Returns Eden's `qt-config.ini` for the lab: the console's four cores and 4 GB, handheld at 1280×720, full screen,
+/// no update check, no stop confirmation, no controller applet, audio through SDL's dummy driver, the processor mode
+/// `cpu`, and the renderer `gpu` can drive — OpenGL on Mesa's Direct3D 12 driver through WSL2, Vulkan on Mesa's
+/// software driver.
 /// `extra` replaces or adds settings; each key is `Section/key`, and a key without a section is ignored.
 #[must_use]
 pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> String {
@@ -1307,7 +1308,7 @@ pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> St
             "Core",
             &[("use_multi_core", "true"), ("memory_layout_mode", "0")],
         ),
-        ("System", &[("use_docked_mode", "1")]),
+        ("System", &[("use_docked_mode", "0")]),
         ("Debugging", &[("record_frame_times", "true")]),
         (
             "UI",
@@ -1500,7 +1501,7 @@ mod tests {
         let config = qt_config(Gpu::Wsl, EdenCpu::Dynarmic, &BTreeMap::new());
         assert!(config.contains("[Core]\nuse_multi_core\\default=false\nuse_multi_core=true\n"));
         assert!(config.contains("\nmemory_layout_mode=0\n"));
-        assert!(config.contains("[System]\nuse_docked_mode\\default=false\nuse_docked_mode=1\n"));
+        assert!(config.contains("[System]\nuse_docked_mode\\default=false\nuse_docked_mode=0\n"));
     }
 
     #[test]

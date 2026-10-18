@@ -46,6 +46,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `feature` Eden runs handheld at 1280×720, like the console's own screen
 - [x] `feature` The Run screen draws the Switch of the old live page; the browser live page is gone
 - [x] `feature` A regression between two versions starts a bisection over Carafe's commits
 - [x] `feature` Scenarios with nested blocks (repeat, "if the screen shows …"), with a flowchart drawn from them for viewing
