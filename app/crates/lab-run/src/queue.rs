@@ -4,8 +4,8 @@
 //! queue without a server. Each process refreshes its entry every few seconds; an entry that has not been refreshed
 //! for [`STALE_SECONDS`] belongs to a process that died and is ignored.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
@@ -88,11 +88,10 @@ impl Queue {
     #[must_use]
     pub fn state(&self, now: u64) -> QueueState {
         let holder = read_entry(&self.dir.join(HOLDER_FILE)).filter(|entry| alive(entry, now));
-        let mut waiting: Vec<QueueEntry> = fs::read_dir(self.dir.join(WAITING_DIR))
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .filter_map(|entry| read_entry(&entry.path()))
+        let mut waiting: Vec<QueueEntry> = self
+            .waiting_files()
+            .iter()
+            .filter_map(|path| read_entry(path))
             .filter(|entry| alive(entry, now))
             .collect();
         waiting.sort_by(|a, b| (a.since, &a.id).cmp(&(b.since, &b.id)));
@@ -143,16 +142,15 @@ impl Queue {
             });
         }
         let holder_file = self.dir.join(HOLDER_FILE);
-        if read_entry(&holder_file).is_some() {
+        if read_entry(&holder_file).is_some() || broken(&holder_file, now) {
             let _ = fs::remove_file(&holder_file);
         }
-        let text = serde_json::to_string_pretty(entry).map_err(|error| error.to_string())?;
-        let created = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&holder_file)
-            .and_then(|mut file| file.write_all(text.as_bytes()));
-        match created {
+        for path in self.waiting_files() {
+            if broken(&path, now) {
+                let _ = fs::remove_file(path);
+            }
+        }
+        match create_entry(&holder_file, entry) {
             Ok(()) => {
                 let _ = fs::remove_file(self.waiting_file(&entry.id));
                 Ok(Turn::Taken)
@@ -217,6 +215,19 @@ impl Queue {
 
     fn waiting_file(&self, id: &str) -> PathBuf {
         self.dir.join(WAITING_DIR).join(format!("{id}.json"))
+    }
+
+    fn waiting_files(&self) -> Vec<PathBuf> {
+        fs::read_dir(self.dir.join(WAITING_DIR))
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .collect()
     }
 
     fn stop_file(&self, id: &str) -> PathBuf {
@@ -299,12 +310,45 @@ fn read_entry(path: &Path) -> Option<QueueEntry> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
+fn broken(path: &Path, now: u64) -> bool {
+    let written = fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok());
+    written.is_some_and(|written| now.saturating_sub(written.as_secs()) > STALE_SECONDS)
+        && read_entry(path).is_none()
+}
+
 fn write_entry(path: &Path, entry: &QueueEntry) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| format!("{}: {error}", parent.display()))?;
     }
-    let text = serde_json::to_string_pretty(entry).map_err(|error| error.to_string())?;
-    fs::write(path, text).map_err(|error| format!("{}: {error}", path.display()))
+    let temp = write_temp(path, entry).map_err(|error| format!("{}: {error}", path.display()))?;
+    fs::rename(&temp, path).map_err(|error| {
+        let _ = fs::remove_file(&temp);
+        format!("{}: {error}", path.display())
+    })
+}
+
+fn create_entry(path: &Path, entry: &QueueEntry) -> io::Result<()> {
+    let temp = write_temp(path, entry)?;
+    let created = fs::hard_link(&temp, path);
+    let _ = fs::remove_file(&temp);
+    created
+}
+
+fn write_temp(path: &Path, entry: &QueueEntry) -> io::Result<PathBuf> {
+    let text = serde_json::to_string_pretty(entry).map_err(io::Error::other)?;
+    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
+    let written = File::create(&temp).and_then(|mut file| {
+        file.write_all(text.as_bytes())
+            .and_then(|()| file.sync_all())
+    });
+    if let Err(error) = written {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    Ok(temp)
 }
 
 #[cfg(test)]
@@ -373,6 +417,64 @@ mod tests {
         let later = 100 + STALE_SECONDS + 1;
         queue.beat_waiting(&mut second, later).unwrap();
         assert_eq!(queue.try_take(&mut second, later).unwrap(), Turn::Taken);
+    }
+
+    #[test]
+    fn a_broken_holder_file_frees_the_emulator() {
+        let queue = queue("broken-holder");
+        fs::create_dir_all(&queue.dir).unwrap();
+        fs::write(queue.dir.join(HOLDER_FILE), [0_u8; 230]).unwrap();
+        let later = unix_now() + STALE_SECONDS + 1;
+        let mut first = queue.join("window", "nfsu", 1, later).unwrap();
+        assert_eq!(queue.try_take(&mut first, later).unwrap(), Turn::Taken);
+        assert_eq!(queue.state(later).holder, Some(first));
+    }
+
+    #[test]
+    fn a_fresh_unreadable_holder_file_is_left_alone() {
+        let queue = queue("fresh-holder");
+        fs::create_dir_all(&queue.dir).unwrap();
+        fs::write(queue.dir.join(HOLDER_FILE), b"").unwrap();
+        let now = unix_now();
+        let mut first = queue.join("window", "nfsu", 1, now).unwrap();
+        assert_eq!(
+            queue.try_take(&mut first, now).unwrap(),
+            Turn::Wait {
+                holder: String::new(),
+                ahead: 1
+            }
+        );
+    }
+
+    #[test]
+    fn a_broken_waiting_file_is_removed() {
+        let queue = queue("broken-waiting");
+        let broken_file = queue.waiting_file("1-1");
+        fs::create_dir_all(broken_file.parent().unwrap()).unwrap();
+        fs::write(&broken_file, [0_u8; 153]).unwrap();
+        let later = unix_now() + STALE_SECONDS + 1;
+        let mut first = queue.join("window", "nfsu", 2, later).unwrap();
+        assert_eq!(queue.try_take(&mut first, later).unwrap(), Turn::Taken);
+        assert!(!broken_file.exists());
+    }
+
+    #[test]
+    fn writing_entries_leaves_only_whole_files() {
+        let queue = queue("whole");
+        let mut first = queue.join("window", "nfsu", 1, 100).unwrap();
+        let mut second = queue.join("Claude", "quick", 2, 100).unwrap();
+        assert_eq!(queue.try_take(&mut first, 100).unwrap(), Turn::Taken);
+        queue.beat_holder(&mut first, 101).unwrap();
+        queue.beat_waiting(&mut second, 101).unwrap();
+        let mut names: Vec<String> = [queue.dir.clone(), queue.dir.join(WAITING_DIR)]
+            .iter()
+            .flat_map(|dir| fs::read_dir(dir).unwrap())
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != WAITING_DIR)
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["100-2.json".to_owned(), HOLDER_FILE.to_owned()]);
+        assert_eq!(queue.state(101).holder.map(|holder| holder.beat), Some(101));
     }
 
     #[test]
