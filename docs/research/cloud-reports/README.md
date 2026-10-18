@@ -9,6 +9,4 @@ reasoning behind patches whose headers only state the fix.
 - `bench-rest.md` — the remaining bench bugs handed over together.
 - `nfsu-eden-exit.md` — why Need for Speed Underground ended itself in Eden (`0016`, `0018`), in Russian.
 
-The cloud sessions' answers with their logs live outside the repository, in `D:\Carafe\` (`eden-openttd-report`,
-`carafe-openttd-stall`, `cloud-gpu-picture-fix`). What they found is in the patch headers, `ROADMAP.md` and the
-decisions.
+What the cloud sessions found is in the patch headers, `ROADMAP.md` and the decisions.

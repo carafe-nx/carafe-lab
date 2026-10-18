@@ -21,7 +21,7 @@ Mesa's Vulkan on D3D12, so Eden can use the GPU only through OpenGL on Mesa's d3
   while it compiles (`llvm::sys::OverrideSignalHandler`). Fastmem faults of Eden's CPU threads then reach it instead of
   dynarmic, and Eden crashes. Turning fastmem off avoided it at the cost of CPU speed.
 
-Found by a cloud session (report `D:\Carafe\gpu\gpu.txt`), checked on the bench PC.
+Found by a cloud session, checked on the bench PC.
 
 ## Decision
 
