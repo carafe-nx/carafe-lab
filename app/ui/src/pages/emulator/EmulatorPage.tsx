@@ -136,6 +136,17 @@ export function EmulatorPage() {
       .then(() => status.refresh())
       .catch((reason: unknown) => setError(errorText(reason)));
   };
+  const chooseWork = async () => {
+    setError(null);
+    const picked = await open({ multiple: false, directory: true, title: t("emulator.workPick") });
+    if (typeof picked !== "string") return;
+    try {
+      await api.chooseWork(picked);
+      status.refresh();
+    } catch (reason) {
+      setError(errorText(reason));
+    }
+  };
   const firmwareAction = (
     <span className={styles.actions}>
       <Button onClick={() => void chooseFirmware()}>
@@ -199,6 +210,13 @@ export function EmulatorPage() {
             ))}
             <span className={styles.label}>{t("emulator.work")}</span>
             <span className={styles.mono}>{data.work || "—"}</span>
+            <span className={styles.muted}>{t("emulator.workHint")}</span>
+            <span className={styles.actions}>
+              <Button onClick={() => void chooseWork()}>
+                <Icon name="folder" size={14} />
+                {t("emulator.workChoose")}
+              </Button>
+            </span>
           </aside>
         </div>
       ) : null}

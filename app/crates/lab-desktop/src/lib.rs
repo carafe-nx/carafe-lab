@@ -38,6 +38,7 @@ pub fn run() {
             commands::choose_keys,
             commands::forget_keys,
             commands::choose_firmware,
+            commands::choose_work,
             commands::read_nsp,
             commands::list_releases,
             commands::start_bisect,

@@ -27,7 +27,10 @@
     "waiting_many": "{{count}} в очереди",
     "waiting_other": "{{count}} в очереди",
     "queued": "Ждёт: {{who}} · {{what}}",
-    "work": "Рабочая папка"
+    "work": "Рабочая папка",
+    "workHint": "Сюда идут NSP, данные эмулятора и прогоны. Исключите её из Защитника Windows: в неё распаковываются DLL Wine из рантайма",
+    "workChoose": "Выбрать папку",
+    "workPick": "Рабочая папка"
   },
   "docker": {
     "missing": "Docker не установлен",
@@ -276,7 +279,7 @@
   },
   "stages": {
     "lab": "Файл lab.json",
-    "labFix": "Скопируйте lab.example.json в lab.json и впишите свои пути",
+    "labFix": "Исправьте ошибку в lab.json в корне репозитория",
     "keys": "Файлы консоли",
     "keysMissing": "не выбраны ни здесь, ни в Carafe",
     "keysFrom": {

@@ -98,6 +98,7 @@ export const api = {
   forgetKeys: () => invoke<KeysState>("forget_keys"),
   chooseFirmware: (path: string) => invoke<FirmwareState>("choose_firmware", { path }),
   forgetFirmware: () => invoke<FirmwareState>("forget_firmware"),
+  chooseWork: (path: string) => invoke<void>("choose_work", { path }),
   openPath: (path: string) => invoke<void>("open_path", { path }),
   readScreen: () => invoke<Screen | null>("read_screen"),
   livePerf: (seconds: number) => invoke<PerfSample[]>("live_perf", { seconds }),

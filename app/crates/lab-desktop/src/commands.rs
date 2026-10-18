@@ -723,6 +723,31 @@ pub async fn add_game(lab: State<'_, Arc<Lab>>, folder: String) -> Result<String
     .await
 }
 
+/// Chooses the folder `path` as the lab's work folder in `lab.json`.
+///
+/// # Errors
+///
+/// [`CommandError`] when the folder cannot be made or `lab.json` cannot be read or written.
+#[tauri::command]
+pub async fn choose_work(lab: State<'_, Arc<Lab>>, path: String) -> Result<(), CommandError> {
+    let lab = Arc::clone(&lab);
+    blocking(move || {
+        let folder = PathBuf::from(path);
+        fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+        lab.config()?;
+        let config_path = lab.config_path();
+        let text = fs::read_to_string(&config_path).map_err(|error| error.to_string())?;
+        let base = config::scenario_base(&text, lab.repository());
+        let updated = config::set_work(&text, &folder, |file| {
+            fs::read_to_string(base.join(file)).map_err(|error| error.to_string())
+        })
+        .map_err(|error| error.to_string())?;
+        fs::write(&config_path, updated).map_err(|error| error.to_string())?;
+        Ok(())
+    })
+    .await
+}
+
 /// Chooses the console files Lab packs with, for this PC only.
 ///
 /// # Errors

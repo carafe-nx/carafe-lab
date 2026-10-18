@@ -1,7 +1,7 @@
 //! `lab.json`: where the lab works, how it draws, and which games it checks.
 //!
-//! The repository keeps `lab.example.json`; each developer copies it to `lab.json`, which git ignores,
-//! because the paths are their own.
+//! The lab writes `lab.json` itself the first time it is read, without games; git ignores it, because the paths are
+//! each developer's own.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,18 +22,15 @@ use crate::lang::Lang;
 use crate::scenario::{Scenario, ScenarioError};
 use crate::versions;
 
-/// Name of the developer's own file, next to the template.
+/// Name of the developer's own file in the repository's root.
 pub const CONFIG_FILE: &str = "lab.json";
-/// Name of the template kept in the repository.
-pub const TEMPLATE_FILE: &str = "lab.example.json";
+/// The text of a new `lab.json`: the work folder `build/work` next to it and no games.
+pub const DEFAULT_TEXT: &str = "{\n  \"work\": \"build/work\"\n}\n";
 
 /// An error in `lab.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ConfigError {
-    /// There is no `lab.json`.
-    #[error("no {0}: copy {TEMPLATE_FILE} to {CONFIG_FILE} next to it and put your paths in")]
-    Missing(String),
-    /// The file could not be read.
+    /// The file could not be read or written.
     #[error("{0}: {1}")]
     Io(String, String),
     /// The file is not valid JSON or has unknown fields.
@@ -189,28 +186,32 @@ pub fn scenario_base(text: &str, lab_dir: &Path) -> PathBuf {
 }
 
 impl Config {
-    /// Reads `lab.json`.
+    /// Reads `lab.json`, writing it with [`DEFAULT_TEXT`] first when there is none. A relative work folder is taken
+    /// relative to the file's folder.
     ///
     /// # Errors
     ///
-    /// [`ConfigError::Missing`] if there is no such file; another [`ConfigError`] if it is broken.
+    /// [`ConfigError::Io`] if the file cannot be read or written; another [`ConfigError`] if it is broken.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        let io =
+            |error: std::io::Error| ConfigError::Io(path.display().to_string(), error.to_string());
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ConfigError::Missing(path.display().to_string()));
+                fs::write(path, DEFAULT_TEXT).map_err(io)?;
+                DEFAULT_TEXT.to_owned()
             }
-            Err(error) => {
-                return Err(ConfigError::Io(
-                    path.display().to_string(),
-                    error.to_string(),
-                ));
-            }
+            Err(error) => return Err(io(error)),
         };
-        let base = scenario_base(&text, path.parent().unwrap_or_else(|| Path::new(".")));
-        Self::parse_with(&text, |file| {
+        let lab_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let base = scenario_base(&text, lab_dir);
+        let mut config = Self::parse_with(&text, |file| {
             fs::read_to_string(base.join(file)).map_err(|error| error.to_string())
-        })
+        })?;
+        if config.work.is_relative() {
+            config.work = tidy(&lab_dir.join(&config.work));
+        }
+        Ok(config)
     }
 
     /// Reads the text of `lab.json` whose games' scenarios are all written in it.
@@ -692,6 +693,34 @@ pub fn set_game_notes(
     Ok(updated)
 }
 
+/// Returns the text of `lab.json` with the work folder replaced by `folder`; everything else keeps its order.
+///
+/// # Errors
+///
+/// [`ConfigError`] when the text is not a valid lab file.
+pub fn set_work(
+    text: &str,
+    folder: &Path,
+    read: impl Fn(&str) -> Result<String, String>,
+) -> Result<String, ConfigError> {
+    let mut value: Value =
+        serde_json::from_str(text).map_err(|error| ConfigError::Format(error.to_string()))?;
+    value
+        .as_object_mut()
+        .ok_or_else(|| ConfigError::Format("the lab file is not an object".to_owned()))?
+        .insert(
+            "work".to_owned(),
+            Value::String(folder.display().to_string()),
+        );
+    let updated = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&value)
+            .map_err(|error| ConfigError::Format(error.to_string()))?
+    );
+    Config::parse_with(&updated, read)?;
+    Ok(updated)
+}
+
 /// Returns the scenario file a game named `name` gets when its scenario is first saved on its own:
 /// `scenarios/<name>.json` with the name in lower case and every character other than a letter or digit as `-`.
 #[must_use]
@@ -737,8 +766,6 @@ mod tests {
 
     use super::*;
 
-    const EXAMPLE: &str = include_str!("../../../../lab.example.json");
-
     fn report(paths: &[(&str, Arch, u64)]) -> FolderReport {
         FolderReport {
             folder: "D:\\Games\\OpenTTD".to_owned(),
@@ -778,16 +805,20 @@ mod tests {
     }
 
     #[test]
-    fn the_template_reads() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-        let config = Config::parse_with(EXAMPLE, |file| {
-            fs::read_to_string(root.join(file)).map_err(|error| error.to_string())
-        })
-        .unwrap();
-        assert_eq!(config.games.len(), 1);
-        assert_eq!(config.games[0].name, "OpenTTD");
-        assert_eq!(config.select(Some("quick")).unwrap().len(), 1);
+    fn the_default_file_has_no_games() {
+        let config = Config::parse(DEFAULT_TEXT).unwrap();
+        assert!(config.games.is_empty());
+        assert_eq!(config.work, PathBuf::from("build/work"));
         assert_eq!(config.gpu, Gpu::Wsl);
+    }
+
+    #[test]
+    fn the_work_folder_is_replaced() {
+        let text = r#"{"work": "build/work", "games": [{"name": "A", "folder": "C:\\A"}]}"#;
+        let updated = set_work(text, Path::new("E:\\Lab"), |_| Err("none".to_owned())).unwrap();
+        let config = Config::parse(&updated).unwrap();
+        assert_eq!(config.work, PathBuf::from("E:\\Lab"));
+        assert_eq!(config.games.len(), 1);
     }
 
     #[test]
@@ -1097,9 +1128,14 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_file_says_how_to_make_it() {
-        let error = Config::load(Path::new("Z:\\nowhere\\lab.json")).unwrap_err();
-        assert!(matches!(error, ConfigError::Missing(_)));
-        assert!(error.to_string().contains(TEMPLATE_FILE));
+    fn a_missing_file_is_written_with_the_defaults() {
+        let dir = std::env::temp_dir().join(format!("lab-config-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CONFIG_FILE);
+        let _ = fs::remove_file(&path);
+        let config = Config::load(&path).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), DEFAULT_TEXT);
+        assert_eq!(config.work, dir.join("build").join("work"));
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

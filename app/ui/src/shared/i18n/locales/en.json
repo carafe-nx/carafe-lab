@@ -25,7 +25,10 @@
     "waiting_one": "{{count}} waiting",
     "waiting_other": "{{count}} waiting",
     "queued": "Waiting: {{who}} · {{what}}",
-    "work": "Work folder"
+    "work": "Work folder",
+    "workHint": "NSPs, the emulator's data and runs go here. Exclude it from Windows Defender: the runtime's Wine DLLs are unpacked into it",
+    "workChoose": "Choose folder",
+    "workPick": "Work folder"
   },
   "docker": {
     "missing": "Docker is not installed",
@@ -254,7 +257,7 @@
   },
   "stages": {
     "lab": "lab.json",
-    "labFix": "Copy lab.example.json to lab.json and put your paths in",
+    "labFix": "Fix the error in lab.json in the repository's root",
     "keys": "Console files",
     "keysMissing": "chosen neither here nor in Carafe",
     "keysFrom": {

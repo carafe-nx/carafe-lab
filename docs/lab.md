@@ -30,8 +30,9 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    - `docker compose --profile build build eden` — the image `carafe-lab-eden` that runs games;
    - `docker compose --profile build run --rm probes` — the probe programs in `tools/probes/build/`.
    `external/eden` and `external/mesa` are never edited: their changes are the patches.
-5. Copy `lab.example.json` to `lab.json` and put your paths in. Keep `work` in a folder Windows Defender skips: the
-   runtime's Wine DLLs are unpacked there for every build.
+5. Lab writes `lab.json` itself on the first start: no games and the work folder `build/work`. Games are added in
+   the Library, and another work folder is chosen in the Emulator screen. Keep the work folder where Windows Defender
+   skips it: the runtime's Wine DLLs are unpacked there for every build.
 6. `gpu: wsl` runs Eden on the PC's graphics card: OpenGL on Mesa's d3d12 driver through WSL2. `gpu: software` is the
    fallback: Vulkan on llvmpipe, everything on the CPU, and the only way to check Eden's Vulkan renderer. Ubuntu does
    not build Dozen, so there is no Vulkan on the graphics card. `carafe-lab gpu` shows what the container sees; on a
