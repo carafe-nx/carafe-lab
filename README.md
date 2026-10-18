@@ -25,18 +25,11 @@ Carafe Lab is a development tool for [Carafe](https://github.com/carafe-nx/caraf
 runtime, runs them in the [Eden](https://git.eden-emu.dev/eden-emu/eden) emulator in Docker and checks them with
 scenarios.
 
-- **Runs of many games** with repeats, the emulator's live picture in the window and a report with screenshots,
-  milestones and logs.
-- **Every Carafe version compared**: time to the first frame, FPS, the worst frames and memory, with the spread
-  between repeats; a game that got slower than its threshold fails.
-- **The commit that broke a game**, found by halving Carafe's history; the runtime of each release is built once and
-  kept, so a game can run on main against a release.
-- **Logs that explain a failure**: the thread stacks of a hung game, where a game crashed, one timeline for all logs,
-  and a second run with detailed logs after a failure.
-- **Scenarios**: presses, waits, screen checks, repeats and "if the screen shows", recorded by playing by hand and
-  drawn as a flowchart.
-- **Ready NSPs and the console**: an NSP made by Carafe runs as it is or is built again; NSPs built for the console
-  get the console's verdict in the history.
+- Runs of many games with repeats, a report and a history of runs.
+- Comparison of Carafe versions and A/B runs between settings or runtimes.
+- Search for the Carafe commit that broke a game.
+- Scenarios: presses, waits and screen checks.
+- Ready NSPs run as they are.
 
 ## How it works
 
