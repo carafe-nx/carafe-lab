@@ -5,7 +5,7 @@
   <img src="assets/github/banner-light.png" alt="Carafe Lab" width="645">
 </picture>
 
-**Checks the games Carafe builds, in an emulator, between releases**
+**A test bench for Carafe's development**
 
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D4)](#requirements)
@@ -21,10 +21,9 @@
 
 ## What it does
 
-Carafe Lab builds games into NSPs the way [Carafe](https://github.com/carafe-nx/carafe) does, runs them in the
-[Eden](https://git.eden-emu.dev/eden-emu/eden) emulator and tells whether they still work. It does not replace the
-console: the console stays the last check before a release. Lab catches what breaks between releases — a game that
-no longer starts, a black screen, a hang, a lost save — and shows where it broke.
+Carafe Lab is a development tool for [Carafe](https://github.com/carafe-nx/carafe). It builds games with Carafe's
+runtime, runs them in the [Eden](https://git.eden-emu.dev/eden-emu/eden) emulator in Docker and checks them with
+scenarios.
 
 - **Runs of many games** with repeats, the emulator's live picture in the window and a report with screenshots,
   milestones and logs.
