@@ -158,14 +158,15 @@ save data is still there, close it.
 
 The threads probe, `probe-threads.exe`, runs as a game of `lab.json` rather than through `probes`, because it needs
 its own scenario and arguments. It takes every thread it can at several points of its run and logs how many it got
-(`ceiling …` lines in `probe-threads.log`), then opens a Direct3D 9 device and holds every thread again. Its words on
-the command line choose what else it does:
+(`ceiling …` lines in `probe-threads.log`), then opens a Direct3D 9 device, holds every thread for 30 s and lets
+them all go at once, logging how long they took to end (`released … in … ms`). Its words on the command line choose
+what else it does:
 
 - none: before the device, 300 threads that are joined, 300 that are let go and 300 whose handles stay open, each
   followed by a ceiling, so a leak shows as a lower one;
 - `census`: none of that, straight to the device, for the `stacks` step to see the threads at rest and at the limit;
-- `dxvk`: a second Direct3D 9 device asked for with every thread taken while half of them end 2 s later, as a burst
-  of loading threads does in a game;
+- `dxvk`: instead of the 30 s hold, a second Direct3D 9 device asked for with every thread taken while half of them
+  end 2 s later, as a burst of loading threads does in a game;
 - `dxvk-hard`: the same with no thread ending, so DXVK is refused for good.
 
 The `expectThreads` step reads the log. The Eden Lab runs gives a program 96 threads, as the console does
