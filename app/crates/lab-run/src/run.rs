@@ -53,6 +53,9 @@ pub const PROBE_SCREEN_LOG: &str = "probe-screen.log";
 /// Name of the log the threads probe writes.
 pub const PROBE_THREADS_LOG: &str = "probe-threads.log";
 
+/// Name the probe's own log is kept under in the launch's folder, beside the runtime's log of the same name.
+pub const PROBE_LOG_COPY: &str = "probe-log.txt";
+
 /// An error of the emulator or of the files around it.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum EmulatorError {
@@ -752,6 +755,9 @@ impl<'a> Runner<'a> {
                 None,
             );
         };
+        if let Some(record) = self.launches.last() {
+            let _ = std::fs::write(self.dir.join(&record.logs).join(PROBE_LOG_COPY), &log);
+        }
         match ThreadsLog::read(&log).check(min) {
             Ok(detail) => self.result(step, Outcome::Pass, detail, None),
             Err(detail) => self.result(step, Outcome::Fail, detail, None),
