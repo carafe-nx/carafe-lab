@@ -218,7 +218,9 @@ emulator.
   HUD; these three change the NSP, so a ready NSP run as it is takes only the other two. `stacks` starts Eden with
   its gdb stub and a gdb inside the container that lets the game run on: when a launch misses its milestone, gdb
   stops the game for a moment and `backtraces.txt` gets the module map, every thread with its state and every
-  thread's stack, each unnamed frame marked with its module and offset. `eden-debug` sets Eden's log to the debug
+  thread's stack, each unnamed frame marked with its module and offset. When the run uses the checkout's runtime,
+  gdb loads `resources/runtime/symbols/wine-nx-runtime.elf` at the runtime's address, so its frames have names and
+  the stacks go past the first frame. `eden-debug` sets Eden's log to the debug
   level. Eden's diagnostics need an Eden started with them, so changing them starts a new one.
 - A game that fails runs once more right after, as `<name> · detailed`, with the diagnostics that suit how it
   failed: `verbose` always, with `profiler` and `stacks` when it never reached its first frame and `hud` when a

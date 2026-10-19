@@ -11,6 +11,9 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Planned
 
+- [ ] `bug` A program that crashes during a wait step still passes: the threads probe died in DXVK and every step passed
+- [ ] `bug` A runtime that stops with `[FAIL]` and parks is waited for until the milestone's timeout
+- [ ] `feature` The threads probe as a standing check: a ceiling, no crash, no leak
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
 - [ ] `bug` "No slower than the last version" compares runs of different scenarios, such as a hands-on session in the menu against the standard one
 
@@ -27,6 +30,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ### Emulator and games (not the app)
 
+- [ ] `bug` 64-bit games never start: the runtime refuses Eden's 39-bit address space (`0x8000000-0x4000000000`)
+- [ ] `bug` With the `stacks` diagnostic a Box64 game crashes Eden (SIGSEGV) seconds after launch
 - [ ] `bug` The input check still passes on OpenTTD: its title jumps between `first-frame` and `after-a` in every run
 - [ ] **`game` OpenTTD stands still for 20–110 s at start-up in 8 launches of 14, with both renderers and on the console too, so the cause is in the runtime (Carafe's roadmap). With the lock-wait fix 3 launches of 3 had no stall (first frame at 24–54 s), without it 3 of 3 stood still (80–111 s); threads spun in Wine's `spin_lock` at the addresses the cloud named, and the holder waited for newlib's malloc lock. Still unexplained: the counted malloc waits are short (at most 119 ms)**
 - [ ] `bug` Eden: OpenGL draws 9–15 fps; keeping a core's read area until the GPU writes to it (`0017`) cuts slow `OnCPURead` checks ~500 times and gave a peak of 25 fps; the temporary counters that measured it are archived
