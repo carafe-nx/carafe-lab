@@ -24,6 +24,19 @@ pub fn annotate(text: &str) -> String {
         + "\n"
 }
 
+/// Returns where the module `name` starts in the module map of `text`, the gdb stub's answer to `monitor get info`.
+///
+/// # Returns
+///
+/// `None` when the map has no module of that name.
+#[must_use]
+pub fn module_base(text: &str, name: &str) -> Option<u64> {
+    modules(text)
+        .into_iter()
+        .find(|(_, _, module)| module == name)
+        .map(|(start, _, _)| start)
+}
+
 fn modules(text: &str) -> Vec<(u64, u64, String)> {
     text.lines()
         .filter_map(|line| {
@@ -60,6 +73,13 @@ Thread 27 (Thread 195 \"Thread 195\" (Waiting (ConditionVar))):
 #0  0x00000000cc21a56c in ?? ()
 #1  0x000000308901fbd0 in ?? ()
 ";
+
+    #[test]
+    fn a_module_is_found_by_its_name() {
+        assert_eq!(module_base(TEXT, "wine-nx-runtime"), Some(0xca92_9000));
+        assert_eq!(module_base(TEXT, "carafe-loader"), Some(0x10_00eb_b000));
+        assert_eq!(module_base(TEXT, "nnSdk"), None);
+    }
 
     #[test]
     fn unnamed_frames_get_their_module_and_offset() {

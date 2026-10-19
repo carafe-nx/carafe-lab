@@ -58,6 +58,8 @@ const GDB_PORT: u16 = 6543;
 const GDB_INPUT: &str = "/tmp/lab-gdb.in";
 const GDB_OUTPUT: &str = "/tmp/lab-gdb.out";
 const GDB_END: &str = "--- carafe-lab end ---";
+const GDB_SYMBOLS: &str = "/tmp/wine-nx-runtime.elf";
+const RUNTIME_MODULE: &str = "wine-nx-runtime";
 const GDB_SERVER_WAIT: Duration = Duration::from_secs(30);
 const GDB_INTERRUPT_WAIT: Duration = Duration::from_secs(3);
 const GDB_ANSWER_WAIT: Duration = Duration::from_secs(90);
@@ -107,6 +109,7 @@ pub struct Eden {
     firmware: Option<PathBuf>,
     video: Video,
     diagnostics: Vec<Diagnostic>,
+    symbols: Option<PathBuf>,
 }
 
 struct Session {
@@ -169,6 +172,7 @@ impl Eden {
             firmware: None,
             video: Video::Full,
             diagnostics: Vec::new(),
+            symbols: None,
         }
     }
 
@@ -207,6 +211,16 @@ impl Eden {
     #[must_use]
     pub fn with_video(mut self, video: Video) -> Self {
         self.video = video;
+        self
+    }
+
+    /// Returns the emulator whose thread stacks name the runtime's functions from `symbols`, the runtime's ELF with
+    /// its symbols; `None` leaves the runtime's frames as module and offset.
+    ///
+    /// The file must come from the same build as the runtime the games run with, or the names are wrong.
+    #[must_use]
+    pub fn with_symbols(mut self, symbols: Option<PathBuf>) -> Self {
+        self.symbols = symbols;
         self
     }
 
@@ -624,14 +638,33 @@ impl Eden {
         if !self.watches_stacks() || !self.container_running() {
             return None;
         }
-        let mark = format!("--- carafe-lab {} ---", unix_millis());
         self.exec("kill -INT $(pgrep -x gdb)").ok()?;
         thread::sleep(GDB_INTERRUPT_WAIT);
-        let commands = format!(
-            "cat >> {GDB_INPUT} <<'EOF'\necho {mark}\\n\nmonitor get info\ninfo threads\n\
-             thread apply all bt 40\necho {GDB_END}\\n\ncontinue\nEOF"
+        let info = self.gdb_answer("monitor get info\n", false);
+        let symbols = info
+            .as_deref()
+            .and_then(|info| stacks::module_base(info, RUNTIME_MODULE))
+            .filter(|_| self.copy_symbols())
+            .map(|base| format!("add-symbol-file {GDB_SYMBOLS} -o {base:#x}\n"))
+            .unwrap_or_default();
+        let threads = self.gdb_answer(
+            &format!("{symbols}info threads\nthread apply all bt 40\n"),
+            true,
+        )?;
+        Some(stacks::annotate(&format!(
+            "{}\n{}",
+            info.unwrap_or_default().trim(),
+            threads.trim()
+        )))
+    }
+
+    fn gdb_answer(&mut self, commands: &str, resume: bool) -> Option<String> {
+        let mark = format!("--- carafe-lab {} ---", unix_millis());
+        let resume = if resume { "continue\n" } else { "" };
+        let script = format!(
+            "cat >> {GDB_INPUT} <<'EOF'\necho {mark}\\n\n{commands}echo {GDB_END}\\n\n{resume}EOF"
         );
-        self.exec(&commands).ok()?;
+        self.exec(&script).ok()?;
         let deadline = Instant::now() + GDB_ANSWER_WAIT;
         while Instant::now() < deadline {
             let output = self.exec(&format!("cat {GDB_OUTPUT}")).ok()?;
@@ -639,12 +672,23 @@ impl Eden {
             if let Some(start) = text.rfind(&mark)
                 && let Some(length) = text[start..].find(GDB_END)
             {
-                let body = &text[start + mark.len()..start + length];
-                return Some(stacks::annotate(body.trim()));
+                return Some(text[start + mark.len()..start + length].to_owned());
             }
             thread::sleep(Duration::from_secs(1));
         }
         None
+    }
+
+    fn copy_symbols(&self) -> bool {
+        let Some(symbols) = self.symbols.as_ref().filter(|path| path.is_file()) else {
+            return false;
+        };
+        docker_owned(&[
+            "cp".to_owned(),
+            symbols.display().to_string(),
+            format!("{CONTAINER}:{GDB_SYMBOLS}"),
+        ])
+        .is_ok()
     }
 
     fn boot_in_session(&mut self, dir: &Path, name: &str) -> Result<(), EmulatorError> {

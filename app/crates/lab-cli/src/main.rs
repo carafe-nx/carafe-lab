@@ -46,6 +46,7 @@ use serde::Serialize;
 
 const REPOSITORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
 const DESKTOP: &str = "app/crates/carafe-desktop";
+const RUNTIME_SYMBOLS: &str = "resources/runtime/symbols/wine-nx-runtime.elf";
 const QUEUE_POLL: Duration = Duration::from_secs(2);
 const PERF_WINDOW_MS: u64 = 10_000;
 const LOG_PROBLEMS_SHOWN: usize = 15;
@@ -173,7 +174,10 @@ fn start(args: Args) -> Result<ExitCode, String> {
     .with_one_eden(config.one_eden)
     .with_fresh_eden(args.clean)
     .with_video(args.video)
-    .with_firmware(local_settings(&config_path)?.firmware);
+    .with_firmware(local_settings(&config_path)?.firmware)
+    .with_symbols(
+        (args.runtime.is_none() && like.is_none()).then(|| desktop.join(RUNTIME_SYMBOLS)),
+    );
     let image = match &like {
         Some(kept) => kept.image.clone(),
         None => config

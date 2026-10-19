@@ -158,11 +158,12 @@ static IDirect3DDevice9 *create_device(IDirect3D9 *d3d, HWND window, HRESULT *hr
     return SUCCEEDED(*hr) ? device : NULL;
 }
 
-static BOOL present(IDirect3DDevice9 *device, unsigned int frames)
+static BOOL present(IDirect3DDevice9 *device, DWORD milliseconds)
 {
+    DWORD start = GetTickCount();
     unsigned int frame;
 
-    for (frame = 1; frame <= frames && probe_pump(); frame++)
+    for (frame = 1; GetTickCount() - start < milliseconds && probe_pump(); frame++)
     {
         int i;
 
@@ -198,12 +199,16 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
 
     (void)instance;
     (void)previous;
-    (void)command_line;
     (void)show;
     probe_open_log("threads");
     hold_event = CreateEventA(NULL, TRUE, FALSE, NULL);
     window = probe_window("Carafe threads probe", probe_default_proc);
     probe_pump();
+    if (command_line && strstr(command_line, "census"))
+    {
+        probe_log("census: no ceiling or churn phases");
+        goto device;
+    }
 
     hold_all("at start");
     release_all();
@@ -231,6 +236,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     hold_all("after closing those handles");
     release_all();
 
+device:
     d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d)
     {
@@ -244,15 +250,18 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
         return 4;
     }
     probe_log("device ready");
-    present(device, 120);
+    probe_log("idle for 15 s");
+    present(device, 15000);
     hold_all("with a Direct3D 9 device");
+    probe_log("holding every thread for 30 s");
+    present(device, 30000);
     probe_log("second device with every thread taken");
     second = create_device(d3d, window, &hr);
     probe_log("second device survived: 0x%08lx", (unsigned long)hr);
     release_all();
     if (second)
         IDirect3DDevice9_Release(second);
-    present(device, 300);
+    present(device, 5000);
     IDirect3DDevice9_Release(device);
     IDirect3D9_Release(d3d);
     probe_log("exit");
