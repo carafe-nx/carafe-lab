@@ -167,7 +167,9 @@ what else it does:
 - `census`: none of that, straight to the device, for the `stacks` step to see the threads at rest and at the limit;
 - `dxvk`: instead of the 30 s hold, a second Direct3D 9 device asked for with every thread taken while half of them
   end 2 s later, as a burst of loading threads does in a game;
-- `dxvk-hard`: the same with no thread ending, so DXVK is refused for good.
+- `dxvk-hard`: the same with no thread ending, so DXVK is refused for good;
+- `locks`: instead of the hold, 4, 16 and 48 threads take one critical section 2000 times each, and the probe logs
+  how long it took, how many waits for it were longer than 100 ms and the longest (`lock storm …`).
 
 The `expectThreads` step reads the log. The Eden Lab runs gives a program 96 threads, as the console does
 (`patches/eden/0050`).

@@ -156,6 +156,72 @@ static unsigned int churn_kept(void)
     return count;
 }
 
+#define PROBE_LOCK_ROUNDS 2000
+
+static CRITICAL_SECTION lock_section;
+static HANDLE lock_start;
+static volatile LONG lock_slow;
+static volatile LONG lock_longest_ms;
+static volatile LONG lock_entries;
+
+static DWORD WINAPI lock_thread(void *arg)
+{
+    LARGE_INTEGER before, after;
+    unsigned int i;
+
+    (void)arg;
+    WaitForSingleObject(lock_start, INFINITE);
+    for (i = 0; i < PROBE_LOCK_ROUNDS; i++)
+    {
+        LONG ms, longest;
+
+        QueryPerformanceCounter(&before);
+        EnterCriticalSection(&lock_section);
+        QueryPerformanceCounter(&after);
+        lock_entries++;
+        LeaveCriticalSection(&lock_section);
+        ms = (LONG)((after.QuadPart - before.QuadPart) * 1000 / probe_frequency.QuadPart);
+        if (ms >= 100)
+            InterlockedIncrement(&lock_slow);
+        longest = lock_longest_ms;
+        while (ms > longest && InterlockedCompareExchange(&lock_longest_ms, ms, longest) != longest)
+            longest = lock_longest_ms;
+    }
+    return 0;
+}
+
+static void lock_storm(unsigned int wanted)
+{
+    HANDLE threads[PROBE_MAX_THREADS];
+    unsigned int count = 0, i;
+    DWORD start;
+
+    InitializeCriticalSectionAndSpinCount(&lock_section, 0);
+    lock_start = CreateEventA(NULL, TRUE, FALSE, NULL);
+    lock_slow = 0;
+    lock_longest_ms = 0;
+    lock_entries = 0;
+    while (count < wanted && count < PROBE_MAX_THREADS)
+    {
+        HANDLE thread = start_thread(lock_thread, 0);
+
+        if (!thread)
+            break;
+        threads[count++] = thread;
+    }
+    start = GetTickCount();
+    SetEvent(lock_start);
+    for (i = 0; i < count; i++)
+    {
+        WaitForSingleObject(threads[i], INFINITE);
+        CloseHandle(threads[i]);
+    }
+    probe_log("lock storm: %u threads x %u entries in %lu ms, %ld waits over 100 ms, longest %ld ms, %ld entries",
+              count, PROBE_LOCK_ROUNDS, GetTickCount() - start, lock_slow, lock_longest_ms, lock_entries);
+    CloseHandle(lock_start);
+    DeleteCriticalSection(&lock_section);
+}
+
 static IDirect3DDevice9 *create_device(IDirect3D9 *d3d, HWND window, HRESULT *hr)
 {
     D3DPRESENT_PARAMETERS params = {0};
@@ -284,6 +350,12 @@ device:
         probe_log("second device with every thread taken");
         second = create_device(d3d, window, &hr);
         probe_log("second device survived: 0x%08lx", (unsigned long)hr);
+    }
+    else if (command_line && strstr(command_line, "locks"))
+    {
+        lock_storm(4);
+        lock_storm(16);
+        lock_storm(48);
     }
     else
     {
