@@ -54,7 +54,11 @@ quiet?: Array<[string, string]>, } | { "step": "expectPattern",
 /**
  * The picture.
  */
-name: string, } | { "step": "expectInput" } | { "step": "expectPointer" } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
+name: string, } | { "step": "expectInput" } | { "step": "expectPointer" } | { "step": "expectThreads", 
+/**
+ * The fewest threads the probe must be able to hold.
+ */
+min: number, } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
 /**
  * The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
  */

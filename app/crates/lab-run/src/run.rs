@@ -22,6 +22,7 @@ use lab_core::pointer_check;
 use lab_core::problems::{self, Problem, ProblemCounts};
 use lab_core::resources::{self, ResourceSample, ResourceSummary};
 use lab_core::scenario::{Milestone, Scenario, Step};
+use lab_core::threads_check::ThreadsLog;
 use lab_core::timeline;
 use lab_core::versions::{self, VersionPerf};
 
@@ -48,6 +49,9 @@ pub const PROBE_INPUT_LOG: &str = "probe-input.log";
 
 /// Name of the log the screen probe writes.
 pub const PROBE_SCREEN_LOG: &str = "probe-screen.log";
+
+/// Name of the log the threads probe writes.
+pub const PROBE_THREADS_LOG: &str = "probe-threads.log";
 
 /// An error of the emulator or of the files around it.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -567,6 +571,14 @@ impl<'a> Runner<'a> {
                             None,
                         );
                     }
+                    if self.launch_open {
+                        let launch = self.current_launch();
+                        if matches!(launch.exit, Some(Exit::Code(_))) {
+                            let detail =
+                                format!("the game crashed ({})", describe_exit(launch.exit));
+                            return self.result(step, Outcome::Fail, detail, None);
+                        }
+                    }
                     self.glimpse();
                     self.clock
                         .sleep(POLL.min(until.saturating_sub(self.clock.now())));
@@ -627,6 +639,7 @@ impl<'a> Runner<'a> {
             Step::ExpectInput => self.expect_input(step),
             Step::ExpectPointer => self.expect_pointer(step),
             Step::Stacks { name } => self.stacks(step, name),
+            Step::ExpectThreads { min } => self.expect_threads(step, *min),
             Step::RandomPresses { seconds, seed } => self.random_presses(step, *seconds, *seed),
             Step::Close { timeout } => self.close(step, *timeout),
             Step::Repeat { .. } | Step::IfScreen { .. } => self.result(
@@ -730,6 +743,21 @@ impl<'a> Runner<'a> {
         }
     }
 
+    fn expect_threads(&mut self, step: &Step, min: u32) -> StepResult {
+        let Some(log) = self.emulator.find_file(self.title, PROBE_THREADS_LOG) else {
+            return self.result(
+                step,
+                Outcome::Fail,
+                format!("the probe wrote no {PROBE_THREADS_LOG}"),
+                None,
+            );
+        };
+        match ThreadsLog::read(&log).check(min) {
+            Ok(detail) => self.result(step, Outcome::Pass, detail, None),
+            Err(detail) => self.result(step, Outcome::Fail, detail, None),
+        }
+    }
+
     fn launch(&mut self, step: &Step) -> StepResult {
         if self.running {
             let _ = self.emulator.close(Duration::from_secs(10));
@@ -813,9 +841,12 @@ impl<'a> Runner<'a> {
                 .is_some_and(|(_, reason)| !reason.is_success());
             let crashed = matches!(launch.exit, Some(Exit::Code(_)));
             let ended = !self.emulator.running();
-            if gave_up || crashed || ended || self.clock.now() >= deadline {
+            let refused = launch.refused.is_some();
+            if gave_up || crashed || refused || ended || self.clock.now() >= deadline {
                 let why = if crashed {
                     format!("the game crashed ({})", describe_exit(launch.exit))
+                } else if let Some(reason) = &launch.refused {
+                    format!("the runtime refused to start the game: {reason}")
                 } else if gave_up {
                     "the loading screen gave up: no picture in time".to_owned()
                 } else if ended {
@@ -1673,7 +1704,7 @@ mod tests {
             self.emulator_log.clone()
         }
         fn find_file(&self, _title: TitleId, name: &str) -> Option<String> {
-            matches!(name, PROBE_INPUT_LOG | PROBE_SCREEN_LOG)
+            matches!(name, PROBE_INPUT_LOG | PROBE_SCREEN_LOG | PROBE_THREADS_LOG)
                 .then(|| self.probe_log.clone())
                 .flatten()
         }
@@ -2024,6 +2055,70 @@ mod tests {
         let (result, _) = run(emulator, &waiting(600));
         assert_eq!(result.steps[1].outcome, Outcome::Fail);
         assert!(result.steps[1].detail.contains("0xc0000005"));
+        assert!(result.steps[1].at < 5.0);
+    }
+
+    #[test]
+    fn the_threads_probe_log_is_checked_against_the_minimum() {
+        let log = "1.0 ceiling at start: 35 threads, started 35, refused with error 8\n2.0 exit\n";
+        let scenario = Scenario {
+            steps: vec![Step::Launch, Step::ExpectThreads { min: 30 }],
+        };
+        let emulator = FakeEmulator {
+            probe_log: Some(log.to_owned()),
+            ..FakeEmulator::default()
+        };
+        let (passed, _) = run(emulator, &scenario);
+        assert_eq!(
+            passed.steps[1].outcome,
+            Outcome::Pass,
+            "{}",
+            passed.steps[1].detail
+        );
+        let scenario = Scenario {
+            steps: vec![Step::Launch, Step::ExpectThreads { min: 40 }],
+        };
+        let emulator = FakeEmulator {
+            probe_log: Some(log.to_owned()),
+            ..FakeEmulator::default()
+        };
+        let (failed, _) = run(emulator, &scenario);
+        assert_eq!(failed.steps[1].outcome, Outcome::Fail);
+        assert!(failed.steps[1].detail.contains("fewer than 40"));
+    }
+
+    #[test]
+    fn a_refusal_to_start_fails_at_once() {
+        let refused = logs(
+            "[carafe-overlay] started 2026-10-12 10:00:00\n",
+            "[CPU] FEX-2609\n[FAIL] AMD64 requires the 39-bit forwarder\n",
+        );
+        let emulator = FakeEmulator {
+            script: VecDeque::from(vec![refused]),
+            ..FakeEmulator::default()
+        };
+        let (result, _) = run(emulator, &waiting(600));
+        assert_eq!(result.steps[1].outcome, Outcome::Fail);
+        assert!(result.steps[1].detail.contains("39-bit forwarder"));
+        assert!(result.steps[1].at < 5.0);
+    }
+
+    #[test]
+    fn a_crash_during_a_wait_fails_the_wait() {
+        let crashed = logs(
+            "[carafe-overlay] started 2026-10-12 10:00:00\n",
+            "[INIT] virtual memory ready\n[EXIT] NtTerminateProcess(self) exit_code=0x00000003\n",
+        );
+        let emulator = FakeEmulator {
+            script: VecDeque::from(vec![crashed]),
+            ..FakeEmulator::default()
+        };
+        let scenario = Scenario {
+            steps: vec![Step::Launch, Step::Wait { seconds: 30.0 }],
+        };
+        let (result, _) = run(emulator, &scenario);
+        assert_eq!(result.steps[1].outcome, Outcome::Fail);
+        assert!(result.steps[1].detail.contains("0x00000003"));
         assert!(result.steps[1].at < 5.0);
     }
 

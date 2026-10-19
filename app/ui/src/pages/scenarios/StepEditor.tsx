@@ -15,7 +15,7 @@ const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"
 
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "stacks", "expectChange",
-  "expectPattern", "expectScreen", "expectInput", "expectPointer", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
+  "expectPattern", "expectScreen", "expectInput", "expectPointer", "expectThreads", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
   "repeat", "ifScreen", "close",
 ];
 
@@ -44,6 +44,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "expectInput" };
     case "expectPointer":
       return { step: "expectPointer" };
+    case "expectThreads":
+      return { step: "expectThreads", min: 30 };
     case "expectSave":
       return { step: "expectSave" };
     case "expectSaveKept":
@@ -392,6 +394,13 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
           <span>{t("scenarios.sec")}</span>
           <label htmlFor={`${id}-seed`}>{t("steps.seed")}</label>
           <NumberInput id={`${id}-seed`} value={step.seed} onChange={(seed) => onChange({ ...step, seed })} />
+        </>
+      );
+    case "expectThreads":
+      return (
+        <>
+          <label htmlFor={`${id}-min`}>{t("steps.atLeast")}</label>
+          <NumberInput id={`${id}-min`} value={step.min} onChange={(min) => onChange({ ...step, min })} />
         </>
       );
     case "repeat":

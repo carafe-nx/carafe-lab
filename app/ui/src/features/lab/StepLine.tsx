@@ -67,6 +67,9 @@ export function StepParams({ step }: { step: Step }) {
     case "repeat":
       params.push(`×${step.times}`);
       break;
+    case "expectThreads":
+      params.push(`≥ ${step.min}`);
+      break;
     case "ifScreen":
       params.push(step.reference || "—");
       break;

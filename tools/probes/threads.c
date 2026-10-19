@@ -12,11 +12,22 @@ static volatile LONG hold_started;
 static HANDLE held[PROBE_MAX_THREADS];
 static unsigned int held_count;
 static HANDLE kept[PROBE_CHURN];
+static DWORD hold_release_ms = INFINITE;
+static HANDLE go_event;
 
 static DWORD WINAPI hold_thread(void *arg)
 {
-    (void)arg;
+    HANDLE events[2];
+
     InterlockedIncrement(&hold_started);
+    if (((UINT_PTR)arg & 1) && hold_release_ms != INFINITE)
+    {
+        events[0] = hold_event;
+        events[1] = go_event;
+        if (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0 + 1)
+            Sleep(hold_release_ms);
+        return 0;
+    }
     WaitForSingleObject(hold_event, INFINITE);
     return 0;
 }
@@ -27,9 +38,9 @@ static DWORD WINAPI quick_thread(void *arg)
     return 0;
 }
 
-static HANDLE start_thread(LPTHREAD_START_ROUTINE proc)
+static HANDLE start_thread(LPTHREAD_START_ROUTINE proc, UINT_PTR index)
 {
-    return CreateThread(NULL, PROBE_STACK, proc, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+    return CreateThread(NULL, PROBE_STACK, proc, (void *)index, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
 }
 
 static unsigned int hold_all(const char *phase)
@@ -42,7 +53,7 @@ static unsigned int hold_all(const char *phase)
     held_count = 0;
     while (held_count < PROBE_MAX_THREADS)
     {
-        HANDLE thread = start_thread(hold_thread);
+        HANDLE thread = start_thread(hold_thread, held_count);
 
         if (!thread)
         {
@@ -82,7 +93,7 @@ static void churn_joined(void)
 
     for (i = 0; i < PROBE_CHURN; i++)
     {
-        HANDLE thread = start_thread(quick_thread);
+        HANDLE thread = start_thread(quick_thread, 0);
 
         if (!thread)
         {
@@ -103,7 +114,7 @@ static void churn_detached(void)
 
     for (i = 0; i < PROBE_CHURN; i++)
     {
-        HANDLE thread = start_thread(quick_thread);
+        HANDLE thread = start_thread(quick_thread, 0);
 
         if (!thread)
         {
@@ -127,7 +138,7 @@ static unsigned int churn_kept(void)
 
     for (i = 0; i < PROBE_CHURN; i++)
     {
-        HANDLE thread = start_thread(quick_thread);
+        HANDLE thread = start_thread(quick_thread, 0);
 
         if (!thread)
         {
@@ -202,6 +213,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     (void)show;
     probe_open_log("threads");
     hold_event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    go_event = CreateEventA(NULL, TRUE, FALSE, NULL);
     window = probe_window("Carafe threads probe", probe_default_proc);
     probe_pump();
     if (command_line && strstr(command_line, "census"))
@@ -255,9 +267,23 @@ device:
     hold_all("with a Direct3D 9 device");
     probe_log("holding every thread for 30 s");
     present(device, 30000);
-    probe_log("second device with every thread taken");
-    second = create_device(d3d, window, &hr);
-    probe_log("second device survived: 0x%08lx", (unsigned long)hr);
+    second = NULL;
+    if (command_line && strstr(command_line, "dxvk-hard"))
+    {
+        probe_log("second device with every thread taken");
+        second = create_device(d3d, window, &hr);
+        probe_log("second device survived: 0x%08lx", (unsigned long)hr);
+    }
+    else if (command_line && strstr(command_line, "dxvk"))
+    {
+        release_all();
+        hold_release_ms = 2000;
+        hold_all("with half of them ending 2 s after the device is asked for");
+        SetEvent(go_event);
+        probe_log("second device with every thread taken");
+        second = create_device(d3d, window, &hr);
+        probe_log("second device survived: 0x%08lx", (unsigned long)hr);
+    }
     release_all();
     if (second)
         IDirect3DDevice9_Release(second);

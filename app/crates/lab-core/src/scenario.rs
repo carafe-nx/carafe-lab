@@ -83,6 +83,14 @@ pub enum Step {
     ExpectInput,
     /// Checks the screen probe's log: the mouse moves reached every edge of its window.
     ExpectPointer,
+    /// Checks the threads probe's log: it could hold at least `min` threads at every point, Direct3D 9 lived through
+    /// a refused thread when that was tried, and the probe finished.
+    #[serde(rename_all = "camelCase")]
+    ExpectThreads {
+        /// The fewest threads the probe must be able to hold.
+        #[serde(default = "default_min_threads")]
+        min: u32,
+    },
     /// Checks that the game has written its save data and remembers it for [`Step::ExpectSaveKept`].
     ExpectSave,
     /// Checks that the save data remembered by [`Step::ExpectSave`] is still there and unchanged.
@@ -163,6 +171,10 @@ fn default_tolerance() -> f32 {
 
 fn default_seed() -> u64 {
     1
+}
+
+fn default_min_threads() -> u32 {
+    30
 }
 
 fn default_hold() -> f32 {
@@ -262,6 +274,7 @@ fn check_steps<'a>(
                     | Step::IfScreen { .. }
                     | Step::ExpectInput
                     | Step::ExpectPointer
+                    | Step::ExpectThreads { .. }
             );
             if needs_game && !state.running {
                 return Err(ScenarioError::NotRunning(number));

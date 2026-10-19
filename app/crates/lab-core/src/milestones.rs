@@ -115,6 +115,8 @@ pub struct Launch {
     pub commits: Vec<Commit>,
     /// How the game process ended; `None` if the log does not say.
     pub exit: Option<Exit>,
+    /// Why the runtime refused to start the program, from its `[FAIL]` line; it then waits for HOME.
+    pub refused: Option<String>,
     /// The overlay shut down in order.
     pub shutdown: bool,
 }
@@ -142,6 +144,10 @@ impl Launch {
                 line.strip_prefix("[EXIT] NtTerminateProcess(self) exit_code=")
             {
                 launch.exit = Some(parse_exit(code));
+            } else if let Some(reason) = line.strip_prefix("[FAIL] ") {
+                launch
+                    .refused
+                    .get_or_insert_with(|| reason.trim().to_owned());
             } else if let Some(text) = line.strip_prefix(CARAFE_PREFIX) {
                 if text.starts_with("no progress for ") {
                     stalls_in_runtime += 1;
@@ -355,6 +361,20 @@ mod tests {
             Launch::read("", runtime).exit,
             Some(Exit::Code(0xc000_0005))
         );
+    }
+
+    #[test]
+    fn a_refusal_keeps_its_first_reason() {
+        let runtime = "[CPU] FEX-2609\n\
+            [FAIL] AMD64 requires the 39-bit forwarder; current address space 0x8000000-0x4000000000\n\
+            [FAIL] second\n";
+        assert_eq!(
+            Launch::read("", runtime).refused.as_deref(),
+            Some(
+                "AMD64 requires the 39-bit forwarder; current address space 0x8000000-0x4000000000"
+            )
+        );
+        assert_eq!(Launch::read("", "[CPU] FEX-2609\n").refused, None);
     }
 
     #[test]

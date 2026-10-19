@@ -90,6 +90,8 @@
     "expectPattern": "Probe picture",
     "expectInput": "Buttons arrived",
     "expectPointer": "Mouse reached the edges",
+    "expectThreads": "Threads the probe holds",
+    "atLeast": "at least",
     "expectSave": "Save data written",
     "expectSaveKept": "Save data kept",
     "expectPerformance": "No slower than the last version",

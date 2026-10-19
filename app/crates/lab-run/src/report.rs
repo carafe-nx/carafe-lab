@@ -489,6 +489,12 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "The mouse reached the window's edges",
             )
             .to_owned(),
+        Step::ExpectThreads { min } => lang
+            .pick(
+                "Проба держит не меньше {min} потоков",
+                "The probe holds at least {min} threads",
+            )
+            .replace("{min}", &min.to_string()),
         Step::ExpectSave => lang
             .pick("Игра записала сохранение", "The game wrote save data")
             .to_owned(),
