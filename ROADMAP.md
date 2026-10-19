@@ -11,9 +11,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Planned
 
-- [ ] `bug` A program that crashes during a wait step still passes: the threads probe died in DXVK and every step passed
-- [ ] `bug` A runtime that stops with `[FAIL]` and parks is waited for until the milestone's timeout
-- [ ] `feature` The threads probe as a standing check: a ceiling, no crash, no leak
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
 - [ ] `bug` "No slower than the last version" compares runs of different scenarios, such as a hands-on session in the menu against the standard one
 
@@ -54,6 +51,10 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `feature` The threads probe as a standing check: a ceiling, Direct3D 9 through a refused thread, no leak
+- [x] `bug` A runtime that stops with `[FAIL]` and parks is waited for until the milestone's timeout
+- [x] `bug` A program that crashes during a wait step still passes: the threads probe died in DXVK and every step passed
+- [x] `feature` Thread stacks at any step of a scenario, with the runtime's functions named from its symbols
 - [x] `feature` A screen probe checks that the mouse reaches the edges of a game fitted into the screen
 - [x] `feature` Eden runs handheld at 1280×720, like the console's own screen
 - [x] `feature` The Run screen draws the Switch of the old live page; the browser live page is gone

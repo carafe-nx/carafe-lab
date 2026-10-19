@@ -102,8 +102,9 @@ save data is still there, close it.
 
 - `launch` — starts the game.
 - `waitFor` — `milestone`: `wine`, `loadingScreen`, `firstFrame` or `commit`; `timeout` in seconds. Fails at once
-  when the game crashes, the loading screen gives up or the game ends.
-- `wait` — `seconds`.
+  when the game crashes, the runtime refuses to start it (a `[FAIL]` line), the loading screen gives up or the game
+  ends.
+- `wait` — `seconds`. Fails at once when the game crashes meanwhile.
 - `press` — `buttons`: Switch buttons as in `carafe.json` (`A`, `ZR`, `LUP`…), held together; `hold` in seconds.
 - `screenshot` — `name`.
 - `stacks` — `name`: every thread of the game with its state and stack, as the `stacks` diagnostic gives them, in
@@ -116,6 +117,9 @@ save data is still there, close it.
 - `expectPattern` — `name`: a screenshot of a graphics probe.
 - `expectInput` — the input probe's log against the bindings of the build.
 - `expectPointer` — the screen probe's log: the mouse moves reached every edge of its window.
+- `expectThreads` — `min` (30 by default): the threads probe's log. At every point it measured, the probe could hold
+  at least `min` threads; a second Direct3D 9 device asked for with every thread taken did not end the probe; the
+  probe finished.
 - `expectSave` — the game has written save data; remembered for `expectSaveKept`.
 - `expectSaveKept` — the remembered save data is still there and unchanged.
 - `expectPerformance` — the first launch's time to the first frame and median FPS against the game at the newest
@@ -151,6 +155,21 @@ save data is still there, close it.
 - the graphics probes draw four coloured quadrants with GDI, Direct3D 9, 11, 12 or OpenGL, 32 and 64 bit, under a
   pairwise set of graphics and system settings: every pair of values of any two settings appears at least once
   (25 runs instead of 746,496 combinations). `--random <n>` adds random combinations for a long run.
+
+The threads probe, `probe-threads.exe`, runs as a game of `lab.json` rather than through `probes`, because it needs
+its own scenario and arguments. It takes every thread it can at several points of its run and logs how many it got
+(`ceiling …` lines in `probe-threads.log`), then opens a Direct3D 9 device and holds every thread again. Its words on
+the command line choose what else it does:
+
+- none: before the device, 300 threads that are joined, 300 that are let go and 300 whose handles stay open, each
+  followed by a ceiling, so a leak shows as a lower one;
+- `census`: none of that, straight to the device, for the `stacks` step to see the threads at rest and at the limit;
+- `dxvk`: a second Direct3D 9 device asked for with every thread taken while half of them end 2 s later, as a burst
+  of loading threads does in a game;
+- `dxvk-hard`: the same with no thread ending, so DXVK is refused for good.
+
+The `expectThreads` step reads the log. The Eden Lab runs gives a program 96 threads, as the console does
+(`patches/eden/0050`).
 
 ## Results
 
