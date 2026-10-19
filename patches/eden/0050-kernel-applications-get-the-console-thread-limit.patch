@@ -1,0 +1,16 @@
+Carafe Lab: an application gets the console's limit of 96 threads instead of 800.
+On the console a process reaches threads=96/96 and the next svcCreateThread fails with LimitReached (0x10801);
+Eden let it go on to 800, so a game that runs out of threads on the console kept running in Lab.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/kernel/k_resource_limit.cpp
++++ b/src/core/hle/kernel/k_resource_limit.cpp
+@@ -164,7 +164,7 @@
+ 
+     ASSERT(resource_limit->SetLimitValue(LimitableResource::PhysicalMemoryMax, physical_memory_size)
+                .IsSuccess());
+-    ASSERT(resource_limit->SetLimitValue(LimitableResource::ThreadCountMax, 800).IsSuccess());
++    ASSERT(resource_limit->SetLimitValue(LimitableResource::ThreadCountMax, 96).IsSuccess());
+     ASSERT(resource_limit->SetLimitValue(LimitableResource::EventCountMax, 900).IsSuccess());
+     ASSERT(
+         resource_limit->SetLimitValue(LimitableResource::TransferMemoryCountMax, 200).IsSuccess());
