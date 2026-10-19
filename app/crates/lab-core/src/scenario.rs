@@ -54,6 +54,11 @@ pub enum Step {
         /// Name of the picture, unique in the scenario.
         name: String,
     },
+    /// Saves every thread of the game with its state and stack under `name`; needs the `stacks` diagnostic.
+    Stacks {
+        /// Name of the file, `stacks-<name>.txt` in the launch's logs.
+        name: String,
+    },
     /// Checks that the screen changed between two pictures: the input reached the game.
     ExpectChange {
         /// The picture before.
@@ -249,6 +254,7 @@ fn check_steps<'a>(
                 Step::WaitFor { .. }
                     | Step::Press { .. }
                     | Step::Screenshot { .. }
+                    | Step::Stacks { .. }
                     | Step::Close { .. }
                     | Step::RandomPresses { .. }
                     | Step::ExpectScreen { .. }
@@ -608,6 +614,20 @@ mod tests {
     fn a_press_needs_a_running_game() {
         let json = r#"{"steps": [{"step": "press", "buttons": ["A"]}]}"#;
         assert_eq!(Scenario::parse(json), Err(ScenarioError::NotRunning(1)));
+    }
+
+    #[test]
+    fn stacks_are_taken_of_a_running_game() {
+        let early = r#"{"steps": [{"step": "stacks", "name": "peak"}]}"#;
+        assert_eq!(Scenario::parse(early), Err(ScenarioError::NotRunning(1)));
+        let json = r#"{"steps": [{"step": "launch"}, {"step": "stacks", "name": "peak"}]}"#;
+        let scenario = Scenario::parse(json).expect("valid");
+        assert_eq!(
+            scenario.steps[1],
+            Step::Stacks {
+                name: "peak".to_owned()
+            }
+        );
     }
 
     #[test]

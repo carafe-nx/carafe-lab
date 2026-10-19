@@ -85,6 +85,7 @@
     "wait": "Pause",
     "press": "Press",
     "screenshot": "Screenshot",
+    "stacks": "Thread stacks",
     "expectChange": "Screen changed",
     "expectPattern": "Probe picture",
     "expectInput": "Buttons arrived",

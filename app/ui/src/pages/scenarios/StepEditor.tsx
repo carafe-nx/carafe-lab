@@ -14,7 +14,7 @@ export const BUTTONS: SwitchButton[] = [
 const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"];
 
 export const NEW_STEPS: Step["step"][] = [
-  "launch", "waitFor", "wait", "press", "screenshot", "expectChange",
+  "launch", "waitFor", "wait", "press", "screenshot", "stacks", "expectChange",
   "expectPattern", "expectScreen", "expectInput", "expectPointer", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
   "repeat", "ifScreen", "close",
 ];
@@ -32,6 +32,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "press", buttons: ["A"], hold: 0.15 };
     case "screenshot":
       return { step: "screenshot", name: `shot-${shots.length + 1}` };
+    case "stacks":
+      return { step: "stacks", name: `stacks-${steps.filter((step) => step.step === "stacks").length + 1}` };
     case "expectChange":
       return { step: "expectChange", from: shots[shots.length - 2] ?? "", to: shots[shots.length - 1] ?? "", soft: true };
     case "expectPattern":
@@ -311,6 +313,7 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
         </>
       );
     case "screenshot":
+    case "stacks":
       return (
         <input
           id={`${id}-name`}

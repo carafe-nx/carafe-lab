@@ -373,6 +373,45 @@ impl<'a> Runner<'a> {
         self
     }
 
+    fn stacks(&mut self, step: &Step, name: &str) -> StepResult {
+        let Some(record) = self.launches.last() else {
+            return self.result(step, Outcome::Fail, "no launch to look at".to_owned(), None);
+        };
+        let file_name = format!("stacks-{name}.txt");
+        let file = self.dir.join(&record.logs).join(&file_name);
+        let Some(text) = self.emulator.backtraces() else {
+            return self.result(
+                step,
+                Outcome::Warn,
+                "no stacks: the run needs the stacks diagnostic".to_owned(),
+                None,
+            );
+        };
+        let threads = text
+            .lines()
+            .filter(|line| line.starts_with("Thread "))
+            .count();
+        let saved = file
+            .parent()
+            .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+            && std::fs::write(&file, text).is_ok();
+        if saved {
+            self.result(
+                step,
+                Outcome::Pass,
+                format!("{threads} threads in {file_name}"),
+                None,
+            )
+        } else {
+            self.result(
+                step,
+                Outcome::Fail,
+                format!("could not write {file_name}"),
+                None,
+            )
+        }
+    }
+
     fn save_backtraces(&mut self) -> bool {
         let Some(record) = self.launches.last() else {
             return false;
@@ -587,6 +626,7 @@ impl<'a> Runner<'a> {
             Step::ExpectPattern { name } => self.expect_pattern(step, name),
             Step::ExpectInput => self.expect_input(step),
             Step::ExpectPointer => self.expect_pointer(step),
+            Step::Stacks { name } => self.stacks(step, name),
             Step::RandomPresses { seconds, seed } => self.random_presses(step, *seconds, *seed),
             Step::Close { timeout } => self.close(step, *timeout),
             Step::Repeat { .. } | Step::IfScreen { .. } => self.result(

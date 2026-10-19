@@ -8,6 +8,7 @@ export function stepKind(step: Step): string {
     case "launch":
     case "press":
     case "screenshot":
+    case "stacks":
     case "close":
       return styles.kindAct ?? "";
     case "waitFor":
@@ -44,6 +45,7 @@ export function StepParams({ step }: { step: Step }) {
       if (step.hold !== 0.15) params.push(t("units.seconds", { count: step.hold }));
       break;
     case "screenshot":
+    case "stacks":
     case "expectPattern":
       params.push(step.name);
       break;

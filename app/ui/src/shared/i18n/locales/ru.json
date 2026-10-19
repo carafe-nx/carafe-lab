@@ -95,6 +95,7 @@
     "wait": "Пауза",
     "press": "Нажать",
     "screenshot": "Снимок",
+    "stacks": "Стеки потоков",
     "expectChange": "Экран изменился",
     "expectPattern": "Картинка пробы",
     "expectInput": "Кнопки дошли",

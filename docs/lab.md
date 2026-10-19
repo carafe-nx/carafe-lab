@@ -106,6 +106,8 @@ save data is still there, close it.
 - `wait` — `seconds`.
 - `press` — `buttons`: Switch buttons as in `carafe.json` (`A`, `ZR`, `LUP`…), held together; `hold` in seconds.
 - `screenshot` — `name`.
+- `stacks` — `name`: every thread of the game with its state and stack, as the `stacks` diagnostic gives them, in
+  the launch's `stacks-<name>.txt`. Without that diagnostic the step only warns.
 - `expectChange` — `from`, `to`: two screenshots that must differ; `soft` makes it a warning. `quiet` lists pairs
   of screenshots taken as far apart as `from` and `to` with no input between: when the screen changed about as much
   on its own in any of them, the step warns that the pictures cannot tell. The standard scenario has one pair before

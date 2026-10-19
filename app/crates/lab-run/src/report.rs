@@ -464,6 +464,7 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
             format!("{} {}", lang.pick("Нажатие", "Press"), names.join("+"))
         }
         Step::Screenshot { name } => format!("{} {name}", lang.pick("Скриншот", "Screenshot")),
+        Step::Stacks { name } => format!("{} {name}", lang.pick("Стеки потоков", "Thread stacks")),
         Step::ExpectScreen { reference, .. } => format!(
             "{} {reference}",
             lang.pick("На экране как на эталоне", "The screen shows")

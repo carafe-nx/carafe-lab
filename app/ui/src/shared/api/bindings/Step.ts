@@ -29,6 +29,10 @@ hold: number, } | { "step": "screenshot",
 /**
  * Name of the picture, unique in the scenario.
  */
+name: string, } | { "step": "stacks", 
+/**
+ * Name of the file, `stacks-<name>.txt` in the launch's logs.
+ */
 name: string, } | { "step": "expectChange", 
 /**
  * The picture before.
