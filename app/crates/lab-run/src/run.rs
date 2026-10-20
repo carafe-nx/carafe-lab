@@ -30,6 +30,7 @@ use crate::report;
 
 const POLL: Duration = Duration::from_millis(500);
 const GLIMPSE_EVERY: Duration = Duration::from_secs(10);
+const PROBE_LOG_SETTLE: Duration = Duration::from_secs(10);
 
 /// Name of the folder in a launch's log folder with a small picture of the screen every ten seconds.
 pub const TIMELINE_DIR: &str = "timeline";
@@ -747,7 +748,7 @@ impl<'a> Runner<'a> {
     }
 
     fn expect_threads(&mut self, step: &Step, min: u32) -> StepResult {
-        let Some(log) = self.emulator.find_file(self.title, PROBE_THREADS_LOG) else {
+        let Some(mut log) = self.emulator.find_file(self.title, PROBE_THREADS_LOG) else {
             return self.result(
                 step,
                 Outcome::Fail,
@@ -755,6 +756,17 @@ impl<'a> Runner<'a> {
                 None,
             );
         };
+        let ended_by_itself = self.current_launch().exit == Some(Exit::Clean);
+        let settle_from = self.clock.now();
+        while ended_by_itself
+            && !ThreadsLog::read(&log).finished
+            && self.clock.now() - settle_from < PROBE_LOG_SETTLE
+        {
+            self.clock.sleep(POLL);
+            if let Some(newer) = self.emulator.find_file(self.title, PROBE_THREADS_LOG) {
+                log = newer;
+            }
+        }
         if let Some(record) = self.launches.last() {
             let _ = std::fs::write(self.dir.join(&record.logs).join(PROBE_LOG_COPY), &log);
         }
