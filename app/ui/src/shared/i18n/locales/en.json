@@ -116,7 +116,8 @@
     "wine": "Wine ready",
     "loadingScreen": "loading screen",
     "firstFrame": "first frame",
-    "commit": "save committed"
+    "commit": "save committed",
+    "programEnded": "program ended"
   },
   "units": {
     "seconds_one": "{{count}} s",

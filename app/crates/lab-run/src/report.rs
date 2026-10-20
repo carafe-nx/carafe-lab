@@ -451,6 +451,7 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 Milestone::LoadingScreen => lang.pick("Загрузочный экран", "Loading screen"),
                 Milestone::FirstFrame => lang.pick("Первый кадр игры", "The game's first frame"),
                 Milestone::Commit => lang.pick("Запись сохранения", "Save data commit"),
+                Milestone::ProgramEnded => lang.pick("Программа завершилась", "The program ended"),
             };
             what.to_owned()
         }

@@ -831,6 +831,7 @@ impl<'a> Runner<'a> {
                 Milestone::LoadingScreen => launch.stage() >= Stage::LoadingScreen,
                 Milestone::FirstFrame => launch.stage() == Stage::FirstFrame,
                 Milestone::Commit => !launch.commits.is_empty(),
+                Milestone::ProgramEnded => launch.exit == Some(Exit::Clean),
             };
             let seconds = (self.clock.now() - waited_from).as_secs_f64();
             if reached {
@@ -2132,6 +2133,35 @@ mod tests {
         assert_eq!(result.steps[1].outcome, Outcome::Fail);
         assert!(result.steps[1].detail.contains("0x00000003"));
         assert!(result.steps[1].at < 5.0);
+    }
+
+    #[test]
+    fn a_program_ending_by_itself_ends_the_wait() {
+        let ended = logs(
+            "[carafe-overlay] started 2026-10-12 10:00:00\n",
+            "[INIT] virtual memory ready\n[EXIT] NtTerminateProcess(self) exit_code=0x00000000\n",
+        );
+        let emulator = FakeEmulator {
+            script: VecDeque::from(vec![started(), ended]),
+            ..FakeEmulator::default()
+        };
+        let scenario = Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::WaitFor {
+                    milestone: Milestone::ProgramEnded,
+                    timeout: 180,
+                },
+            ],
+        };
+        let (result, _) = run(emulator, &scenario);
+        assert_eq!(
+            result.steps[1].outcome,
+            Outcome::Pass,
+            "{}",
+            result.steps[1].detail
+        );
+        assert!(result.steps[1].at < 60.0);
     }
 
     #[test]

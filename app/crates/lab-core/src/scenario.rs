@@ -18,6 +18,8 @@ pub enum Milestone {
     FirstFrame,
     /// The device save data was committed at least once since the launch.
     Commit,
+    /// The program ended by itself with exit code 0, as a probe does once it is through.
+    ProgramEnded,
 }
 
 /// One step of a scenario.

@@ -101,9 +101,9 @@ save data is still there, close it.
 ### Steps
 
 - `launch` — starts the game.
-- `waitFor` — `milestone`: `wine`, `loadingScreen`, `firstFrame` or `commit`; `timeout` in seconds. Fails at once
-  when the game crashes, the runtime refuses to start it (a `[FAIL]` line), the loading screen gives up or the game
-  ends.
+- `waitFor` — `milestone`: `wine`, `loadingScreen`, `firstFrame`, `commit` or `programEnded` (the program ended by
+  itself with exit code 0, as a probe does once it is through); `timeout` in seconds. Fails at once when the game
+  crashes, the runtime refuses to start it (a `[FAIL]` line), the loading screen gives up or the game ends.
 - `wait` — `seconds`. Fails at once when the game crashes meanwhile.
 - `press` — `buttons`: Switch buttons as in `carafe.json` (`A`, `ZR`, `LUP`…), held together; `hold` in seconds.
 - `screenshot` — `name`.

@@ -128,7 +128,8 @@
     "wine": "Wine готов",
     "loadingScreen": "экран загрузки",
     "firstFrame": "первый кадр",
-    "commit": "запись сохранения"
+    "commit": "запись сохранения",
+    "programEnded": "программа завершилась"
   },
   "units": {
     "seconds_one": "{{count}} с",

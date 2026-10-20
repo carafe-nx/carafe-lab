@@ -3,4 +3,4 @@
 /**
  * A point in the launch the lab can wait for.
  */
-export type Milestone = "wine" | "loadingScreen" | "firstFrame" | "commit";
+export type Milestone = "wine" | "loadingScreen" | "firstFrame" | "commit" | "programEnded";
