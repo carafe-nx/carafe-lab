@@ -222,6 +222,81 @@ static void lock_storm(unsigned int wanted)
     DeleteCriticalSection(&lock_section);
 }
 
+static volatile LONG spin_count;
+static volatile LONG apc_value;
+
+static DWORD WINAPI spin_thread(void *arg)
+{
+    (void)arg;
+    for (;;)
+    {
+        InterlockedIncrement(&spin_count);
+        Sleep(1);
+    }
+    return 0;
+}
+
+static DWORD WINAPI returning_thread(void *arg)
+{
+    return (DWORD)(UINT_PTR)arg;
+}
+
+static DWORD WINAPI alertable_thread(void *arg)
+{
+    (void)arg;
+    return SleepEx(10000, TRUE) == WAIT_IO_COMPLETION ? 1 : 2;
+}
+
+static void CALLBACK apc_routine(ULONG_PTR value)
+{
+    InterlockedExchange(&apc_value, (LONG)value);
+}
+
+static void thread_lifecycle(void)
+{
+    LONG before, after, resumed;
+    DWORD code = 0, start, took, waited;
+    HANDLE thread;
+
+    thread = start_thread(spin_thread, 0);
+    Sleep(200);
+    SuspendThread(thread);
+    Sleep(50);
+    before = spin_count;
+    Sleep(300);
+    after = spin_count;
+    ResumeThread(thread);
+    Sleep(300);
+    resumed = spin_count;
+    probe_log("lifecycle: suspend %s (%ld then %ld while suspended), resume %s (%ld after)",
+              before == after ? "ok" : "FAILED", before, after, resumed > after ? "ok" : "FAILED", resumed);
+    start = GetTickCount();
+    TerminateThread(thread, 77);
+    waited = WaitForSingleObject(thread, 5000);
+    took = GetTickCount() - start;
+    GetExitCodeThread(thread, &code);
+    probe_log("lifecycle: terminate %s in %lu ms, exit code %lu",
+              waited == WAIT_OBJECT_0 && code == 77 ? "ok" : "FAILED", took, code);
+    CloseHandle(thread);
+
+    thread = start_thread(returning_thread, 42);
+    waited = WaitForSingleObject(thread, 5000);
+    GetExitCodeThread(thread, &code);
+    probe_log("lifecycle: exit code %s (%lu)", waited == WAIT_OBJECT_0 && code == 42 ? "ok" : "FAILED", code);
+    CloseHandle(thread);
+
+    thread = start_thread(alertable_thread, 0);
+    Sleep(300);
+    start = GetTickCount();
+    QueueUserAPC(apc_routine, thread, 5);
+    WaitForSingleObject(thread, 15000);
+    took = GetTickCount() - start;
+    GetExitCodeThread(thread, &code);
+    probe_log("lifecycle: apc %s (value %ld, the alertable sleep %s after %lu ms)", apc_value == 5 ? "ok" : "FAILED",
+              apc_value, code == 1 ? "woke for it" : "ran out", took);
+    CloseHandle(thread);
+}
+
 static IDirect3DDevice9 *create_device(IDirect3D9 *d3d, HWND window, HRESULT *hr)
 {
     D3DPRESENT_PARAMETERS params = {0};
@@ -350,6 +425,10 @@ device:
         probe_log("second device with every thread taken");
         second = create_device(d3d, window, &hr);
         probe_log("second device survived: 0x%08lx", (unsigned long)hr);
+    }
+    else if (command_line && strstr(command_line, "lifecycle"))
+    {
+        thread_lifecycle();
     }
     else if (command_line && strstr(command_line, "locks"))
     {
