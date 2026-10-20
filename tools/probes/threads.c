@@ -1,6 +1,8 @@
 #define COBJMACROS
 #include "probe.h"
 
+#include <stdlib.h>
+
 #include <d3d9.h>
 
 #define PROBE_MAX_THREADS 512
@@ -43,8 +45,31 @@ static HANDLE start_thread(LPTHREAD_START_ROUTINE proc, UINT_PTR index)
     return CreateThread(NULL, PROBE_STACK, proc, (void *)index, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
 }
 
+static void free_address_space(unsigned long *free_mb, unsigned long *largest_mb)
+{
+    MEMORY_BASIC_INFORMATION info;
+    ULONG_PTR address = 0x10000;
+    ULONG_PTR total = 0, largest = 0;
+
+    while (address < 0xFFFF0000u && VirtualQuery((void *)address, &info, sizeof(info)) == sizeof(info))
+    {
+        if (info.State == MEM_FREE)
+        {
+            total += info.RegionSize;
+            if (info.RegionSize > largest)
+                largest = info.RegionSize;
+        }
+        if (info.RegionSize == 0)
+            break;
+        address = (ULONG_PTR)info.BaseAddress + info.RegionSize;
+    }
+    *free_mb = (unsigned long)(total >> 20);
+    *largest_mb = (unsigned long)(largest >> 20);
+}
+
 static unsigned int hold_all(const char *phase)
 {
+    unsigned long free_mb, largest_mb;
     DWORD error = 0;
     unsigned int waited;
 
@@ -64,8 +89,9 @@ static unsigned int hold_all(const char *phase)
     }
     for (waited = 0; (unsigned int)hold_started < held_count && waited < 1000; waited++)
         Sleep(10);
-    probe_log("ceiling %s: %u threads, started %ld, refused with error %lu", phase, held_count, hold_started,
-              error);
+    free_address_space(&free_mb, &largest_mb);
+    probe_log("ceiling %s: %u threads, started %ld, refused with error %lu; address space free %lu MB, largest %lu MB",
+              phase, held_count, hold_started, error, free_mb, largest_mb);
     return held_count;
 }
 
@@ -255,12 +281,19 @@ static void CALLBACK apc_routine(ULONG_PTR value)
 static void thread_lifecycle(void)
 {
     LONG before, after, resumed;
-    DWORD code = 0, start, took, waited;
+    DWORD code = 0, start, took, waited, suspended;
+    CONTEXT context = {0};
+    ULONG_PTR pc, sp;
+    BOOL got_context;
     HANDLE thread;
 
     thread = start_thread(spin_thread, 0);
     Sleep(200);
-    SuspendThread(thread);
+    start = GetTickCount();
+    suspended = SuspendThread(thread);
+    took = GetTickCount() - start;
+    context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+    got_context = GetThreadContext(thread, &context);
     Sleep(50);
     before = spin_count;
     Sleep(300);
@@ -268,8 +301,18 @@ static void thread_lifecycle(void)
     ResumeThread(thread);
     Sleep(300);
     resumed = spin_count;
-    probe_log("lifecycle: suspend %s (%ld then %ld while suspended), resume %s (%ld after)",
-              before == after ? "ok" : "FAILED", before, after, resumed > after ? "ok" : "FAILED", resumed);
+    probe_log("lifecycle: suspend %s (%ld then %ld while suspended, returned %ld in %lu ms), resume %s (%ld after)",
+              before == after && suspended == 0 ? "ok" : "FAILED", before, after, (long)suspended, took,
+              resumed > after ? "ok" : "FAILED", resumed);
+#ifdef _WIN64
+    pc = context.Rip;
+    sp = context.Rsp;
+#else
+    pc = context.Eip;
+    sp = context.Esp;
+#endif
+    probe_log("lifecycle: context %s (pc %llx sp %llx)", got_context && pc && sp ? "ok" : "FAILED",
+              (unsigned long long)pc, (unsigned long long)sp);
     start = GetTickCount();
     TerminateThread(thread, 77);
     waited = WaitForSingleObject(thread, 5000);
@@ -430,6 +473,19 @@ device:
     else if (command_line && strstr(command_line, "lifecycle"))
     {
         thread_lifecycle();
+    }
+    else if (command_line && strstr(command_line, "crash"))
+    {
+        volatile int *page = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS);
+
+        probe_log("crash: writing to a page with no access at %p", (void *)page);
+        *page = 1;
+        probe_log("crash: the write went through");
+    }
+    else if (command_line && strstr(command_line, "abort"))
+    {
+        probe_log("abort: calling abort()");
+        abort();
     }
     else if (command_line && strstr(command_line, "locks"))
     {

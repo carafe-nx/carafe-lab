@@ -893,6 +893,14 @@ impl Eden {
         })
     }
 
+    fn stopped_by_command_since_boot(&self) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            self.replies(session.booted_at)
+                .iter()
+                .any(|reply| reply.text.starts_with("stopped") && reply.text != "stopped self")
+        })
+    }
+
     fn end_session(&mut self) {
         if self.session.take().is_some() && self.container_running() {
             let _ = self.send("quit");
@@ -1003,6 +1011,25 @@ impl Emulator for Eden {
     fn running(&mut self) -> bool {
         if self.container_running() {
             if self.shut_down() || self.stopped_since_boot() {
+                return false;
+            }
+            if let Some(reason) = self.hung() {
+                self.ended = Some(reason);
+                self.end_session();
+                return false;
+            }
+            return true;
+        }
+        self.session = None;
+        if self.ended.is_none() {
+            self.ended = self.container_end();
+        }
+        false
+    }
+
+    fn application_running(&mut self) -> bool {
+        if self.container_running() {
+            if self.stopped_by_command_since_boot() {
                 return false;
             }
             if let Some(reason) = self.hung() {

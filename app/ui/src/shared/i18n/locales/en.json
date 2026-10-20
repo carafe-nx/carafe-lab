@@ -117,7 +117,8 @@
     "loadingScreen": "loading screen",
     "firstFrame": "first frame",
     "commit": "save committed",
-    "programEnded": "program ended"
+    "programEnded": "program ended",
+    "errorScreen": "error screen"
   },
   "units": {
     "seconds_one": "{{count}} s",

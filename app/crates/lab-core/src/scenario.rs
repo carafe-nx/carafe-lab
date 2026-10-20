@@ -20,6 +20,8 @@ pub enum Milestone {
     Commit,
     /// The program ended by itself with exit code 0, as a probe does once it is through.
     ProgramEnded,
+    /// The runtime started again to show its error screen after the program failed.
+    ErrorScreen,
 }
 
 /// One step of a scenario.

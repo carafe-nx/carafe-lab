@@ -11,7 +11,7 @@ export const BUTTONS: SwitchButton[] = [
   "UP", "DOWN", "LEFT", "RIGHT", "LUP", "LDOWN", "LLEFT", "LRIGHT", "RUP", "RDOWN", "RLEFT", "RRIGHT",
 ];
 
-const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit", "programEnded"];
+const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit", "programEnded", "errorScreen"];
 
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "stacks", "expectChange",

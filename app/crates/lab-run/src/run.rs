@@ -111,6 +111,12 @@ pub trait Emulator {
     /// Returns whether the game still runs.
     fn running(&mut self) -> bool;
 
+    /// Returns whether the emulator still runs the application, though the game's program may have ended, as it
+    /// has when the runtime shows its error screen.
+    fn application_running(&mut self) -> bool {
+        self.running()
+    }
+
     /// Returns why the emulator itself ended, once [`Emulator::running`] has seen it end; `None` if it did not
     /// end or the reason is unknown.
     fn end_reason(&self) -> Option<String> {
@@ -314,6 +320,7 @@ pub struct Runner<'a> {
     started: Duration,
     running: bool,
     launch_open: bool,
+    error_screen_seen: bool,
     launches: Vec<LaunchRecord>,
     remembered: Option<Vec<SaveFile>>,
     screenshots: Vec<(String, String)>,
@@ -352,6 +359,7 @@ impl<'a> Runner<'a> {
             started,
             running: false,
             launch_open: false,
+            error_screen_seen: false,
             launches: Vec::new(),
             remembered: None,
             screenshots: Vec::new(),
@@ -575,7 +583,7 @@ impl<'a> Runner<'a> {
                             None,
                         );
                     }
-                    if self.launch_open {
+                    if self.launch_open && !self.error_screen_seen {
                         let launch = self.current_launch();
                         if matches!(launch.exit, Some(Exit::Code(_))) {
                             let detail =
@@ -803,6 +811,7 @@ impl<'a> Runner<'a> {
             crash: None,
         });
         self.launch_open = true;
+        self.error_screen_seen = false;
         self.launch_started = self.clock.now();
         self.launched_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -831,6 +840,11 @@ impl<'a> Runner<'a> {
             if self.stopped() {
                 return self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None);
             }
+            let ended = if milestone == Milestone::ErrorScreen {
+                !self.emulator.application_running()
+            } else {
+                !self.emulator.running()
+            };
             let launch = self.current_launch();
             if launch.stage() > self.stage {
                 self.stage = launch.stage();
@@ -844,9 +858,13 @@ impl<'a> Runner<'a> {
                 Milestone::FirstFrame => launch.stage() == Stage::FirstFrame,
                 Milestone::Commit => !launch.commits.is_empty(),
                 Milestone::ProgramEnded => launch.exit == Some(Exit::Clean),
+                Milestone::ErrorScreen => launch.error_screen.is_some(),
             };
             let seconds = (self.clock.now() - waited_from).as_secs_f64();
             if reached {
+                if milestone == Milestone::ErrorScreen {
+                    self.error_screen_seen = true;
+                }
                 let detail = match (&launch.loading_hidden, milestone) {
                     (Some((at, reason)), Milestone::FirstFrame) => {
                         format!("first frame at {at} s of the launch: {}", reason.text())
@@ -859,8 +877,8 @@ impl<'a> Runner<'a> {
                 .loading_hidden
                 .as_ref()
                 .is_some_and(|(_, reason)| !reason.is_success());
-            let crashed = matches!(launch.exit, Some(Exit::Code(_)));
-            let ended = !self.emulator.running();
+            let crashed =
+                matches!(launch.exit, Some(Exit::Code(_))) && milestone != Milestone::ErrorScreen;
             let refused = launch.refused.is_some();
             if gave_up || crashed || refused || ended || self.clock.now() >= deadline {
                 let why = if crashed {
@@ -1338,8 +1356,14 @@ impl<'a> Runner<'a> {
             if self.stopped() {
                 return self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None);
             }
-            let crashed = matches!(self.current_launch().exit, Some(Exit::Code(_)));
-            if crashed || !self.emulator.running() {
+            let crashed = !self.error_screen_seen
+                && matches!(self.current_launch().exit, Some(Exit::Code(_)));
+            let ended = if self.error_screen_seen {
+                !self.emulator.application_running()
+            } else {
+                !self.emulator.running()
+            };
+            if crashed || ended {
                 self.running = false;
                 let why = if crashed {
                     format!(

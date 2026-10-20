@@ -11,11 +11,17 @@ LIBS_gl := -lopengl32 -lgdi32
 LIBS_screen := -lddraw -ldxguid
 LIBS_threads := -ld3d9
 
-EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe))
+EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe)) \
+	$(OUT)/i686/probe-missing.exe
 
 .PHONY: all clean
 
 all: $(EXES)
+
+$(OUT)/i686/probe-missing.exe: missing.c missing.def
+	mkdir -p $(dir $@)
+	i686-w64-mingw32-dlltool -d missing.def -l $(OUT)/i686/libcarafe-missing.a
+	i686-w64-mingw32-clang -O2 -Wall -Wextra -std=gnu11 -mwindows -o $@ missing.c $(OUT)/i686/libcarafe-missing.a
 
 $(OUT)/i686/probe-%.exe: %.c probe.h
 	mkdir -p $(dir $@)

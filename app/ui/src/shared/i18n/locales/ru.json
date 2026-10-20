@@ -129,7 +129,8 @@
     "loadingScreen": "экран загрузки",
     "firstFrame": "первый кадр",
     "commit": "запись сохранения",
-    "programEnded": "программа завершилась"
+    "programEnded": "программа завершилась",
+    "errorScreen": "экран ошибки"
   },
   "units": {
     "seconds_one": "{{count}} с",

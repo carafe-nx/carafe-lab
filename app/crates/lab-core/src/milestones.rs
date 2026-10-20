@@ -119,6 +119,8 @@ pub struct Launch {
     pub refused: Option<String>,
     /// The overlay shut down in order.
     pub shutdown: bool,
+    /// What the error screen shows, from the overlay's `error screen: kind …` line; `None` if it was not shown.
+    pub error_screen: Option<String>,
 }
 
 impl Launch {
@@ -165,6 +167,8 @@ impl Launch {
             self.overlay_installed = true;
         } else if text == "shutdown" {
             self.shutdown = true;
+        } else if let Some(rest) = text.strip_prefix("error screen: kind ") {
+            self.error_screen = Some(rest.trim().to_owned());
         } else if let Some(rest) = text.strip_prefix("commit ") {
             if let Some(commit) = parse_commit(rest) {
                 self.commits.push(commit);
@@ -300,6 +304,20 @@ mod tests {
         assert_eq!(launch.exit, Some(Exit::Clean));
         assert!(launch.shutdown);
         assert_eq!(launch.stalls, 0);
+    }
+
+    #[test]
+    fn the_error_screen_line_says_what_it_shows() {
+        let overlay = "[carafe-overlay] error screen: kind 0, code 0xc0000005, module -\n";
+        let launch = Launch::read(overlay, "");
+        assert_eq!(
+            launch.error_screen.as_deref(),
+            Some("0, code 0xc0000005, module -")
+        );
+        assert_eq!(
+            Launch::read(OPENTTD_OVERLAY, OPENTTD_RUNTIME).error_screen,
+            None
+        );
     }
 
     #[test]
