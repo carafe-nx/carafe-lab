@@ -1418,6 +1418,11 @@ impl<'a> Runner<'a> {
         record.resources = resources::summarize(&samples);
         let dest = self.dir.join(&record.logs);
         let _ = self.emulator.take_logs(self.title, &dest);
+        if dest.join("logs").join(PROBE_THREADS_LOG).exists()
+            && let Some(log) = self.emulator.find_file(self.title, PROBE_THREADS_LOG)
+        {
+            let _ = std::fs::write(dest.join(PROBE_LOG_COPY), &log);
+        }
         record.problems = write_problems(&dest);
         let eden_log = std::fs::read(dest.join("eden_log.txt"))
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
