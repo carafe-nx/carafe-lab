@@ -419,8 +419,9 @@ device:
     }
     else if (command_line && strstr(command_line, "dxvk"))
     {
-        hold_release_ms = 2000;
-        hold_all("with a Direct3D 9 device, half of them ending 2 s after the device is asked for");
+        hold_release_ms = strstr(command_line, "dxvk-late") ? 40000 : 2000;
+        hold_all(hold_release_ms > 2000 ? "with a Direct3D 9 device, half of them ending 40 s after the device is asked for"
+                                        : "with a Direct3D 9 device, half of them ending 2 s after the device is asked for");
         SetEvent(go_event);
         probe_log("second device with every thread taken");
         second = create_device(d3d, window, &hr);
