@@ -758,7 +758,8 @@ impl<'a> Runner<'a> {
         if let Some(record) = self.launches.last() {
             let _ = std::fs::write(self.dir.join(&record.logs).join(PROBE_LOG_COPY), &log);
         }
-        match ThreadsLog::read(&log).check(min) {
+        let ended = self.current_launch().exit.is_some() || !self.emulator.running();
+        match ThreadsLog::read(&log).check(min, ended) {
             Ok(detail) => self.result(step, Outcome::Pass, detail, None),
             Err(detail) => self.result(step, Outcome::Fail, detail, None),
         }

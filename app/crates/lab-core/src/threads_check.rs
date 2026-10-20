@@ -37,13 +37,14 @@ impl ThreadsLog {
         read
     }
 
-    /// Checks the log against `min`, the fewest threads the probe must be able to hold at every point.
+    /// Checks the log against `min`, the fewest threads the probe must be able to hold at every point; `ended` tells
+    /// whether the probe's process has ended.
     ///
     /// # Errors
     ///
-    /// What failed: no ceiling at all, a ceiling below `min`, Direct3D 9 dying on a refused thread, or a probe that
-    /// did not finish.
-    pub fn check(&self, min: u32) -> Result<String, String> {
+    /// What failed: no ceiling at all, a ceiling below `min`, Direct3D 9 dying on a refused thread, Direct3D 9 still
+    /// making its second device, or a probe that did not finish.
+    pub fn check(&self, min: u32, ended: bool) -> Result<String, String> {
         let Some(lowest) = self.ceilings.iter().min_by_key(|(_, count)| *count) else {
             return Err("the probe wrote no ceiling".to_owned());
         };
@@ -59,8 +60,11 @@ impl ThreadsLog {
                 lowest.1, lowest.0
             ));
         }
-        if self.dxvk_survived == Some(false) {
+        if self.dxvk_survived == Some(false) && ended {
             return Err("Direct3D 9 ended the probe when a thread was refused".to_owned());
+        }
+        if self.dxvk_survived == Some(false) {
+            return Err("Direct3D 9 was still making its second device".to_owned());
         }
         if !self.finished {
             return Err("the probe did not finish".to_owned());
@@ -112,7 +116,7 @@ mod tests {
     fn a_finished_probe_above_the_minimum_passes() {
         let read = ThreadsLog::read(&format!("{LOG}30.000 exit\n"));
         assert_eq!(
-            read.check(30),
+            read.check(30, true),
             Ok("30–35 threads at 3 points of the run".to_owned())
         );
     }
@@ -121,7 +125,7 @@ mod tests {
     fn the_lowest_ceiling_must_reach_the_minimum() {
         let read = ThreadsLog::read(&format!("{LOG}30.000 exit\n"));
         assert_eq!(
-            read.check(31),
+            read.check(31, true),
             Err("30 threads with a Direct3D 9 device, fewer than 31".to_owned())
         );
     }
@@ -132,7 +136,7 @@ mod tests {
             "{LOG}27.436 second device with every thread taken\n"
         ));
         assert_eq!(
-            died.check(30),
+            died.check(30, true),
             Err("Direct3D 9 ended the probe when a thread was refused".to_owned())
         );
         let lived = ThreadsLog::read(&format!(
@@ -140,7 +144,7 @@ mod tests {
              30.000 exit\n"
         ));
         assert_eq!(
-            lived.check(30),
+            lived.check(30, true),
             Ok(
                 "30–35 threads at 3 points of the run, Direct3D 9 lived through a refused thread"
                     .to_owned()
@@ -149,13 +153,24 @@ mod tests {
     }
 
     #[test]
+    fn a_device_still_being_made_is_not_a_death() {
+        let making = ThreadsLog::read(&format!(
+            "{LOG}27.436 second device with every thread taken\n"
+        ));
+        assert_eq!(
+            making.check(30, false),
+            Err("Direct3D 9 was still making its second device".to_owned())
+        );
+    }
+
+    #[test]
     fn a_probe_that_stopped_fails() {
         assert_eq!(
-            ThreadsLog::read(LOG).check(30),
+            ThreadsLog::read(LOG).check(30, true),
             Err("the probe did not finish".to_owned())
         );
         assert_eq!(
-            ThreadsLog::read("").check(30),
+            ThreadsLog::read("").check(30, true),
             Err("the probe wrote no ceiling".to_owned())
         );
     }
