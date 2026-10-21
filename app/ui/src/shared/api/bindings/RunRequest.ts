@@ -34,6 +34,10 @@ clean: boolean | null,
  */
 scenario: string | null, 
 /**
+ * The program arguments every game gets instead of its own, separated by spaces.
+ */
+arguments: string | null, 
+/**
  * The live video: `full`, `low` or `off`; `None` means full.
  */
 video: string | null, 

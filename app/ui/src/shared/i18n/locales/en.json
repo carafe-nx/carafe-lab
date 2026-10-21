@@ -135,6 +135,8 @@
     "scenario": "Scenario for every game",
     "ownScenarios": "each game's own",
     "standardScenario": "standard",
+    "arguments": "Program arguments for every game",
+    "ownArguments": "each game's own, such as census crash for a probe",
     "games_one": "{{count}} game",
     "games_other": "{{count}} games",
     "start": "Run the set",

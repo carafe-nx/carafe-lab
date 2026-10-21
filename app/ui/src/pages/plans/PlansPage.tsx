@@ -46,6 +46,7 @@ export function PlansPage() {
   const [error, setError] = useState<string | null>(null);
   const [clean, setClean] = useState(false);
   const [scenario, setScenario] = useState("");
+  const [programArguments, setProgramArguments] = useState("");
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const games = lab.data?.games ?? [];
   const scenarioFiles = [...new Set(games.flatMap((game) => (game.scenarioFile ? [game.scenarioFile] : [])))];
@@ -61,7 +62,20 @@ export function PlansPage() {
     setError(null);
     const measured = ab !== null || abRuntime !== null;
     api
-      .startRun(set, null, chosen, repeat, ab, clean, scenario || null, measured ? "low" : null, null, diagnostics, abRuntime)
+      .startRun(
+        set,
+        null,
+        chosen,
+        repeat,
+        ab,
+        clean,
+        scenario || null,
+        measured ? "low" : null,
+        null,
+        diagnostics,
+        abRuntime,
+        programArguments.trim() || null,
+      )
       .then(() => {
         status.refresh();
         navigate("/run");
@@ -106,6 +120,16 @@ export function PlansPage() {
               </option>
             ))}
           </select>
+        </label>
+        <label className={controls.field} htmlFor="plan-arguments">
+          <span className={controls.fieldLabel}>{t("plans.arguments")}</span>
+          <input
+            id="plan-arguments"
+            className={controls.input}
+            value={programArguments}
+            placeholder={t("plans.ownArguments")}
+            onChange={(event) => setProgramArguments(event.target.value)}
+          />
         </label>
       </div>
       <div className={controls.field}>

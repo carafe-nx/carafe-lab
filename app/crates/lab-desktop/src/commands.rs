@@ -239,6 +239,8 @@ pub struct RunRequest {
     pub clean: Option<bool>,
     /// The scenario every game runs instead of its own: `standard` or a file relative to the work folder.
     pub scenario: Option<String>,
+    /// The program arguments every game gets instead of its own, separated by spaces.
+    pub arguments: Option<String>,
     /// The live video: `full`, `low` or `off`; `None` means full.
     pub video: Option<String>,
     /// The folder of a past run to repeat with the runtime and Eden image it ran with.
@@ -411,6 +413,7 @@ pub async fn start_run(
         ab,
         clean,
         scenario,
+        arguments,
         video,
         like,
         nsp,
@@ -446,6 +449,9 @@ pub async fn start_run(
         }
         if let Some(scenario) = scenario.filter(|scenario| !scenario.is_empty()) {
             args.extend(["--scenario".to_owned(), scenario]);
+        }
+        if let Some(arguments) = arguments.filter(|arguments| !arguments.trim().is_empty()) {
+            args.extend(["--args".to_owned(), arguments.trim().to_owned()]);
         }
         if let Some(video) = video.filter(|video| Video::parse(video).is_some()) {
             args.extend(["--video".to_owned(), video]);

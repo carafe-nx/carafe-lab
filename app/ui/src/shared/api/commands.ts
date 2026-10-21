@@ -24,6 +24,7 @@ const noRun: RunRequest = {
   ab: null,
   clean: null,
   scenario: null,
+  arguments: null,
   video: null,
   like: null,
   nsp: null,
@@ -52,6 +53,7 @@ export const api = {
     like: string | null = null,
     diagnostics: Diagnostic[] | null = null,
     abRuntime: string | null = null,
+    programArguments: string | null = null,
   ) => {
     const request: RunRequest = {
       ...noRun,
@@ -62,6 +64,7 @@ export const api = {
       ab,
       clean,
       scenario,
+      arguments: programArguments,
       video,
       like,
       diagnostics,

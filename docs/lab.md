@@ -169,7 +169,16 @@ what else it does:
   end 2 s later, as a burst of loading threads does in a game;
 - `dxvk-hard`: the same with no thread ending, so DXVK is refused for good;
 - `locks`: instead of the hold, 4, 16 and 48 threads take one critical section 2000 times each, and the probe logs
-  how long it took, how many waits for it were longer than 100 ms and the longest (`lock storm …`).
+  how long it took, how many waits for it were longer than 100 ms and the longest (`lock storm …`);
+- `dxvk-late`: as `dxvk`, with half of the threads ending 40 s after the device is asked for;
+- `lifecycle`: suspends, reads the registers of, resumes and terminates a thread, checks an exit code and a user APC;
+- `crash` and `abort`: after the device, write to a page with no access or call `abort()`, for Carafe's error screen.
+
+`lab.json` has one entry for the probe. A plan picks the mode with the program arguments and the scenario that goes
+with it: `run --games "Threads probe" --args "census lifecycle" --scenario scenarios/threads-lifecycle.json`, or the
+Plans screen's "Program arguments" and "Scenario for every game". The run names the game with its arguments
+(`Threads probe · census lifecycle`), so each mode gets its own NSP and history. `probe-missing.exe` imports a DLL
+that does not exist, for the error screen's missing-file case.
 
 The `expectThreads` step reads the log. The Eden Lab runs gives a program 96 threads, as the console does
 (`patches/eden/0050`).

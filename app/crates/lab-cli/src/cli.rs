@@ -58,6 +58,8 @@ Options:
                       full HUD), stacks (thread stacks of a hung game in backtraces.txt), eden-debug (Eden's log at
                       the debug level); a retry after a failure picks its own
   --scenario <s>      every game runs this scenario: standard, or a file in the work folder
+  --args <a b …>      every game's program gets these arguments instead of its own, as a probe's mode;
+                      quote them as one value
   --like <run>        run the games of this past run again with the runtime and Eden image it ran with;
                       every run keeps them from now on
   --nsp <file>        run: a ready NSP made by Carafe instead of the games of lab.json, as it is, with the
@@ -203,6 +205,8 @@ pub struct Args {
     pub rebuild: bool,
     /// `--scenario`: `standard` or a scenario file relative to the work folder.
     pub scenario: Option<String>,
+    /// `--args`: the program arguments every game of the plan gets instead of its own.
+    pub arguments: Option<Vec<String>>,
     /// `--video`.
     pub video: Video,
     /// `--json`.
@@ -285,6 +289,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         nsp: Vec::new(),
         rebuild: false,
         scenario: None,
+        arguments: None,
         video: Video::Full,
         json: false,
         who: None,
@@ -343,6 +348,14 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 parsed.ab_runtime = Some(value("release:<tag> or a runtime archive")?)
             }
             "--scenario" => parsed.scenario = Some(value("standard or a scenario file")?),
+            "--args" => {
+                parsed.arguments = Some(
+                    value("program arguments")?
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect(),
+                );
+            }
             "--like" => parsed.like = Some(value("a run folder")?),
             "--nsp" => parsed.nsp.push(PathBuf::from(value("an NSP file")?)),
             "--rebuild" => parsed.rebuild = true,
@@ -453,6 +466,13 @@ mod tests {
         assert!(!parsed.clean);
         assert!(parse(&args("run --clean")).unwrap().clean);
         assert_eq!(parse(&args("run")).unwrap().scenario, None);
+        assert_eq!(parse(&args("run")).unwrap().arguments, None);
+        let mut with_args = args("run --args");
+        with_args.push("census crash".to_owned());
+        assert_eq!(
+            parse(&with_args).unwrap().arguments,
+            Some(vec!["census".to_owned(), "crash".to_owned()])
+        );
         assert_eq!(parse(&args("run")).unwrap().video, Video::Full);
         assert_eq!(parse(&args("run --video low")).unwrap().video, Video::Low);
         assert!(parse(&args("run --video high")).is_err());

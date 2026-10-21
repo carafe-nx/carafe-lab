@@ -974,6 +974,11 @@ impl Lab {
     }
 
     fn plan(&self, game: &Game, name: String, settings: &AutorunSettings) -> Planned {
+        let arguments = self.args.arguments.as_ref();
+        let name = match arguments {
+            Some(arguments) if !arguments.is_empty() => format!("{name} · {}", arguments.join(" ")),
+            _ => name,
+        };
         let request = DiskFolderInspector
             .inspect(&game.folder.to_string_lossy())
             .map_err(|error| error.to_string())
@@ -984,6 +989,9 @@ impl Lab {
             })
             .map(|mut request| {
                 request.settings = settings.clone();
+                if let Some(arguments) = arguments {
+                    request.source.arguments.clone_from(arguments);
+                }
                 request
             });
         let planned = Planned {

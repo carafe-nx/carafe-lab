@@ -151,6 +151,8 @@
     "scenario": "Сценарий для всех игр",
     "ownScenarios": "у каждой игры свой",
     "standardScenario": "стандартный",
+    "arguments": "Аргументы программы для всех игр",
+    "ownArguments": "у каждой игры свои, например census crash для пробы",
     "games_one": "{{count}} игра",
     "games_few": "{{count}} игры",
     "games_many": "{{count}} игр",
