@@ -174,6 +174,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
     .with_one_eden(config.one_eden)
     .with_fresh_eden(args.clean)
     .with_video(args.video)
+    .with_heap_start(args.heap_start)
     .with_firmware(local_settings(&config_path)?.firmware)
     .with_symbols(
         (args.runtime.is_none() && like.is_none()).then(|| desktop.join(RUNTIME_SYMBOLS)),
@@ -855,6 +856,9 @@ impl Lab {
             )
         });
         let threshold = game.map_or(versions::DEFAULT_THRESHOLD, |game| game.threshold);
+        let save = game
+            .and_then(|game| game.save.as_ref())
+            .map(|save| self.work.join(save));
         let folder = PathBuf::from(&record.source.folder);
         if self.args.rebuild {
             let planned = Planned {
@@ -867,6 +871,7 @@ impl Lab {
                 threshold,
                 nsp: NspSource::Rebuild(Box::new(record)),
                 diagnostics: Vec::new(),
+                save: save.clone(),
             };
             return with_diagnostics(planned, &self.args.diagnostics);
         }
@@ -891,6 +896,7 @@ impl Lab {
             threshold,
             nsp: NspSource::Ready(Box::new(nsp)),
             diagnostics: Vec::new(),
+            save,
         };
         with_diagnostics(planned, &of_emulator)
     }
@@ -1007,6 +1013,7 @@ impl Lab {
             threshold: game.threshold,
             nsp: NspSource::Build,
             diagnostics: Vec::new(),
+            save: game.save.as_ref().map(|save| self.work.join(save)),
         };
         with_diagnostics(planned, &self.args.diagnostics)
     }
@@ -1389,6 +1396,7 @@ fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> 
         threshold: versions::DEFAULT_THRESHOLD,
         nsp: NspSource::Build,
         diagnostics: Vec::new(),
+        save: None,
     }
 }
 

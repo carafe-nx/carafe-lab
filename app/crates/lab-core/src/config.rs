@@ -102,6 +102,7 @@ struct RawGame {
     tags: Vec<String>,
     notes: Option<String>,
     threshold: Option<u32>,
+    save: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +173,9 @@ pub struct Game {
     pub notes: Option<String>,
     /// The percentage the game may get slower by against the last Carafe version before it fails.
     pub threshold: u32,
+    /// A folder whose files become the game's save data before its first launch of a run, such as a save pulled
+    /// from the console; relative to the work folder. `None` starts the game without save data.
+    pub save: Option<PathBuf>,
 }
 
 /// Returns the folder the scenario files of the lab file `text` are named relative to: its work folder, taken
@@ -319,6 +323,7 @@ impl Config {
                 tags: game.tags,
                 notes: game.notes,
                 threshold: game.threshold.unwrap_or(versions::DEFAULT_THRESHOLD),
+                save: game.save,
             });
         }
         for (set, names) in &raw.sets {
@@ -926,6 +931,17 @@ mod tests {
         assert_eq!(config.games[0].notes.as_deref(), Some("stalls at start"));
         let cleared = set_game_notes(&tagged, "A", &[], "", |_| Err("none".to_owned())).unwrap();
         assert!(!cleared.contains("tags") && !cleared.contains("notes"));
+    }
+
+    #[test]
+    fn a_game_can_start_from_a_save_folder() {
+        let text = r#"{"work": "x", "games": [
+            {"name": "A", "folder": "a", "save": "saves/a"},
+            {"name": "B", "folder": "b"}
+        ]}"#;
+        let config = Config::parse(text).unwrap();
+        assert_eq!(config.games[0].save, Some(PathBuf::from("saves/a")));
+        assert_eq!(config.games[1].save, None);
     }
 
     #[test]

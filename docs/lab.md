@@ -68,6 +68,11 @@ Eden is set up like the console: 4 cores, the 4 GB memory layout, handheld at 12
 files chosen in the same screen and kept in `lab.local.json`; Lab copies it into Eden's NAND once and again only when
 the folder changes ([decision 5](decisions/0005-firmware-chosen-in-lab.md)). Without it, Eden runs without firmware.
 
+Eden places a 32-bit game's heap region at random but in practice always high, so the game keeps a large free range
+below it; the console puts it anywhere from 1 GB up, and a game that runs short of address space there does not in
+Lab. `--heap-start <address>`, such as `0x44000000`, puts it where a console log shows it (the `[VA] view … 2097152 KB`
+line), through `CARAFE_LAB_HEAP_START` (`patches/eden/0051`).
+
 ## Games
 
 Every game is an entry of `games` in `lab.json`. Only `name` and `folder` are needed; the rest is taken the way the
@@ -83,9 +88,14 @@ build wizard would take it: the largest game `.exe`, its product name, default s
   "arch": "x86",
   "arguments": ["-windowed"],
   "settings": { "system": { "cpu": "box64" }, "input": { "mode": "keyboardMouse" } },
-  "scenario": "scenarios/game.json"
+  "scenario": "scenarios/game.json",
+  "save": "saves/game"
 }
 ```
+
+`save` is a folder, relative to the work folder, laid out like the game's save data (`switch/…`, `carafe/…`), as
+DBI shows a console save under "Saves". Its files become the save data after it is emptied at the start of the run,
+so a game that fails only with a profile or a career can start from one made on the console.
 
 `scenario` is a file relative to the work folder or the steps themselves: `{ "steps": [ … ] }`. Scenario files are
 your own, like the runs, so they live in the work folder, outside the repository; the Scenarios screen saves them to

@@ -167,6 +167,14 @@ pub trait Emulator {
     /// [`EmulatorError::Io`] if the save data cannot be removed.
     fn clear_save(&mut self, title: TitleId) -> Result<(), EmulatorError>;
 
+    /// Copies the files of `folder` into the emptied save data of `title`, keeping their paths, so the game starts
+    /// from a save made elsewhere.
+    ///
+    /// # Errors
+    ///
+    /// [`EmulatorError::Io`] if the files cannot be copied.
+    fn seed_save(&mut self, title: TitleId, folder: &Path) -> Result<(), EmulatorError>;
+
     /// Returns the files of the device save data of `title`, sorted by path; empty if there is none.
     fn save_files(&self, title: TitleId) -> Vec<SaveFile>;
 
@@ -339,6 +347,7 @@ pub struct Runner<'a> {
     last_glimpse: Duration,
     baseline: Option<VersionPerf>,
     threshold: u32,
+    save: Option<PathBuf>,
 }
 
 impl<'a> Runner<'a> {
@@ -378,6 +387,7 @@ impl<'a> Runner<'a> {
             last_glimpse: started,
             baseline: None,
             threshold: versions::DEFAULT_THRESHOLD,
+            save: None,
         }
     }
 
@@ -485,6 +495,13 @@ impl<'a> Runner<'a> {
         self.stop.as_ref().is_some_and(CancelToken::is_cancelled)
     }
 
+    /// Sets the folder whose files become the game's save data before the first step; `None` starts it without.
+    #[must_use]
+    pub fn with_save(mut self, save: Option<PathBuf>) -> Self {
+        self.save = save;
+        self
+    }
+
     /// Sets the folder the reference pictures of [`Step::ExpectScreen`] are in.
     #[must_use]
     pub fn with_references(mut self, references: impl Into<PathBuf>) -> Self {
@@ -533,14 +550,21 @@ impl<'a> Runner<'a> {
     ) -> ScenarioResult {
         let mut steps = Vec::with_capacity(scenario.steps.len());
         let mut broken = false;
-        if let Err(error) = self.emulator.clear_save(self.title) {
+        let prepared = self
+            .emulator
+            .clear_save(self.title)
+            .map_err(|error| format!("old save data stays: {error}"));
+        let seed = self.save.clone();
+        let prepared = prepared.and_then(|()| match &seed {
+            Some(folder) => self
+                .emulator
+                .seed_save(self.title, folder)
+                .map_err(|error| format!("the save data to start from was not copied: {error}")),
+            None => Ok(()),
+        });
+        if let Err(detail) = prepared {
             broken = true;
-            let result = self.result(
-                &Step::ExpectSave,
-                Outcome::Fail,
-                format!("old save data stays: {error}"),
-                None,
-            );
+            let result = self.result(&Step::ExpectSave, Outcome::Fail, detail, None);
             on_step(&result);
             steps.push(result);
         }
@@ -1819,6 +1843,14 @@ mod tests {
         fn clear_save(&mut self, _title: TitleId) -> Result<(), EmulatorError> {
             Ok(())
         }
+        fn seed_save(&mut self, _title: TitleId, folder: &Path) -> Result<(), EmulatorError> {
+            self.save = vec![SaveFile {
+                path: folder.to_string_lossy().replace('\\', "/"),
+                size: 1,
+                sha256: "seeded".to_owned(),
+            }];
+            Ok(())
+        }
         fn save_files(&self, _title: TitleId) -> Vec<SaveFile> {
             self.save.clone()
         }
@@ -1881,6 +1913,9 @@ mod tests {
         }
         fn clear_save(&mut self, title: TitleId) -> Result<(), EmulatorError> {
             self.0.borrow_mut().clear_save(title)
+        }
+        fn seed_save(&mut self, title: TitleId, folder: &Path) -> Result<(), EmulatorError> {
+            self.0.borrow_mut().seed_save(title, folder)
         }
         fn save_files(&self, title: TitleId) -> Vec<SaveFile> {
             self.0.borrow().save_files(title)
@@ -1951,6 +1986,31 @@ mod tests {
         drop(stepping);
         let emulator = std::rc::Rc::try_unwrap(shared).ok().unwrap().into_inner();
         (result, emulator)
+    }
+
+    #[test]
+    fn a_save_folder_becomes_the_save_data_before_the_first_step() {
+        let scenario = Scenario {
+            steps: vec![Step::ExpectSave],
+        };
+        let run_with = |save: Option<PathBuf>| {
+            let shared = std::rc::Rc::new(std::cell::RefCell::new(FakeEmulator::default()));
+            let clock = FakeClock(Cell::new(Duration::ZERO));
+            let stepping = Stepping {
+                clock: &clock,
+                emulator: shared.clone(),
+            };
+            let dir = std::env::temp_dir().join(format!("carafe-lab-seed-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut adapter = Shared(shared.clone());
+            Runner::new(&mut adapter, &stepping, title(), "game.nsp", &dir)
+                .with_save(save)
+                .run(&scenario, |_| {})
+        };
+        let seeded = run_with(Some(PathBuf::from("saves/game")));
+        assert_eq!(seeded.steps[0].outcome, Outcome::Pass);
+        let empty = run_with(None);
+        assert_eq!(empty.steps[0].outcome, Outcome::Warn);
     }
 
     #[test]

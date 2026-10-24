@@ -73,6 +73,8 @@ Options:
   --rebuild           with --nsp: build each NSP again from its game folder with the lab's runtime and the
                       NSP's own settings
   --video <v>         full, low (about five pictures a second, for measuring) or off; default full
+  --heap-start <a>    put the heap region of a 32-bit game at this address, such as 0x44000000, as the console
+                      may; a multiple of 2 MB below 4 GB; default: where Eden picks
   --json              print the run as JSON lines, one event each; status, games and runs print one JSON
                       document
   --who <name>        who starts the run, shown in the queue; default: command line
@@ -210,6 +212,8 @@ pub struct Args {
     pub arguments: Option<Vec<String>>,
     /// `--video`.
     pub video: Video,
+    /// `--heap-start`: where a 32-bit game's heap region goes; `None` leaves it to Eden.
+    pub heap_start: Option<u64>,
     /// `--json`.
     pub json: bool,
     /// `--who`.
@@ -292,6 +296,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         scenario: None,
         arguments: None,
         video: Video::Full,
+        heap_start: None,
         json: false,
         who: None,
         random: 0,
@@ -318,6 +323,17 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 let text = value("full, low or off")?;
                 parsed.video = Video::parse(&text)
                     .ok_or_else(|| ArgsError::Value(arg.clone(), "full, low or off"))?;
+            }
+            "--heap-start" => {
+                const WHAT: &str = "an address, a multiple of 2 MB below 4 GB";
+                let text = value(WHAT)?;
+                let address = text
+                    .strip_prefix("0x")
+                    .map_or_else(|| text.parse::<u64>(), |hex| u64::from_str_radix(hex, 16))
+                    .ok()
+                    .filter(|address| address % (2 << 20) == 0 && *address < 1 << 32)
+                    .ok_or_else(|| ArgsError::Value(arg.clone(), WHAT))?;
+                parsed.heap_start = Some(address);
             }
             "--lang" => {
                 let text = value("ru or en")?;
@@ -477,6 +493,15 @@ mod tests {
         assert_eq!(parse(&args("run")).unwrap().video, Video::Full);
         assert_eq!(parse(&args("run --video low")).unwrap().video, Video::Low);
         assert!(parse(&args("run --video high")).is_err());
+        assert_eq!(parse(&args("run")).unwrap().heap_start, None);
+        assert_eq!(
+            parse(&args("run --heap-start 0x44000000"))
+                .unwrap()
+                .heap_start,
+            Some(0x4400_0000)
+        );
+        assert!(parse(&args("run --heap-start 0x44001000")).is_err());
+        assert!(parse(&args("run --heap-start 0x100000000")).is_err());
         assert_eq!(
             parse(&args("run --scenario standard"))
                 .unwrap()

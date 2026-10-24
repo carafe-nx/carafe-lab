@@ -1,0 +1,47 @@
+Carafe Lab: the heap region of a 32-bit process can be placed at a chosen address.
+Eden picks the heap's place at random, and in practice always high, so a 32-bit game keeps a large free range
+below it and never runs short of address space the way it does on the console. CARAFE_LAB_HEAP_START puts the
+heap of a 32-bit process without alias region at that address when it fits beside the other regions; the log
+says where it went.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/kernel/k_page_table_base.cpp
++++ b/src/core/hle/kernel/k_page_table_base.cpp
+@@ -4,6 +4,8 @@
+ // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
++#include <cstdlib>
++
+ #include "common/scope_exit.h"
+ #include "common/settings.h"
+ #include "core/core.h"
+@@ -387,6 +389,28 @@
+         }
+     }
+ 
++    const char* forced_heap = std::getenv("CARAFE_LAB_HEAP_START");
++    if (forced_heap && (as_type & Svc::CreateProcessFlag::AddressSpaceMask) ==
++                           Svc::CreateProcessFlag::AddressSpace32BitWithoutAlias) {
++        const u64 start = std::strtoull(forced_heap, nullptr, 0);
++        const u64 end = start + heap_region_size;
++        const auto overlaps = [&](KProcessAddress first, KProcessAddress last) {
++            return first != last && !(end <= GetInteger(first) || GetInteger(last) <= start);
++        };
++        if (start % RegionAlignment == 0 && start >= GetInteger(alloc_start) &&
++            end <= GetInteger(alloc_start) + alloc_size &&
++            !overlaps(m_stack_region_start, m_stack_region_end) &&
++            !overlaps(m_kernel_map_region_start, m_kernel_map_region_end) &&
++            !overlaps(m_alias_region_start, m_alias_region_end)) {
++            m_heap_region_start = start;
++            m_heap_region_end = end;
++            LOG_INFO(Kernel, "Carafe Lab: heap region placed at {:#x}", start);
++        } else {
++            LOG_WARNING(Kernel, "Carafe Lab: heap region cannot start at {:#x}, stays at {:#x}", start,
++                        GetInteger(m_heap_region_start));
++        }
++    }
++
+     // Set heap and fill members.
+     m_current_heap_end = m_heap_region_start;
+     m_max_heap_size = 0;

@@ -45,6 +45,8 @@ pub struct Planned {
     pub nsp: NspSource,
     /// The diagnostics its launches run with.
     pub diagnostics: Vec<Diagnostic>,
+    /// The folder whose files become its save data before the first launch; `None` starts it without save data.
+    pub save: Option<PathBuf>,
 }
 
 /// Where a planned game's NSP comes from.
@@ -499,6 +501,7 @@ impl Engine<'_> {
             .with_stop(self.stop.clone())
             .with_hold(self.work.join("queue").join(HOLD_FILE))
             .with_references(self.references.clone())
+            .with_save(game.save.clone())
             .with_stages(|stage| (shared.borrow_mut())(&Event::Reached { stage }));
         let result = runner.run(&game.scenario, |step| {
             (shared.borrow_mut())(&Event::Step { step: step.clone() });
@@ -772,6 +775,7 @@ mod tests {
             threshold: 20,
             nsp: NspSource::Build,
             diagnostics: Vec::new(),
+            save: None,
         };
         let stalled = detailed(&planned, &failed_at(wait.clone(), "not reached in 120 s")).unwrap();
         assert_eq!(stalled.name, "G · detailed");

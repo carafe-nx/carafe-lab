@@ -110,6 +110,7 @@ pub struct Eden {
     video: Video,
     diagnostics: Vec<Diagnostic>,
     symbols: Option<PathBuf>,
+    heap_start: Option<u64>,
 }
 
 struct Session {
@@ -173,6 +174,7 @@ impl Eden {
             video: Video::Full,
             diagnostics: Vec::new(),
             symbols: None,
+            heap_start: None,
         }
     }
 
@@ -211,6 +213,14 @@ impl Eden {
     #[must_use]
     pub fn with_video(mut self, video: Video) -> Self {
         self.video = video;
+        self
+    }
+
+    /// Returns the emulator that puts the heap region of a 32-bit game at `heap_start` (`patches/eden/0051`), so a
+    /// game meets the address space the console gives it there; `None` leaves the place to Eden.
+    #[must_use]
+    pub fn with_heap_start(mut self, heap_start: Option<u64>) -> Self {
+        self.heap_start = heap_start;
         self
     }
 
@@ -937,6 +947,10 @@ impl Eden {
             "--cap-add".to_owned(),
             "SYS_PTRACE".to_owned(),
         ];
+        if let Some(heap_start) = self.heap_start {
+            args.push("-e".to_owned());
+            args.push(format!("CARAFE_LAB_HEAP_START={heap_start:#x}"));
+        }
         for shared in SHARED_DIRS {
             args.push("-v".to_owned());
             if shared == "nand" {
@@ -1241,6 +1255,28 @@ impl Emulator for Eden {
         fs::write(user.join(KEEP_FILE), b"").map_err(io)
     }
 
+    fn seed_save(&mut self, title: TitleId, folder: &Path) -> Result<(), EmulatorError> {
+        if !folder.is_dir() {
+            return Err(EmulatorError::Io(format!(
+                "{} is not a folder",
+                folder.display()
+            )));
+        }
+        if self.session.is_some() && self.container_running() {
+            let upper = title.to_string().to_ascii_uppercase();
+            let inside = format!("/work/user/nand/user/save/0000000000000000/{ZERO_USER}/{upper}");
+            self.exec(&format!("mkdir -p {inside}"))?;
+            return docker_owned(&[
+                "cp".to_owned(),
+                format!("{}/.", folder.display()),
+                format!("{CONTAINER}:{inside}"),
+            ])
+            .map(|_| ());
+        }
+        let [save, _] = self.save_dirs(title);
+        copy_tree(folder, &save).map_err(io)
+    }
+
     fn save_files(&self, title: TitleId) -> Vec<SaveFile> {
         self.pull_nand();
         let mut files = Vec::new();
@@ -1465,6 +1501,20 @@ fn move_tree(source: &Path, dest: &Path) -> std::io::Result<()> {
         } else if fs::rename(&path, &target).is_err() {
             fs::copy(&path, &target)?;
             fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_tree(source: &Path, dest: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let target = dest.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)?;
         }
     }
     Ok(())
