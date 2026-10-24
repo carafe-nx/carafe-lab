@@ -58,7 +58,19 @@ name: string, } | { "step": "expectInput" } | { "step": "expectPointer" } | { "s
 /**
  * The fewest threads the probe must be able to hold.
  */
-min: number, } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
+min: number, } | { "step": "expectFile", 
+/**
+ * The file's name, such as `probe-registry.log`.
+ */
+name: string, 
+/**
+ * Texts the file must have.
+ */
+contains: Array<string>, 
+/**
+ * Texts the file must not have.
+ */
+absent?: Array<string>, } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
 /**
  * The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
  */

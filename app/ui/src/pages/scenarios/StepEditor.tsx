@@ -15,7 +15,7 @@ const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit"
 
 export const NEW_STEPS: Step["step"][] = [
   "launch", "waitFor", "wait", "press", "screenshot", "stacks", "expectChange",
-  "expectPattern", "expectScreen", "expectInput", "expectPointer", "expectThreads", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
+  "expectPattern", "expectScreen", "expectInput", "expectPointer", "expectThreads", "expectFile", "expectSave", "expectSaveKept", "expectPerformance", "randomPresses",
   "repeat", "ifScreen", "close",
 ];
 
@@ -46,6 +46,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "expectPointer" };
     case "expectThreads":
       return { step: "expectThreads", min: 30 };
+    case "expectFile":
+      return { step: "expectFile", name: "probe-registry.log", contains: [""] };
     case "expectSave":
       return { step: "expectSave" };
     case "expectSaveKept":
@@ -394,6 +396,35 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
           <span>{t("scenarios.sec")}</span>
           <label htmlFor={`${id}-seed`}>{t("steps.seed")}</label>
           <NumberInput id={`${id}-seed`} value={step.seed} onChange={(seed) => onChange({ ...step, seed })} />
+        </>
+      );
+    case "expectFile":
+      return (
+        <>
+          <input
+            id={`${id}-name`}
+            aria-label={t("steps.fileName")}
+            className={styles.text}
+            value={step.name}
+            onChange={(event) => onChange({ ...step, name: event.target.value.trim() })}
+          />
+          <label htmlFor={`${id}-contains`}>{t("steps.contains")}</label>
+          <input
+            id={`${id}-contains`}
+            className={styles.text}
+            value={step.contains.join(" | ")}
+            onChange={(event) => onChange({ ...step, contains: event.target.value.split(" | ") })}
+          />
+          <label htmlFor={`${id}-absent`}>{t("steps.absent")}</label>
+          <input
+            id={`${id}-absent`}
+            className={styles.text}
+            value={(step.absent ?? []).join(" | ")}
+            onChange={(event) => {
+              const absent = event.target.value ? event.target.value.split(" | ") : [];
+              onChange({ ...step, absent });
+            }}
+          />
         </>
       );
     case "expectThreads":

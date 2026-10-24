@@ -120,6 +120,9 @@ save data is still there, close it.
 - `expectThreads` — `min` (30 by default): the threads probe's log. At every point it measured, the probe could hold
   at least `min` threads; a second Direct3D 9 device asked for with every thread taken did not end the probe; the
   probe finished.
+- `expectFile` — `name`, `contains`, `absent`: a file the game wrote, found by name in its save data or logs, such as a
+  probe's log or the registry's `user.reg`, holds every text of `contains` and none of `absent`. It is read again for up
+  to 30 s until it fits; the launch's logs keep it as `file-<name>`.
 - `expectSave` — the game has written save data; remembered for `expectSaveKept`.
 - `expectSaveKept` — the remembered save data is still there and unchanged.
 - `expectPerformance` — the first launch's time to the first frame and median FPS against the game at the newest
@@ -182,6 +185,12 @@ that does not exist, for the error screen's missing-file case.
 
 The `expectThreads` step reads the log. The Eden Lab runs gives a program 96 threads, as the console does
 (`patches/eden/0050`).
+
+The registry probe, `probe-registry.exe`, reads `Width`, `Height`, `Language`, `Old`, `Edited`, `Added` and `Starts`
+under `HKCU\Software\CarafeProbe` and `InstallPath` under `HKLM\Software\CarafeProbe`, writes each as `value …` or
+`missing …` into `probe-registry.log` and on its window, and adds one to `Starts` at every start. Packed by Carafe with
+registry entries, it shows what reached the game; `expectFile` checks the log. Carafe's game registry is checked with it:
+the package's entries at the first start, then the changes made in the console menu after a restart.
 
 ## Results
 
@@ -308,7 +317,8 @@ emulator.
 For Claude and for quick looks, one call each:
 
 - `play <game>` builds the game if needed, launches it and keeps it running for `--minutes` (30 by default) or until
-  `stop`; it holds the emulator in the queue like any run;
+  `stop`; it holds the emulator in the queue like any run. `--nsp <file>` plays a ready NSP as that game instead of
+  building it;
 - `press <A+ZR>` presses buttons together in the running game, `--hold <s>` long;
 - `tap <x> <y>` touches the running game's screen at a point of 1280×720: Eden takes a click on its window for a
   touch, and Carafe moves the mouse cursor there;

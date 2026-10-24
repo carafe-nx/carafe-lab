@@ -31,6 +31,7 @@ use crate::report;
 const POLL: Duration = Duration::from_millis(500);
 const GLIMPSE_EVERY: Duration = Duration::from_secs(10);
 const PROBE_LOG_SETTLE: Duration = Duration::from_secs(10);
+const FILE_SETTLE: Duration = Duration::from_secs(30);
 
 /// Name of the folder in a launch's log folder with a small picture of the screen every ten seconds.
 pub const TIMELINE_DIR: &str = "timeline";
@@ -652,6 +653,11 @@ impl<'a> Runner<'a> {
             Step::ExpectPointer => self.expect_pointer(step),
             Step::Stacks { name } => self.stacks(step, name),
             Step::ExpectThreads { min } => self.expect_threads(step, *min),
+            Step::ExpectFile {
+                name,
+                contains,
+                absent,
+            } => self.expect_file(step, name, contains, absent),
             Step::RandomPresses { seconds, seed } => self.random_presses(step, *seconds, *seed),
             Step::Close { timeout } => self.close(step, *timeout),
             Step::Repeat { .. } | Step::IfScreen { .. } => self.result(
@@ -752,6 +758,73 @@ impl<'a> Runner<'a> {
                 self.result(step, Outcome::Fail, detail, None)
             }
             Err(error) => self.result(step, Outcome::Fail, error, None),
+        }
+    }
+
+    fn expect_file(
+        &mut self,
+        step: &Step,
+        name: &str,
+        contains: &[String],
+        absent: &[String],
+    ) -> StepResult {
+        let started = self.clock.now();
+        let mut text = self.emulator.find_file(self.title, name);
+        let verdict = |text: &Option<String>| {
+            text.as_ref().map(|text| {
+                let missing: Vec<&str> = contains
+                    .iter()
+                    .filter(|want| !text.contains(want.as_str()))
+                    .map(String::as_str)
+                    .collect();
+                let present: Vec<&str> = absent
+                    .iter()
+                    .filter(|unwanted| text.contains(unwanted.as_str()))
+                    .map(String::as_str)
+                    .collect();
+                (missing, present)
+            })
+        };
+        let fits = |verdict: &Option<(Vec<&str>, Vec<&str>)>| {
+            verdict
+                .as_ref()
+                .is_some_and(|(missing, present)| missing.is_empty() && present.is_empty())
+        };
+        while !fits(&verdict(&text)) && self.clock.now() - started < FILE_SETTLE {
+            self.clock.sleep(POLL);
+            text = self.emulator.find_file(self.title, name);
+        }
+        if let (Some(record), Some(text)) = (self.launches.last(), text.as_ref()) {
+            let _ = std::fs::write(
+                self.dir.join(&record.logs).join(format!("file-{name}")),
+                text,
+            );
+        }
+        match verdict(&text) {
+            None => self.result(
+                step,
+                Outcome::Fail,
+                format!("the game wrote no {name}"),
+                None,
+            ),
+            Some((missing, present)) if missing.is_empty() && present.is_empty() => {
+                let detail = format!(
+                    "{name} has all {} texts and none of {} unwanted",
+                    contains.len(),
+                    absent.len()
+                );
+                self.result(step, Outcome::Pass, detail, None)
+            }
+            Some((missing, present)) => {
+                let mut detail = format!("{name}:");
+                if !missing.is_empty() {
+                    detail.push_str(&format!(" missing {}", missing.join(" | ")));
+                }
+                if !present.is_empty() {
+                    detail.push_str(&format!(" unwanted {}", present.join(" | ")));
+                }
+                self.result(step, Outcome::Fail, detail, None)
+            }
         }
     }
 

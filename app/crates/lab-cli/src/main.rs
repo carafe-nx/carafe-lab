@@ -1018,7 +1018,10 @@ impl Lab {
             .into_iter()
             .next()
             .ok_or("no such game")?;
-        let mut planned = self.plan(game, game.name.clone(), &game.settings);
+        let mut planned = match self.args.nsp.first() {
+            Some(path) => self.plan_ready(Some(game), ready::read(path)?),
+            None => self.plan(game, game.name.clone(), &game.settings),
+        };
         planned.scenario = Scenario {
             steps: vec![
                 Step::Launch,

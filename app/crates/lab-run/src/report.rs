@@ -497,6 +497,10 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "The probe holds at least {min} threads",
             )
             .replace("{min}", &min.to_string()),
+        Step::ExpectFile { name, .. } => format!(
+            "{} {name}",
+            lang.pick("В файле есть нужное:", "The file holds what it should:")
+        ),
         Step::ExpectSave => lang
             .pick("Игра записала сохранение", "The game wrote save data")
             .to_owned(),

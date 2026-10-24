@@ -95,6 +95,21 @@ pub enum Step {
         #[serde(default = "default_min_threads")]
         min: u32,
     },
+    /// Checks that a file the game has written holds every text of `contains` and none of `absent`: a probe's log,
+    /// or the registry's `user.reg` in the save data. The file is looked for in the save data and the logs, and is
+    /// read again for a while until it fits.
+    #[serde(rename_all = "camelCase")]
+    ExpectFile {
+        /// The file's name, such as `probe-registry.log`.
+        name: String,
+        /// Texts the file must have.
+        #[serde(default)]
+        contains: Vec<String>,
+        /// Texts the file must not have.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[ts(as = "Option<Vec<String>>", optional)]
+        absent: Vec<String>,
+    },
     /// Checks that the game has written its save data and remembers it for [`Step::ExpectSaveKept`].
     ExpectSave,
     /// Checks that the save data remembered by [`Step::ExpectSave`] is still there and unchanged.
@@ -349,6 +364,17 @@ fn check_steps<'a>(
                 }
                 Step::ExpectPattern { name } if !screenshots.contains(&name.as_str()) => {
                     return Err(ScenarioError::UnknownScreenshot(number, name.clone()));
+                }
+                Step::ExpectFile {
+                    name,
+                    contains,
+                    absent,
+                } => {
+                    if name.trim().is_empty() || (contains.is_empty() && absent.is_empty()) {
+                        return Err(ScenarioError::Format(format!(
+                            "step {number} checks a file without a name or without texts"
+                        )));
+                    }
                 }
                 Step::ExpectSave => *remembered = true,
                 Step::ExpectSaveKept if !*remembered => {
@@ -704,6 +730,30 @@ mod tests {
         let json = r#"{"steps": [{"step": "launch"}, {"step": "press", "buttons": []}]}"#;
         assert!(matches!(
             Scenario::parse(json),
+            Err(ScenarioError::Format(_))
+        ));
+    }
+
+    #[test]
+    fn a_file_check_needs_a_name_and_texts() {
+        let json = r#"{"steps": [{"step": "expectFile", "name": "probe-registry.log", "contains": ["dword 1280"], "absent": ["value HKCU\\Old"]}]}"#;
+        let scenario = Scenario::parse(json).unwrap();
+        assert_eq!(
+            scenario.steps[0],
+            Step::ExpectFile {
+                name: "probe-registry.log".to_owned(),
+                contains: vec!["dword 1280".to_owned()],
+                absent: vec!["value HKCU\\Old".to_owned()],
+            }
+        );
+        let nameless = r#"{"steps": [{"step": "expectFile", "name": " ", "contains": ["x"]}]}"#;
+        assert!(matches!(
+            Scenario::parse(nameless),
+            Err(ScenarioError::Format(_))
+        ));
+        let empty = r#"{"steps": [{"step": "expectFile", "name": "a.log"}]}"#;
+        assert!(matches!(
+            Scenario::parse(empty),
             Err(ScenarioError::Format(_))
         ));
     }

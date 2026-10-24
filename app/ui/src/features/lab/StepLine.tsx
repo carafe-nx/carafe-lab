@@ -70,6 +70,10 @@ export function StepParams({ step }: { step: Step }) {
     case "expectThreads":
       params.push(`≥ ${step.min}`);
       break;
+    case "expectFile":
+      params.push(step.name);
+      params.push(t("steps.textCount", { count: step.contains.length + (step.absent?.length ?? 0) }));
+      break;
     case "ifScreen":
       params.push(step.reference || "—");
       break;

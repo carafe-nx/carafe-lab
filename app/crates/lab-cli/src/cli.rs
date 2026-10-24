@@ -22,7 +22,8 @@ Usage:
   carafe-lab runs [--json]         past runs and the one going, newest first
   carafe-lab stop [id]             stops the run holding the emulator, or the run with this queue id
   carafe-lab play <game>           launches the game and keeps it running for --minutes (default 30) or
-                                   until stop, for hands or for the commands below
+                                   until stop, for hands or for the commands below; --nsp <file> plays a
+                                   ready NSP as the game
   carafe-lab press <A+B…>          presses buttons together in the running game; --hold <s>, default 0.15
   carafe-lab tap <x> <y>           taps the running game's screen at a point of 1280×720, as a finger would
   carafe-lab screen <file.png>     saves the running game's screen
@@ -62,7 +63,7 @@ Options:
                       quote them as one value
   --like <run>        run the games of this past run again with the runtime and Eden image it ran with;
                       every run keeps them from now on
-  --nsp <file>        run: a ready NSP made by Carafe instead of the games of lab.json, as it is, with the
+  --nsp <file>        run, play: a ready NSP made by Carafe instead of the games of lab.json, as it is, with the
                       runtime and settings inside it; give it once for every NSP
   --runtime <file>    run: pack with this runtime archive instead of the Carafe checkout's
   --good <rev>        bisect: a Carafe commit or tag where the game worked
