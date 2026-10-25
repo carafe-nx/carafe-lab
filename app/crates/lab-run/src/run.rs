@@ -154,11 +154,18 @@ pub trait Emulator {
     }
 
     /// Moves the logs of `title` from the emulator's SD card into `dest`, so the next launch starts without them.
+    /// With `keep_caches` the caches the runtime keeps on the SD card stay for the next launch, and `dest` gets
+    /// their list with sizes; without it they go into `dest` too.
     ///
     /// # Errors
     ///
     /// [`EmulatorError::Io`] if the files cannot be moved.
-    fn take_logs(&mut self, title: TitleId, dest: &Path) -> Result<(), EmulatorError>;
+    fn take_logs(
+        &mut self,
+        title: TitleId,
+        dest: &Path,
+        keep_caches: bool,
+    ) -> Result<(), EmulatorError>;
 
     /// Empties the device save data of `title`, so a scenario starts like a first launch.
     ///
@@ -891,9 +898,9 @@ impl<'a> Runner<'a> {
         self.finish_launch();
         let number = self.launches.len() + 1;
         if number == 1
-            && let Err(error) = self
-                .emulator
-                .take_logs(self.title, &self.dir.join("before-launch-1"))
+            && let Err(error) =
+                self.emulator
+                    .take_logs(self.title, &self.dir.join("before-launch-1"), false)
         {
             return self.result(step, Outcome::Fail, error.to_string(), None);
         }
@@ -1552,7 +1559,7 @@ impl<'a> Runner<'a> {
         let samples = self.emulator.launch_resources();
         record.resources = resources::summarize(&samples);
         let dest = self.dir.join(&record.logs);
-        let _ = self.emulator.take_logs(self.title, &dest);
+        let _ = self.emulator.take_logs(self.title, &dest, true);
         if dest.join("logs").join(PROBE_THREADS_LOG).exists()
             && let Some(log) = self.emulator.find_file(self.title, PROBE_THREADS_LOG)
         {
@@ -1837,7 +1844,12 @@ mod tests {
         fn logs(&self, _title: TitleId) -> GameLogs {
             self.current.clone()
         }
-        fn take_logs(&mut self, _title: TitleId, _dest: &Path) -> Result<(), EmulatorError> {
+        fn take_logs(
+            &mut self,
+            _title: TitleId,
+            _dest: &Path,
+            _keep_caches: bool,
+        ) -> Result<(), EmulatorError> {
             Ok(())
         }
         fn clear_save(&mut self, _title: TitleId) -> Result<(), EmulatorError> {
@@ -1908,8 +1920,13 @@ mod tests {
         fn logs(&self, title: TitleId) -> GameLogs {
             self.0.borrow().logs(title)
         }
-        fn take_logs(&mut self, title: TitleId, dest: &Path) -> Result<(), EmulatorError> {
-            self.0.borrow_mut().take_logs(title, dest)
+        fn take_logs(
+            &mut self,
+            title: TitleId,
+            dest: &Path,
+            keep_caches: bool,
+        ) -> Result<(), EmulatorError> {
+            self.0.borrow_mut().take_logs(title, dest, keep_caches)
         }
         fn clear_save(&mut self, title: TitleId) -> Result<(), EmulatorError> {
             self.0.borrow_mut().clear_save(title)

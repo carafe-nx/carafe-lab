@@ -49,6 +49,8 @@ const FRAME_WAIT: Duration = Duration::from_secs(5);
 const CONTAINER_END_FILE: &str = "container-end.log";
 const SESSION_FILE: &str = "session.log";
 const RESOURCES_FILE: &str = "resources.log";
+const CACHE_ROOT: &str = "drive_c";
+const CACHES_FILE: &str = "caches.txt";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_GRACE: Duration = Duration::from_secs(15);
@@ -1187,7 +1189,12 @@ impl Emulator for Eden {
         self.logs_of_dir(&self.logs_dir(title))
     }
 
-    fn take_logs(&mut self, title: TitleId, dest: &Path) -> Result<(), EmulatorError> {
+    fn take_logs(
+        &mut self,
+        title: TitleId,
+        dest: &Path,
+        keep_caches: bool,
+    ) -> Result<(), EmulatorError> {
         let emulator_log = self.user_dir.join("log").join("eden_log.txt");
         if emulator_log.is_file() {
             fs::create_dir_all(dest).map_err(io)?;
@@ -1225,7 +1232,10 @@ impl Emulator for Eden {
         if !source.exists() {
             return Ok(());
         }
-        move_tree(&source, dest).map_err(io)
+        if !keep_caches {
+            return move_tree(&source, dest).map_err(io);
+        }
+        move_logs_keep_caches(&source, dest).map_err(io)
     }
 
     fn clear_save(&mut self, title: TitleId) -> Result<(), EmulatorError> {
@@ -1506,6 +1516,48 @@ fn move_tree(source: &Path, dest: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+fn move_logs_keep_caches(source: &Path, dest: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = dest.join(entry.file_name());
+        if entry.file_name() == CACHE_ROOT {
+            let mut files = Vec::new();
+            list_sizes(&path, &path, &mut files);
+            files.sort();
+            let lines: String = files
+                .iter()
+                .map(|(name, size)| format!("{size} {name}\n"))
+                .collect();
+            fs::write(dest.join(CACHES_FILE), lines)?;
+        } else if entry.file_type()?.is_dir() {
+            move_tree(&path, &target)?;
+            let _ = fs::remove_dir(&path);
+        } else if path.extension().is_some_and(|ext| ext == "shm") {
+            let _ = fs::remove_file(&path);
+        } else if fs::rename(&path, &target).is_err() {
+            fs::copy(&path, &target)?;
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn list_sizes(root: &Path, dir: &Path, files: &mut Vec<(String, u64)>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            list_sizes(root, &path, files);
+        } else if let (Ok(relative), Ok(meta)) = (path.strip_prefix(root), entry.metadata()) {
+            files.push((relative.to_string_lossy().replace('\\', "/"), meta.len()));
+        }
+    }
+}
+
 fn copy_tree(source: &Path, dest: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(source)? {
@@ -1723,6 +1775,33 @@ mod tests {
         );
         assert!(!root.join("dest").join("wine-nx-session-1.shm").exists());
         assert!(!source.join("carafe-overlay.log").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn caches_stay_for_the_next_launch_and_are_listed() {
+        let root = std::env::temp_dir().join(format!("carafe-lab-caches-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let source = root.join("source");
+        let cache = source
+            .join(CACHE_ROOT)
+            .join("users")
+            .join("u")
+            .join("fex-emu");
+        fs::create_dir_all(&cache).unwrap();
+        fs::create_dir_all(source.join("logs")).unwrap();
+        fs::write(source.join("logs").join("autorun_runtime.log"), "b").unwrap();
+        fs::write(cache.join("RWCacheDB.foz"), "12345").unwrap();
+        let dest = root.join("dest");
+        move_logs_keep_caches(&source, &dest).unwrap();
+        assert!(dest.join("logs").join("autorun_runtime.log").is_file());
+        assert!(!source.join("logs").join("autorun_runtime.log").exists());
+        assert!(cache.join("RWCacheDB.foz").is_file());
+        assert!(!dest.join(CACHE_ROOT).exists());
+        assert_eq!(
+            fs::read_to_string(dest.join(CACHES_FILE)).unwrap(),
+            "5 users/u/fex-emu/RWCacheDB.foz\n"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 
