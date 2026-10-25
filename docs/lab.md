@@ -202,6 +202,12 @@ under `HKCU\Software\CarafeProbe` and `InstallPath` under `HKLM\Software\CarafeP
 registry entries, it shows what reached the game; `expectFile` checks the log. Carafe's game registry is checked with it:
 the package's entries at the first start, then the changes made in the console menu after a restart.
 
+The files probe, `probe-files.exe`, does what FEX's disk cache does with its files, in a folder that the overlay keeps
+on the SD card (`%LOCALAPPDATA%\fex-emu\probe`) and in one that goes to save data (`%LOCALAPPDATA%\probe-files`):
+opens a file, takes an exclusive lock far past its end and one at its start, writes at given offsets, reads back and
+unlocks. Each step is a line `<where> <step> ok` or `<where> <step> failed <error>` in `probe-files.log` and on its
+window; `scenarios/files-check.json` keeps the log.
+
 ## Results
 
 Each run gets `<work>/runs/<date>/`:
@@ -217,7 +223,10 @@ Each run gets `<work>/runs/<date>/`:
   Eden's log of that launch only, `frametimes.csv` (the time of every frame in milliseconds, without the waits for
   the display, from Eden's `record_frame_times`; the loading screen counts too), `resources.log` (the container's
   memory without the file cache and its processor time, once a second), `timeline/` (a 640×360 picture of the
-  screen every 10 s while a step waits, named by the second of the launch) and `problems.json`: the error and
+  screen every 10 s while a step waits, named by the second of the launch), `caches.txt` (the files the runtime keeps
+  on the SD card under `drive_c/`, DXVK's shader cache and FEX's code cache, with their sizes: they stay for the next
+  launch of the run, as on a console, and go with the logs before the first launch of the next run) and
+  `problems.json`: the error and
   warning lines of Eden, the runtime, Wine, DXVK and Mesa, lines that differ only in numbers counted as one.
   `summary.json` keeps the peak memory, the processor use and the counts for the History screen, which lists a
   game's problems and highlights those its run before did not have.
@@ -284,8 +293,8 @@ emulator.
   `Booting game` line, their own clock's zero) and the container's memory and processor every 5 s. A line without a
   time keeps the time of the line before it.
 - `--video low` sends the live picture at about five frames a second, `--video off` sends none (`CARAFE_VIDEO` in
-  the container), so the video takes little or nothing from the game while it is measured; A/B runs from the window
-  use `low`.
+  the container), so the video takes little or nothing from the game while it is measured. Runs from the window,
+  A/B ones included, send the full picture.
 - The Run screen draws the live picture itself, on a canvas in the Switch frame, with the noVNC client connected to
   the container's websockify on port 6080. The window serves the client under its own `novnc` scheme from a copy of
   `/usr/share/novnc/core` and `vendor` taken out of the Eden image the first time into `<work>/novnc`, so no package

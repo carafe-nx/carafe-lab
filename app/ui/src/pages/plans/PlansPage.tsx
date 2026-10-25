@@ -60,7 +60,6 @@ export function PlansPage() {
     abRuntime: string | null = null,
   ) => {
     setError(null);
-    const measured = ab !== null || abRuntime !== null;
     api
       .startRun(
         set,
@@ -70,7 +69,7 @@ export function PlansPage() {
         ab,
         clean,
         scenario || null,
-        measured ? "low" : null,
+        null,
         null,
         diagnostics,
         abRuntime,
