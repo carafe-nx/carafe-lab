@@ -1,5 +1,5 @@
 OUT ?= $(CURDIR)/build
-PROBES := input gdi d3d9 d3d11 d3d12 gl screen threads registry
+PROBES := input gdi d3d9 d3d11 d3d12 gl screen threads registry files
 ARCHES := i686 x86_64
 
 LIBS_input :=
@@ -11,6 +11,7 @@ LIBS_gl := -lopengl32 -lgdi32
 LIBS_screen := -lddraw -ldxguid
 LIBS_threads := -ld3d9
 LIBS_registry := -ladvapi32
+LIBS_files :=
 
 EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe)) \
 	$(OUT)/i686/probe-missing.exe
