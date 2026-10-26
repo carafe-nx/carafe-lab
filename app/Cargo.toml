@@ -13,10 +13,10 @@ publish = false
 lab-core = { path = "crates/lab-core" }
 lab-run = { path = "crates/lab-run" }
 lab-eden = { path = "crates/lab-eden" }
-carafe-core = { path = "../external/carafe/app/crates/carafe-core" }
-carafe-folder = { path = "../external/carafe/app/crates/carafe-folder" }
-carafe-keys = { path = "../external/carafe/app/crates/carafe-keys" }
-carafe-pack = { path = "../external/carafe/app/crates/carafe-pack" }
+carafe-core = { path = "../../carafe/app/crates/carafe-core" }
+carafe-folder = { path = "../../carafe/app/crates/carafe-folder" }
+carafe-keys = { path = "../../carafe/app/crates/carafe-keys" }
+carafe-pack = { path = "../../carafe/app/crates/carafe-pack" }
 flate2 = "1.1"
 fs4 = "1.1"
 serde = { version = "1", features = ["derive"] }
