@@ -9,10 +9,6 @@ import styles from "@/shared/ui/lab.module.css";
 import plans from "./PlansPage.module.css";
 
 const PRESETS: { key: string; json: string }[] = [
-  { key: "box64", json: '{ "system": { "cpu": "box64" } }' },
-  { key: "fex", json: '{ "system": { "cpu": "fex" } }' },
-  { key: "gplasync", json: '{ "graphics": { "dxvkSource": "gplasync" } }' },
-  { key: "twoCores", json: '{ "system": { "fourCores": false } }' },
   { key: "noVsync", json: '{ "graphics": { "vsync": false } }' },
   { key: "hudOff", json: '{ "graphics": { "hud": "off" } }' },
 ];

@@ -766,7 +766,7 @@ fn same_path(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use carafe_core::ports::ExecutableInfo;
-    use carafe_core::settings::{CpuEmulator, InputMode};
+    use carafe_core::settings::{InputMode, WindowOutput};
     use serde_json::json;
 
     use super::*;
@@ -840,10 +840,10 @@ mod tests {
     #[test]
     fn settings_merge_over_the_defaults() {
         let settings = merged_settings(Some(
-            &json!({"system": {"cpu": "box64"}, "input": {"mode": "keyboardMouse"}}),
+            &json!({"system": {"windows": "compositor"}, "input": {"mode": "keyboardMouse"}}),
         ))
         .unwrap();
-        assert_eq!(settings.system.cpu, CpuEmulator::Box64);
+        assert_eq!(settings.system.windows, WindowOutput::Compositor);
         assert_eq!(settings.input.mode, InputMode::KeyboardMouse);
         assert_eq!(settings.graphics, AutorunSettings::default().graphics);
         assert_eq!(settings.input.keys.len(), 24);
@@ -851,9 +851,9 @@ mod tests {
 
     #[test]
     fn invalid_settings_name_their_game() {
-        let sarek = r#"{"name": "A", "folder": "x", "settings": {"graphics": {"direct3d": "dxvkVkd3d", "dxvkSource": "sarek"}}}"#;
-        assert!(matches!(config(sarek, ""), Err(ConfigError::Settings(name, _)) if name == "A"));
-        let unknown = r#"{"name": "A", "folder": "x", "settings": {"system": {"cpu": "qemu"}}}"#;
+        let limit = r#"{"name": "A", "folder": "x", "settings": {"graphics": {"frameLimit": 1000}}}"#;
+        assert!(matches!(config(limit, ""), Err(ConfigError::Settings(name, _)) if name == "A"));
+        let unknown = r#"{"name": "A", "folder": "x", "settings": {"system": {"windows": "qemu"}}}"#;
         assert!(matches!(
             config(unknown, ""),
             Err(ConfigError::Settings(..))

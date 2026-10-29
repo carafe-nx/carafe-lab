@@ -368,10 +368,6 @@
     "hint": "One game in two variants, alternating: A with its own settings, B with the changes below. The run ends with a verdict on the time to the first frame.",
     "variantB": "Variant B",
     "presets": {
-      "box64": "Box64 instead of FEX",
-      "fex": "FEX instead of Box64",
-      "gplasync": "DXVK gplasync",
-      "twoCores": "2 cores instead of 4",
       "noVsync": "no vsync",
       "hudOff": "no HUD"
     },

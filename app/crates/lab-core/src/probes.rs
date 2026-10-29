@@ -1,7 +1,7 @@
 //! The probe runs: which probe program and bitness each combination of settings is tried with.
 
 use carafe_core::record::Arch;
-use carafe_core::settings::{AutorunSettings, Binding, Direct3d, InputMode, SwitchButton};
+use carafe_core::settings::{AutorunSettings, Binding, InputMode, SwitchButton};
 
 use crate::matrix::Combination;
 use crate::scenario::Scenario;
@@ -60,20 +60,21 @@ pub struct ProbeRun {
 
 /// Assigns a graphics probe and a bitness to every combination.
 ///
-/// The probe follows the combination's Direct3D choice, so every API meets every setting it goes through:
-/// DXVK takes Direct3D 11, 9, OpenGL and GDI in turn; DXVK with VKD3D takes Direct3D 12 and 11; WineD3D takes
-/// Direct3D 9, 11, OpenGL and GDI. Bitness alternates.
+/// The probes take Direct3D 12, 11, 9, OpenGL and GDI in turn, so every API meets every setting it goes through.
+/// Bitness alternates.
 #[must_use]
 pub fn graphics_runs(combinations: &[Combination], first_frame_timeout: u32) -> Vec<ProbeRun> {
     combinations
         .iter()
         .enumerate()
         .map(|(index, combination)| {
-            let candidates: &[Probe] = match combination.settings.graphics.direct3d {
-                Direct3d::Dxvk => &[Probe::D3d11, Probe::D3d9, Probe::Gl, Probe::Gdi],
-                Direct3d::DxvkVkd3d => &[Probe::D3d12, Probe::D3d11],
-                Direct3d::Wine => &[Probe::D3d9, Probe::D3d11, Probe::Gl, Probe::Gdi],
-            };
+            let candidates: &[Probe] = &[
+                Probe::D3d11,
+                Probe::D3d9,
+                Probe::D3d12,
+                Probe::Gl,
+                Probe::Gdi,
+            ];
             let probe = candidates[index % candidates.len()];
             let arch = if index % 2 == 0 { Arch::X64 } else { Arch::X86 };
             ProbeRun {
@@ -180,20 +181,6 @@ fn arch_name(arch: Arch) -> &'static str {
 mod tests {
     use super::*;
     use crate::matrix;
-
-    #[test]
-    fn d3d12_runs_only_with_vkd3d() {
-        for run in graphics_runs(&matrix::pairwise(), 600) {
-            if run.probe == Probe::D3d12 {
-                assert_eq!(
-                    run.settings.graphics.direct3d,
-                    Direct3d::DxvkVkd3d,
-                    "{}",
-                    run.label
-                );
-            }
-        }
-    }
 
     #[test]
     fn every_graphics_api_and_both_bitnesses_are_tried() {

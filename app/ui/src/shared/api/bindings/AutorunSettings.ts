@@ -2,6 +2,8 @@
 import type { DebugSettings } from "./DebugSettings";
 import type { GraphicsSettings } from "./GraphicsSettings";
 import type { InputSettings } from "./InputSettings";
+import type { OptionValues } from "./OptionValues";
+import type { RegistrySettings } from "./RegistrySettings";
 import type { SystemSettings } from "./SystemSettings";
 
 /**
@@ -25,4 +27,12 @@ system: SystemSettings,
 /**
  * Debugging.
  */
-debug: DebugSettings, };
+debug: DebugSettings, 
+/**
+ * Values of the catalog's settings without a typed field: FEX and DXVK options.
+ */
+options: OptionValues, 
+/**
+ * Entries laid over the game's Windows registry and the console menu rows that change it.
+ */
+registry: RegistrySettings, };
