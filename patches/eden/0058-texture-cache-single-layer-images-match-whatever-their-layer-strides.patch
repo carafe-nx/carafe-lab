@@ -1,0 +1,20 @@
+Carafe Lab: two single-layer images match whatever their layer strides. The texture cache compared layer strides
+before joining or aliasing overlapping images, and a single-level image the GPU draws into has a layer stride of one
+level while the same memory sampled as a texture with a mip chain has a stride of the whole chain. The two never
+matched, the texture was filled from guest memory instead of what the GPU drew, and textures a game renders and
+samples later, such as NFSU2's road reflection, read black. With one layer there is no other layer to stride to.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/texture_cache/util.cpp
++++ b/src/video_core/texture_cache/util.cpp
+@@ -1174,6 +1174,10 @@ std::optional<OverlapResult> ResolveOverlap(const ImageInfo& new_info, GPUVAddr
+ }
+ 
+ bool IsLayerStrideCompatible(const ImageInfo& lhs, const ImageInfo& rhs) {
++    if (lhs.type != ImageType::e3D && rhs.type != ImageType::e3D && lhs.resources.layers == 1 &&
++        rhs.resources.layers == 1) {
++        return true;
++    }
+     // If either of the layer strides is zero, we can assume they are compatible
+     // These images generally come from rendertargets
+     if (lhs.layer_stride == 0) {
