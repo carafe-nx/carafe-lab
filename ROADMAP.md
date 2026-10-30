@@ -12,6 +12,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 ## Planned
 
 - [ ] **`feature` Live passes: a card per game, a paused player, the pass written down as the game's scenario**
+- [ ] `bug` A recorded point matches a different picture: two random OpenTTD maps differ by under 12, the default tolerance
+- [ ] `research` Eden logs "already exists" when Wine renames a registry file over the old one: check the registry still keeps changes
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
 - [ ] `bug` "No slower than the last version" compares runs of different scenarios, such as a hands-on session in the menu against the standard one
