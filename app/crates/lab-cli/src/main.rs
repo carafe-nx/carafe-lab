@@ -29,6 +29,7 @@ use lab_core::milestones::Launch;
 use lab_core::perf;
 use lab_core::probes::{self, ProbeRun};
 use lab_core::problems;
+use lab_core::recording;
 use lab_core::scenario::{Milestone, Scenario, Step};
 use lab_core::time::Utc;
 use lab_core::versions;
@@ -53,6 +54,8 @@ const PERF_WINDOW_MS: u64 = 10_000;
 const LOG_PROBLEMS_SHOWN: usize = 15;
 const KEPT_IMAGES: &str = "carafe-lab-eden-kept";
 const REFERENCES_DIR: &str = "references";
+const SCENARIOS_DIR: &str = "scenarios";
+const RECORDING_FILE: &str = "recording.jsonl";
 const RUNTIME_VERSION: &str = match option_env!("CARAFE_RUNTIME_VERSION") {
     Some(version) => version,
     None => "dev",
@@ -130,6 +133,12 @@ fn start(args: Args) -> Result<ExitCode, String> {
         Command::Stop { id } => return stop_run(&config, id.as_deref()),
         Command::Perf => return show_perf(&config, args.json),
         Command::Tidy => return tidy_runs(&config, args.apply, args.json),
+        Command::Record { name } => {
+            let name = name
+                .as_deref()
+                .ok_or("record needs a name for the scenario, such as nfsu-race")?;
+            return save_recording(&config, name);
+        }
         Command::Bisect { game } => {
             let game = game
                 .as_deref()
@@ -266,6 +275,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         | Command::Nsp { .. }
         | Command::Release { .. }
         | Command::Bisect { .. }
+        | Command::Record { .. }
         | Command::Tidy => Ok(ExitCode::SUCCESS),
     }
 }
@@ -458,6 +468,74 @@ fn show_nsp(config: &Config, file: &Path, json: bool) -> Result<ExitCode, String
     );
     if let Some(game) = game {
         println!("in lab.json as {game}");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis().try_into().unwrap_or(u64::MAX))
+}
+
+fn record(work: &Path, event: &recording::Event, fresh: bool) {
+    let Ok(line) = serde_json::to_string(event) else {
+        return;
+    };
+    let path = work.join(RECORDING_FILE);
+    let file = if fresh {
+        fs::File::create(&path)
+    } else {
+        fs::OpenOptions::new().create(true).append(true).open(&path)
+    };
+    if let Ok(mut file) = file {
+        use std::io::Write as _;
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn save_recording(config: &Config, name: &str) -> Result<ExitCode, String> {
+    let plain = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !plain {
+        return Err(format!(
+            "{name}: a scenario's name takes letters, digits, - and _"
+        ));
+    }
+    let text = fs::read_to_string(config.work.join(RECORDING_FILE))
+        .map_err(|_| "nothing is recorded: start a game with carafe-lab play <game>".to_owned())?;
+    let events = recording::parse(&text);
+    let game = events.iter().find_map(|event| match event {
+        recording::Event::Start { game, .. } => Some(game.clone()),
+        _ => None,
+    });
+    let (scenario, points) = recording::scenario(&events, name, config.timeout);
+    scenario.check().map_err(|error| error.to_string())?;
+    for point in &points {
+        let dest = config.work.join(REFERENCES_DIR).join(&point.reference);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::copy(&point.file, &dest).map_err(|error| format!("{}: {error}", point.file))?;
+    }
+    let file = config.work.join(SCENARIOS_DIR).join(format!("{name}.json"));
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(&scenario).map_err(|error| error.to_string())?;
+    fs::write(&file, json + "\n").map_err(|error| format!("{}: {error}", file.display()))?;
+    println!(
+        "{}: {} steps, {} points",
+        file.display(),
+        scenario.steps.len(),
+        points.len()
+    );
+    if let Some(game) = game {
+        println!(
+            "replay: carafe-lab run --games \"{game}\" --scenario {SCENARIOS_DIR}/{name}.json"
+        );
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -1115,6 +1193,14 @@ impl Lab {
             ],
         };
         let what = format!("play {}", game.name);
+        record(
+            &config.work,
+            &recording::Event::Start {
+                at: unix_ms(),
+                game: game.name.clone(),
+            },
+            true,
+        );
         self.execute(vec![planned], &what)
     }
 
@@ -1136,6 +1222,22 @@ impl Lab {
             .collect::<Result<_, _>>()?;
         self.eden.join_running();
         let paused = self.eden.paused();
+        let hold = self.args.hold_ms as f32 / 1000.0;
+        let after = if paused {
+            self.args.after_ms as f32 / 1000.0
+        } else {
+            0.0
+        };
+        record(
+            &config.work,
+            &recording::Event::Press {
+                at: unix_ms(),
+                buttons: buttons.clone(),
+                hold,
+                after,
+            },
+            false,
+        );
         if paused {
             self.eden
                 .set_paused(false)
@@ -1164,6 +1266,13 @@ impl Lab {
         self.eden
             .set_paused(paused)
             .map_err(|error| error.to_string())?;
+        let at = unix_ms();
+        let event = if paused {
+            recording::Event::Pause { at }
+        } else {
+            recording::Event::Resume { at }
+        };
+        record(&config.work, &event, false);
         println!("{}", if paused { "paused" } else { "resumed" });
         Ok(ExitCode::SUCCESS)
     }
@@ -1231,6 +1340,15 @@ impl Lab {
         self.eden
             .screenshot(file)
             .map_err(|error| error.to_string())?;
+        let whole = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+        record(
+            &config.work,
+            &recording::Event::Screen {
+                at: unix_ms(),
+                file: whole.display().to_string(),
+            },
+            false,
+        );
         println!("{}", file.display());
         Ok(ExitCode::SUCCESS)
     }

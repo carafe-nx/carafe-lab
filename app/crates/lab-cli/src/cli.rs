@@ -29,6 +29,9 @@ Usage:
                                    stands again
   carafe-lab pause                 pauses the running game, so the next move can wait as long as it takes
   carafe-lab resume                lets the paused game go on
+  carafe-lab record <name>         writes the pass since play down as scenarios/<name>.json: each screen
+                                   taken becomes a point the replay waits for, with its picture in
+                                   references/<name>/; presses keep the game time between them
   carafe-lab tap <x> <y>           taps the running game's screen at a point of 1280×720, as a finger would
   carafe-lab screen <file.png>     saves the running game's screen, paused or not
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
@@ -138,6 +141,11 @@ pub enum Command {
     Pause,
     /// Let the paused game go on.
     Resume,
+    /// Write the pass recorded since `play` down as a scenario.
+    Record {
+        /// The scenario's name.
+        name: Option<String>,
+    },
     /// Show the emulator's recent performance.
     Perf,
     /// Show the running game's stages and the problems of its logs.
@@ -272,6 +280,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("screen") => Command::Screen { file: None },
         Some("pause") => Command::Pause,
         Some("resume") => Command::Resume,
+        Some("record") => Command::Record { name: None },
         Some("perf") => Command::Perf,
         Some("logs") => Command::Logs,
         Some("tidy") => Command::Tidy,
@@ -442,6 +451,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 Command::Press { buttons } if buttons.is_none() => {
                     *buttons = Some(other.to_owned())
                 }
+                Command::Record { name } if name.is_none() => *name = Some(other.to_owned()),
                 Command::Tap { x, y } if x.is_none() || y.is_none() => {
                     let value = number(other, other.to_owned(), "a whole number of pixels")?;
                     if x.is_none() {

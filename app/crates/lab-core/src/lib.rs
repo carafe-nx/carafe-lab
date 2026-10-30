@@ -22,6 +22,7 @@ pub mod picture;
 pub mod pointer_check;
 pub mod probes;
 pub mod problems;
+pub mod recording;
 pub mod redact;
 pub mod resources;
 pub mod roadmap;

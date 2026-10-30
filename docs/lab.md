@@ -363,7 +363,12 @@ For Claude and for quick looks, one call each:
   who looks at the screen and decides what to press gets all the time it needs;
 - `tap <x> <y>` touches the running game's screen at a point of 1280×720: Eden takes a click on its window for a
   touch, and Carafe moves the mouse cursor there;
-- `screen <file.png>` saves the running game's screen;
+- `screen <file.png>` saves the running game's screen, paused or not;
+- `record <name>` writes the pass since `play` down as `<work>/scenarios/<name>.json` (decision 9). `play` starts
+  `<work>/recording.jsonl` afresh, and `press`, `screen`, `pause` and `resume` add to it. In the scenario each
+  picture taken becomes a `waitForScreen` on it, copied to `<work>/references/<name>/point-<n>.png`; each press keeps
+  the time the game ran before it, and time it stood paused does not count. Start a pass with a picture, so the
+  replay knows where the first press goes;
 - `perf` prints the median and worst-tenth FPS and the speed over the last 10 seconds; `--json` prints the readings.
 - `logs` prints how far the running game got (loading screen, first frame, stalls) and the error and warning lines of
   Eden's log since its boot, the overlay's and the runtime's, grouped; `--json` prints the milestones and every group.
