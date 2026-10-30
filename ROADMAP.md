@@ -12,6 +12,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 ## Planned
 
 - [ ] **`feature` Live passes: a card per game, a paused player, the pass written down as the game's scenario**
+- [ ] `bug` While Carafe's on-screen keyboard is open over a Vulkan game, Eden shows the whole frame with red and blue swapped
 - [ ] `bug` A recorded point matches a different picture: two random OpenTTD maps differ by under 12, the default tolerance
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
