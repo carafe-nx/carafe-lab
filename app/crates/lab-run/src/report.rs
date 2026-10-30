@@ -516,6 +516,7 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "No slower than the last version",
             )
             .to_owned(),
+        Step::Tap { x, y } => format!("{} {x}, {y}", lang.pick("Касание", "Touch")),
         Step::WaitForScreen { reference, .. } => format!(
             "{} {reference}",
             lang.pick("Ждать экран", "Wait for the screen")

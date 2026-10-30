@@ -7,12 +7,14 @@ export function stepKind(step: Step): string {
   switch (step.step) {
     case "launch":
     case "press":
+    case "tap":
     case "screenshot":
     case "stacks":
     case "close":
       return styles.kindAct ?? "";
     case "waitFor":
     case "wait":
+    case "waitForScreen":
       return styles.kindWait ?? "";
     default:
       return styles.kindCheck ?? "";
@@ -43,6 +45,9 @@ export function StepParams({ step }: { step: Step }) {
     case "press":
       params.push(step.buttons.join(" + "));
       if (step.hold !== 0.15) params.push(t("units.seconds", { count: step.hold }));
+      break;
+    case "tap":
+      params.push(`${step.x}, ${step.y}`);
       break;
     case "screenshot":
     case "stacks":

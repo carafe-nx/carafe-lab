@@ -14,7 +14,7 @@ export const BUTTONS: SwitchButton[] = [
 const MILESTONES: Milestone[] = ["wine", "loadingScreen", "firstFrame", "commit", "programEnded", "errorScreen"];
 
 export const NEW_STEPS: Step["step"][] = [
-  "launch", "waitFor", "wait", "press", "screenshot", "stacks", "expectChange",
+  "launch", "waitFor", "wait", "press", "tap", "screenshot", "stacks", "expectChange",
   "expectPattern", "expectScreen", "waitForScreen", "expectInput", "expectPointer", "expectThreads", "expectFile", "expectSave", "expectSaveKept", "expectPerformance", "expectFps", "randomPresses",
   "repeat", "ifScreen", "close",
 ];
@@ -30,6 +30,8 @@ export function newStep(kind: Step["step"], steps: Step[]): Step {
       return { step: "wait", seconds: 5 };
     case "press":
       return { step: "press", buttons: ["A"], hold: 0.15 };
+    case "tap":
+      return { step: "tap", x: 640, y: 360 };
     case "screenshot":
       return { step: "screenshot", name: `shot-${shots.length + 1}` };
     case "stacks":
@@ -294,6 +296,15 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
         <>
           <NumberInput id={`${id}-seconds`} value={step.seconds} step={0.5} onChange={(seconds) => onChange({ ...step, seconds })} />
           <span>{t("scenarios.sec")}</span>
+        </>
+      );
+    case "tap":
+      return (
+        <>
+          <label htmlFor={`${id}-x`}>x</label>
+          <NumberInput id={`${id}-x`} value={step.x} onChange={(x) => onChange({ ...step, x })} />
+          <label htmlFor={`${id}-y`}>y</label>
+          <NumberInput id={`${id}-y`} value={step.y} onChange={(y) => onChange({ ...step, y })} />
         </>
       );
     case "press":

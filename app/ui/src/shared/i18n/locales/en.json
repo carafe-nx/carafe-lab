@@ -84,6 +84,7 @@
     "waitFor": "Wait for",
     "wait": "Pause",
     "press": "Press",
+    "tap": "Touch",
     "screenshot": "Screenshot",
     "stacks": "Thread stacks",
     "expectChange": "Screen changed",

@@ -46,6 +46,18 @@ pub enum Event {
         /// Seconds the paused game went on after the press; `0` when it was not paused.
         after: f32,
     },
+    /// The screen was touched at a point of 1280×720; a paused game went on for the touch and `after` seconds more.
+    #[serde(rename_all = "camelCase")]
+    Tap {
+        /// Unix milliseconds.
+        at: u64,
+        /// The point across the screen.
+        x: u32,
+        /// The point down the screen.
+        y: u32,
+        /// Seconds the paused game went on after the touch; `0` when it was not paused.
+        after: f32,
+    },
     /// The screen was saved to `file`, which becomes a point of the pass.
     #[serde(rename_all = "camelCase")]
     Screen {
@@ -122,6 +134,17 @@ pub fn scenario(events: &[Event], name: &str, first_frame_timeout: u32) -> (Scen
                     ran_ms = 0;
                     since = Some(*at + (hold * 1000.0) as u64);
                 }
+            }
+            Event::Tap { at, x, y, after } => {
+                run_until(*at, &mut since, &mut ran_ms, paused);
+                if seen_point && ran_ms >= SHORTEST_WAIT_MS {
+                    steps.push(Step::Wait {
+                        seconds: ran_ms as f32 / 1000.0,
+                    });
+                }
+                steps.push(Step::Tap { x: *x, y: *y });
+                seen_point = true;
+                ran_ms = if paused { (after * 1000.0) as u64 } else { 0 };
             }
             Event::Screen { at, file } => {
                 run_until(*at, &mut since, &mut ran_ms, paused);
@@ -252,6 +275,31 @@ mod tests {
         let (scenario, _) = scenario(&events, "g", 300);
         assert_eq!(scenario.steps[3], Step::Wait { seconds: 1.0 });
         assert_eq!(scenario.steps[5], Step::Wait { seconds: 2.0 });
+    }
+
+    #[test]
+    fn a_paused_touch_waits_out_its_after_time() {
+        let events = vec![
+            Event::Start {
+                at: 0,
+                game: "G".to_owned(),
+            },
+            Event::Pause { at: 10_000 },
+            Event::Screen {
+                at: 11_000,
+                file: "a.png".to_owned(),
+            },
+            Event::Tap {
+                at: 20_000,
+                x: 640,
+                y: 360,
+                after: 1.5,
+            },
+            press(60_000, 0.5),
+        ];
+        let (scenario, _) = scenario(&events, "g", 300);
+        assert_eq!(scenario.steps[3], Step::Tap { x: 640, y: 360 });
+        assert_eq!(scenario.steps[4], Step::Wait { seconds: 1.5 });
     }
 
     #[test]

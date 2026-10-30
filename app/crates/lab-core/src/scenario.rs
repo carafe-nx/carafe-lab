@@ -53,6 +53,13 @@ pub enum Step {
         #[serde(default = "default_hold")]
         hold: f32,
     },
+    /// Touches the screen at a point of 1280×720 the way a finger would; Carafe moves the mouse there and clicks.
+    Tap {
+        /// The point across the screen.
+        x: u32,
+        /// The point down the screen.
+        y: u32,
+    },
     /// Saves a picture of the screen under `name`.
     Screenshot {
         /// Name of the picture, unique in the scenario.
@@ -313,6 +320,7 @@ fn check_steps<'a>(
                 step,
                 Step::WaitFor { .. }
                     | Step::Press { .. }
+                    | Step::Tap { .. }
                     | Step::Screenshot { .. }
                     | Step::Stacks { .. }
                     | Step::Close { .. }

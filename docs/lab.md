@@ -118,6 +118,8 @@ save data is still there, close it.
   crashes, the runtime refuses to start it (a `[FAIL]` line), the loading screen gives up or the game ends.
 - `wait` — `seconds`. Fails at once when the game crashes meanwhile.
 - `press` — `buttons`: Switch buttons as in `carafe.json` (`A`, `ZR`, `LUP`…), held together; `hold` in seconds.
+- `tap` — `x`, `y`: touches the screen at a point of 1280×720, as `carafe-lab tap` does; Carafe moves the mouse
+  pointer there and clicks. A recorded pass keeps the touches made with `tap`, paused or not.
 - `screenshot` — `name`.
 - `stacks` — `name`: every thread of the game with its state and stack, as the `stacks` diagnostic gives them, in
   the launch's `stacks-<name>.txt`. Without that diagnostic the step only warns.

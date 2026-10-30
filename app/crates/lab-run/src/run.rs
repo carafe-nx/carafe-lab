@@ -202,6 +202,17 @@ pub trait Emulator {
         Vec::new()
     }
 
+    /// Touches the screen at a point of 1280×720 the way a finger would.
+    ///
+    /// # Errors
+    ///
+    /// [`EmulatorError::Control`] when the emulator cannot touch its screen.
+    fn tap(&mut self, _x: u32, _y: u32) -> Result<(), EmulatorError> {
+        Err(EmulatorError::Control(
+            "this emulator cannot touch its screen".to_owned(),
+        ))
+    }
+
     /// Saves a small, cheap picture of the screen to `dest`, for the timeline of a launch; does nothing when the
     /// emulator cannot.
     ///
@@ -685,6 +696,10 @@ impl<'a> Runner<'a> {
                 self.expect_performance(step, threshold.unwrap_or(self.threshold))
             }
             Step::ExpectFps { min, seconds } => self.expect_fps(step, *min, *seconds),
+            Step::Tap { x, y } => match self.emulator.tap(*x, *y) {
+                Ok(()) => self.result(step, Outcome::Pass, format!("touched {x}, {y}"), None),
+                Err(error) => self.result(step, Outcome::Fail, error.to_string(), None),
+            },
             Step::WaitForScreen {
                 name,
                 reference,

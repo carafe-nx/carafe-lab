@@ -1330,7 +1330,34 @@ impl Lab {
     fn tap(mut self, config: &Config, x: u32, y: u32) -> Result<ExitCode, String> {
         self.require_running(config)?;
         self.eden.join_running();
+        let paused = self.eden.paused();
+        let after = if paused {
+            self.args.after_ms as f32 / 1000.0
+        } else {
+            0.0
+        };
+        record(
+            &config.work,
+            &recording::Event::Tap {
+                at: unix_ms(),
+                x,
+                y,
+                after,
+            },
+            false,
+        );
+        if paused {
+            self.eden
+                .set_paused(false)
+                .map_err(|error| error.to_string())?;
+        }
         self.eden.tap(x, y).map_err(|error| error.to_string())?;
+        if paused {
+            std::thread::sleep(Duration::from_millis(u64::from(self.args.after_ms)));
+            self.eden
+                .set_paused(true)
+                .map_err(|error| error.to_string())?;
+        }
         Ok(ExitCode::SUCCESS)
     }
 

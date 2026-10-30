@@ -25,7 +25,15 @@ buttons: Array<SwitchButton>,
 /**
  * Seconds the buttons stay down.
  */
-hold: number, } | { "step": "screenshot", 
+hold: number, } | { "step": "tap", 
+/**
+ * The point across the screen.
+ */
+x: number, 
+/**
+ * The point down the screen.
+ */
+y: number, } | { "step": "screenshot", 
 /**
  * Name of the picture, unique in the scenario.
  */
