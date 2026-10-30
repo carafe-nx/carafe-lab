@@ -1,6 +1,7 @@
 # Carafe Lab documentation
 
 - [lab.md](lab.md) — setting Lab up, `lab.json`, scenarios and their steps, the report.
+- [cards.md](cards.md) — what "the game works" means for each game: the points of a live pass and what fails it.
 - [decisions/](decisions/) — decisions in force: what was chosen, why, and what was rejected.
 - [research/automated-testing/REPORT.md](research/automated-testing/REPORT.md) — why an emulator and which one.
 - [research/cloud-reports/](research/cloud-reports/) — the material of the cloud sessions that brought the bench up.
