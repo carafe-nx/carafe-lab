@@ -35,7 +35,7 @@ use lab_core::versions;
 use lab_core::view::LabView;
 use lab_eden::Eden;
 use lab_run::engine::{
-    Alternate, Engine, Event, NspSource, Planned, READY, safe_name, with_diagnostics,
+    Alternate, Engine, Event, NSP_DIR, NspSource, Planned, READY, safe_name, with_diagnostics,
 };
 use lab_run::history::{self, VARIANT_A, VARIANT_B};
 use lab_run::queue::{Holding, Queue, QueueEntry, QueueState, Turn, unix_now};
@@ -460,20 +460,69 @@ fn show_nsp(config: &Config, file: &Path, json: bool) -> Result<ExitCode, String
     Ok(ExitCode::SUCCESS)
 }
 
-fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, String> {
-    let runs = config.work.join("runs");
-    let nsp = config.work.join("nsp");
+fn tidy_plan(work: &Path) -> tidy::TidyPlan {
+    let runs = work.join("runs");
+    let nsp = work.join(NSP_DIR);
+    let runtimes = work.join("runtimes");
     let dumps = std::env::temp_dir().join("wsl-crashes");
     let places = tidy::Places {
         runs: &runs,
         nsp: &nsp,
+        runtimes: &runtimes,
         dumps: Some(&dumps),
     };
-    let plan = tidy::plan(places, tidy::KEPT_WHOLE);
+    tidy::plan(places, tidy::KEPT_WHOLE)
+}
+
+fn tidy_after_run(work: &Path) {
+    let _ = tidy::apply(&tidy_plan(work));
+    remove_images(&unused_images(work));
+    let containers = stopped_containers();
+    if !containers.is_empty() {
+        let _ = std::process::Command::new("docker")
+            .arg("rm")
+            .args(&containers)
+            .output();
+    }
+}
+
+fn unused_images(work: &Path) -> Vec<String> {
+    let used: Vec<String> = history::list(&work.join("runs"))
+        .iter()
+        .take(tidy::KEPT_WHOLE)
+        .filter_map(|run| run.stamp.eden_image.clone())
+        .collect();
+    std::process::Command::new("docker")
+        .args(["images", KEPT_IMAGES, "--format", "{{.Tag}}"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|tag| !tag.is_empty() && !used.iter().any(|id| id == tag))
+                .map(kept_image)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn remove_images(images: &[String]) {
+    if !images.is_empty() {
+        let _ = std::process::Command::new("docker")
+            .arg("rmi")
+            .args(images)
+            .output();
+    }
+}
+
+fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, String> {
+    let plan = tidy_plan(&config.work);
     if json && !apply {
         print_json(&plan)?;
         return Ok(ExitCode::SUCCESS);
     }
+    let images = unused_images(&config.work);
     let containers = stopped_containers();
     let mib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
     println!(
@@ -487,9 +536,11 @@ fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, Strin
         mib(plan.remove_bytes)
     );
     println!(
-        "remove {} old NSPs and Eden crash dumps ({:.1} MB) and {} stopped lab containers",
+        "remove {} NSPs of runs that are over, unused runtimes and Eden crash dumps ({:.1} MB), {} kept Eden images \
+         no newest run used and {} stopped lab containers",
         plan.stale.len(),
         mib(plan.stale_bytes),
+        images.len(),
         containers.len()
     );
     if !apply {
@@ -497,6 +548,7 @@ fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, Strin
         return Ok(ExitCode::SUCCESS);
     }
     let freed = tidy::apply(&plan).map_err(|error| error.to_string())?;
+    remove_images(&images);
     if !containers.is_empty() {
         let _ = std::process::Command::new("docker")
             .arg("rm")
@@ -1291,6 +1343,7 @@ impl Lab {
             &mut on_event,
         )?;
         drop(holding);
+        tidy_after_run(&self.work);
         let [_, _, _, failed] = report.counts();
         Ok(if failed == 0 {
             ExitCode::SUCCESS

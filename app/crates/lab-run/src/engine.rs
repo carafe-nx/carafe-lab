@@ -79,6 +79,10 @@ pub struct Alternate<'a> {
 /// The folder inside the NSP folder for the NSPs built with the other runtime of an A/B run.
 pub const ALTERNATE_DIR: &str = "alternate";
 
+/// The folder inside the work folder where each run builds its NSPs, in a folder named as the run's; the run removes
+/// it when it ends.
+pub const NSP_DIR: &str = "nsp";
+
 /// The file in a game's run folder with every line of its NSP build, each with the seconds since the build started.
 pub const BUILD_LOG_FILE: &str = "build.log";
 
@@ -88,6 +92,14 @@ struct Built {
     size_bytes: u64,
     reused: bool,
     nsp: PathBuf,
+}
+
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 /// What the run is doing, for the window, the terminal and `--json`.
@@ -329,9 +341,10 @@ impl Engine<'_> {
         on_event: &mut dyn FnMut(&Event),
     ) -> Result<RunReport, String> {
         let run_dir = self.work.join("runs").join(folder);
-        let nsp_dir = self.work.join("nsp");
+        let nsp_dir = self.work.join(NSP_DIR).join(folder);
         fs::create_dir_all(&run_dir).map_err(|error| format!("{}: {error}", run_dir.display()))?;
         fs::create_dir_all(&nsp_dir).map_err(|error| format!("{}: {error}", nsp_dir.display()))?;
+        let _built = Scratch(nsp_dir.clone());
         let _ = fs::remove_file(self.work.join("queue").join(HOLD_FILE));
         let mut report = RunReport {
             started: started.to_owned(),

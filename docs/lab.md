@@ -233,13 +233,17 @@ Each run gets `<work>/runs/<date>/`:
   `summary.json` keeps the peak memory, the processor use and the counts for the History screen, which lists a
   game's problems and highlights those its run before did not have.
 
-`carafe-lab tidy` shows what keeping the runs folder small would do and changes nothing; `tidy --apply` does it.
-The 10 newest runs stay whole. Older failed or unfinished runs get their logs compressed into `.gz` next to them,
+A run builds its NSPs into `<work>/nsp/<run folder>` and removes that folder when it ends: a game is packed again on
+every run, and a repeat inside one run uses the NSP built for it.
+
+Every run ends by tidying, and `carafe-lab tidy` shows what tidying would do and changes nothing; `tidy --apply` does
+it. The 10 newest runs stay whole. Older failed or unfinished runs get their logs compressed into `.gz` next to them,
 their pictures kept. Older runs where nothing failed lose their raw logs and timeline pictures and keep their
-summaries, reports, events, screenshots and `problems.json`, which History reads. NSPs in `work/nsp` that no game
-of the 10 newest runs uses go, with their build keys, and so do Eden's crash dumps in `%TEMP%\wsl-crashes` (WSL
-writes 10–13 GB per crash) and stopped `carafe-lab` containers. The title bar warns when the work drive or the
-temporary drive has less than 15 GB free.
+summaries, reports, events, screenshots and `problems.json`, which History reads. Anything in `work/nsp` but the
+folders of runs still going goes, and so do the runtimes in `work/runtimes` and the `carafe-lab-eden-kept` images
+none of the 10 newest runs ran with, Eden's crash dumps in `%TEMP%\wsl-crashes` (WSL writes 10–13 GB per crash) and
+stopped `carafe-lab` containers. The runtimes of releases and of bisect commits stay. The title bar warns when the
+work drive or the temporary drive has less than 15 GB free.
 
 Together they are the run's dataset: every press in `events.jsonl` has its buttons, hold and time, every screenshot
 step its file, time and outcome, and every check the pictures it compared and its verdict.
@@ -254,15 +258,16 @@ emulator.
 - `--scenario standard` or `--scenario scenarios/<file>.json`, a file in the work folder, runs every game of the plan
   with that scenario instead of its own; the Plans screen has the same choice.
 - Every run keeps what it ran with: the runtime archive as `<work>/runtimes/<hash>.bin`, once for each hash, and the
-  Eden image under the tag `carafe-lab-eden-kept:<id>`. `run --like <run folder>`, or History's "Repeat exactly",
-  runs that run's games again with them instead of the current ones; the games' settings come from `lab.json`.
+  Eden image under the tag `carafe-lab-eden-kept:<id>`, for as long as it is one of the 10 newest runs. `run --like
+  <run folder>`, or History's "Repeat exactly", runs that run's games again with them instead of the current ones;
+  the games' settings come from `lab.json`.
 - A ready NSP made by Carafe carries its build record, `carafe.json`, unencrypted next to its NCAs, so the lab reads
   its runtime version, settings and game folder without keys: `carafe-lab nsp <file>` prints them. `run --nsp <file>`
-  runs it as it is, as `<name> · NSP`: it is linked into `<work>/nsp/ready/<Title ID>.nsp`, since Eden names a game
-  by its file, and stays out of performance by version, which compares the lab's own builds. `--rebuild` builds it
-  again from its game folder with the lab's runtime and the NSP's own settings, keeping its Title ID. The game takes
-  the name, scenario and threshold of the `lab.json` game with the same folder, if there is one. The Plans screen has
-  the same under "A ready NSP".
+  runs it as it is, as `<name> · NSP`: it is linked into `<work>/nsp/<run folder>/ready/<Title ID>.nsp`, since Eden
+  names a game by its file, and stays out of performance by version, which compares the lab's own builds.
+  `--rebuild` builds it again from its game folder with the lab's runtime and the NSP's own settings, keeping its
+  Title ID. The game takes the name, scenario and threshold of the `lab.json` game with the same folder, if there is
+  one. The Plans screen has the same under "A ready NSP".
 - `run --build-only`, or "Only build for the console" in the Plans screen's own plan, builds the NSPs without running
   them and links each into its game's folder in the run as `<Title ID>.nsp`, so a later build does not replace the
   one under test. Such games, like games with a step the emulator cannot show, end "on the console", and History
@@ -315,8 +320,9 @@ emulator.
   each variant its own NSP and Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame
   of each variant; a difference counts only when it is larger than the spread of either variant.
 - `--ab-runtime <r>` instead of `--ab` keeps the settings and changes the runtime: `G · B` is built with `r`, a kept
-  release (`release:v0.2.2`, `release:latest`) or any runtime archive, into `<work>/nsp/alternate`. The Plans
-  screen's A/B card offers it as "another runtime", with the releases whose runtime is kept: main against a release.
+  release (`release:v0.2.2`, `release:latest`) or any runtime archive, into `<work>/nsp/<run folder>/alternate`. The
+  Plans screen's A/B card offers it as "another runtime", with the releases whose runtime is kept: main against a
+  release.
   `run --runtime <file>` packs a whole run with another runtime archive.
 - `carafe-lab release <tag>` builds the runtime of a Carafe release once and keeps it as
   `<work>/runtimes/release-<tag>.bin`. All of it runs in Linux containers with the build limits (2 CPUs, 2 jobs,
@@ -367,8 +373,8 @@ whose process dies frees the emulator after 30 seconds.
 A step marked "for the console" failed because the emulator's log shows it does not implement something the
 runtime needs; check that game on the console.
 
-Other folders: `nsp/` — the built NSPs; `eden/user/` — Eden's data: SD card, NAND, logs; `probes/` — the probe game
-folders. The NAND reaches Eden's volume as one archive, `eden/user/nand.tar`, made again before each new Eden: copying
-the folder itself through WSL's file sharing took 33 s. Eden's shader cache and the cache folder of the container's
-user live in the Docker volumes `carafe-lab-eden-shader` and `carafe-lab-eden-host-cache`, so they outlive the
-container.
+Other folders: `nsp/` — the NSPs of the runs going now; `eden/user/` — Eden's data: SD card, NAND, logs; `probes/` —
+the probe game folders. The NAND reaches Eden's volume as one archive, `eden/user/nand.tar`, made again before each new
+Eden: copying the folder itself through WSL's file sharing took 33 s. Eden's shader cache and the cache folder of the
+container's user live in the Docker volumes `carafe-lab-eden-shader` and `carafe-lab-eden-host-cache`, so they
+outlive the container.

@@ -1,21 +1,24 @@
 //! Keeping the runs folder small: the newest runs and the failed ones keep their logs, compressed once they are old;
-//! older runs where nothing failed keep only what History and the reports read.
+//! older runs where nothing failed keep only what History and the reports read. NSPs live only while their run
+//! goes, and only the newest runs keep the runtimes they packed with.
 
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use serde::Serialize;
 
-use crate::engine::ALTERNATE_DIR;
 use crate::history::{self, RunSummary};
-use crate::ready::READY_DIR;
 use crate::run::{Outcome, PROBLEMS_FILE, TIMELINE_DIR};
 
 /// How many of the newest runs keep everything as it is.
 pub const KEPT_WHOLE: usize = 10;
+
+const GOING_AT_MOST: Duration = Duration::from_secs(24 * 60 * 60);
+const RELEASE_PREFIXES: [&str; 2] = ["commit-", "release-"];
 
 const KEPT_FILES: [&str; 3] = [PROBLEMS_FILE, "session.log", "container-end.log"];
 const RAW_EXTENSIONS: [&str; 3] = ["log", "txt", "csv"];
@@ -34,8 +37,8 @@ pub struct TidyPlan {
     pub compress_bytes: u64,
     /// Bytes the files to remove take.
     pub remove_bytes: u64,
-    /// NSPs no game of the newest runs uses, with their build keys, NSPs older runs built for the console and Eden's
-    /// crash dumps, to remove.
+    /// What runs that are over left in the NSP folder, NSPs older runs built for the console, runtimes none of the
+    /// newest runs packed with and Eden's crash dumps, to remove; a folder goes with everything in it.
     pub stale: Vec<PathBuf>,
     /// Bytes the stale files take.
     pub stale_bytes: u64,
@@ -48,11 +51,13 @@ pub struct Places<'a> {
     pub runs: &'a Path,
     /// The folder of built NSPs.
     pub nsp: &'a Path,
+    /// The folder of runtimes kept for running a run again as it was.
+    pub runtimes: &'a Path,
     /// The folder WSL writes crash dumps to; `None` leaves dumps alone.
     pub dumps: Option<&'a Path>,
 }
 
-/// Returns what tidying would do, keeping the `keep` newest runs whole and the NSPs of their games.
+/// Returns what tidying would do, keeping the `keep` newest runs whole with the runtimes they packed with.
 #[must_use]
 pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
     let runs = places.runs;
@@ -61,18 +66,18 @@ pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
         runs: list.len(),
         ..TidyPlan::default()
     };
-    let used: Vec<String> = list
+    let going: Vec<&str> = list
+        .iter()
+        .filter(|run| !run.finished)
+        .map(|run| run.dir.as_str())
+        .collect();
+    let mut stale = left_nsps(places.nsp, &going);
+    let packed: Vec<&str> = list
         .iter()
         .take(keep)
-        .flat_map(|run| {
-            run.games
-                .iter()
-                .map(|game| game.title_id.to_ascii_lowercase())
-        })
+        .filter_map(|run| run.stamp.runtime_hash.as_deref())
         .collect();
-    let mut stale = stale_nsps(places.nsp, &used);
-    stale.extend(stale_nsps(&places.nsp.join(READY_DIR), &used));
-    stale.extend(stale_nsps(&places.nsp.join(ALTERNATE_DIR), &used));
+    stale.extend(unused_runtimes(places.runtimes, &packed));
     if let Some(dumps) = places.dumps {
         stale.extend(eden_dumps(dumps));
     }
@@ -87,10 +92,7 @@ pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
             }
         }
     }
-    plan.stale_bytes = stale
-        .iter()
-        .map(|file| fs::metadata(file).map_or(0, |metadata| metadata.len()))
-        .sum();
+    plan.stale_bytes = stale.iter().map(|path| size(path)).sum();
     plan.stale = stale;
     for run in list.iter().skip(keep) {
         let failed = !run.finished || run.games.iter().any(|game| game.outcome == Outcome::Fail);
@@ -131,9 +133,18 @@ pub fn apply(plan: &TidyPlan) -> io::Result<u64> {
         let packed = compress(file)?;
         freed += before.saturating_sub(fs::metadata(&packed)?.len());
     }
-    for file in plan.remove.iter().chain(&plan.stale) {
+    for file in &plan.remove {
         freed += fs::metadata(file).map_or(0, |metadata| metadata.len());
         fs::remove_file(file)?;
+    }
+    for path in &plan.stale {
+        let bytes = size(path);
+        if path.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+        freed += bytes;
     }
     for dir in plan.remove.iter().filter_map(|file| file.parent()) {
         if dir.file_name().is_some_and(|name| name == TIMELINE_DIR) {
@@ -143,26 +154,58 @@ pub fn apply(plan: &TidyPlan) -> io::Result<u64> {
     Ok(freed)
 }
 
-fn stale_nsps(nsp: &Path, used: &[String]) -> Vec<PathBuf> {
+fn left_nsps(nsp: &Path, going: &[&str]) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(nsp) else {
         return Vec::new();
     };
-    let mut files: Vec<PathBuf> = entries
+    let mut left: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let fresh = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age < GOING_AT_MOST));
+            !(going.contains(&name.as_str()) && fresh)
+        })
+        .map(|entry| entry.path())
+        .collect();
+    left.sort();
+    left
+}
+
+fn unused_runtimes(runtimes: &Path, packed: &[&str]) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(runtimes) else {
+        return Vec::new();
+    };
+    let mut unused: Vec<PathBuf> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
-            let is_build = path
-                .extension()
-                .is_some_and(|extension| extension == "nsp" || extension == "build-key");
-            let title = path
+            let stem = path
                 .file_stem()
-                .map(|stem| stem.to_string_lossy().to_ascii_lowercase())
+                .map(|stem| stem.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            is_build && !used.contains(&title)
+            let release = RELEASE_PREFIXES
+                .iter()
+                .any(|prefix| stem.starts_with(prefix));
+            path.is_file() && !release && !packed.contains(&stem.as_str())
         })
         .collect();
-    files.sort();
-    files
+    unused.sort();
+    unused
+}
+
+fn size(path: &Path) -> u64 {
+    if !path.is_dir() {
+        return fs::metadata(path).map_or(0, |metadata| metadata.len());
+    }
+    fs::read_dir(path).map_or(0, |entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| size(&entry.path()))
+            .sum()
+    })
 }
 
 fn eden_dumps(dumps: &Path) -> Vec<PathBuf> {
@@ -272,12 +315,21 @@ mod tests {
         run(&runs, "2026-01-01_00-00-00", "pass");
         run(&runs, "2026-01-02_00-00-00", "fail");
         run(&runs, "2026-01-03_00-00-00", "pass");
+        write(
+            &runs.join("2026-01-04_00-00-00").join(history::SUMMARY_FILE),
+            r#"{"started":"x","seconds":1,"emulator":"e","runtimeVersion":"r","finished":false,"planned":["G"],
+            "games":[],"stamp":{"runtimeHash":"aaaaaaaaaaaa"}}"#,
+        );
         let nsp = runs.join("nsp");
+        let runtimes = runs.join("runtimes");
         let dumps = runs.join("dumps");
-        write(&nsp.join("t.nsp"), "kept");
-        write(&nsp.join("t.build-key"), "kept");
+        write(&nsp.join("2026-01-04_00-00-00").join("t.nsp"), "going");
+        write(&nsp.join("2026-01-03_00-00-00").join("t.nsp"), "over");
         write(&nsp.join("0100aaaa.nsp"), "old");
         write(&nsp.join("0100aaaa.build-key"), "old");
+        write(&runtimes.join("aaaaaaaaaaaa.bin"), "packed");
+        write(&runtimes.join("bbbbbbbbbbbb.bin"), "unused");
+        write(&runtimes.join("commit-cccccccccccc.bin"), "release");
         write(&dumps.join("wsl-crash-1-12-_opt_eden_bin_eden.dmp"), "dump");
         write(
             &dumps.join("wsl-crash-1-67-_usr_bin_weston.dmp"),
@@ -287,17 +339,24 @@ mod tests {
             Places {
                 runs: &runs,
                 nsp: &nsp,
+                runtimes: &runtimes,
                 dumps: Some(&dumps),
             },
-            1,
+            2,
         );
-        assert_eq!(plan.runs, 3);
+        assert_eq!(plan.runs, 4);
         assert_eq!(plan.compress.len(), 1);
         assert_eq!(plan.remove.len(), 2);
         assert!(plan.compress[0].ends_with("eden_log.txt"));
-        assert_eq!(plan.stale.len(), 3);
+        assert_eq!(plan.stale.len(), 5);
         apply(&plan).unwrap();
-        assert!(nsp.join("t.nsp").exists() && !nsp.join("0100aaaa.nsp").exists());
+        assert!(nsp.join("2026-01-04_00-00-00").join("t.nsp").exists());
+        assert!(!nsp.join("2026-01-03_00-00-00").exists() && !nsp.join("0100aaaa.nsp").exists());
+        assert!(
+            runtimes.join("aaaaaaaaaaaa.bin").exists()
+                && !runtimes.join("bbbbbbbbbbbb.bin").exists()
+        );
+        assert!(runtimes.join("commit-cccccccccccc.bin").exists());
         assert!(dumps.join("wsl-crash-1-67-_usr_bin_weston.dmp").exists());
         let old = runs.join("2026-01-01_00-00-00").join("G");
         assert!(!old.join("launch-1").join("eden_log.txt").exists());
