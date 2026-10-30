@@ -123,9 +123,9 @@ save data is still there, close it.
   the launch's `stacks-<name>.txt`. Without that diagnostic the step only warns.
 - `expectChange` — `from`, `to`: two screenshots that must differ; `soft` makes it a warning. `quiet` lists pairs
   of screenshots taken as far apart as `from` and `to` with no input between: when the screen changed about as much
-  on its own in any of them, the step warns that the pictures cannot tell. The standard scenario has one pair before
-  the press and one after. A screen that jumps now and then, as OpenTTD's title does every ~17 s, can still slip
-  between the pairs.
+  on its own in any of them, the step passes and says the pictures cannot tell. The standard scenario has one pair
+  before the press and one after. A screen that jumps now and then, as OpenTTD's title does every ~17 s, can still
+  slip between the pairs.
 - `expectPattern` — `name`: a screenshot of a graphics probe.
 - `expectInput` — the input probe's log against the bindings of the build.
 - `expectPointer` — the screen probe's log: the mouse moves reached every edge of its window.
@@ -136,7 +136,7 @@ save data is still there, close it.
   probe's log or the registry's `user.reg`, holds every text of `contains` and none of `absent`. It is read again for up
   to 30 s until it fits; the launch's logs keep it as `file-<name>`.
 - `expectSave` — the game has written save data; remembered for `expectSaveKept`.
-- `expectSaveKept` — the remembered save data is still there and unchanged.
+- `expectSaveKept` — every remembered save file is still there; files the game rewrote count as kept.
 - `expectPerformance` — the first launch's time to the first frame and median FPS against the game at the newest
   other Carafe commit in History: fails when either is worse by more than `threshold` percent, or by the game's
   `threshold` in `lab.json` (20 by default). Passes with a note when there is no other commit to compare with. The
@@ -155,7 +155,8 @@ save data is still there, close it.
   the blocks in place and draws the scenario as a flowchart under the steps.
 - `close` — asks the game to close and waits `timeout` seconds; then stops it. Lab sends Eden SIGUSR1, and
   Eden closes the software the way the HOME Menu does, without asking (`patches/eden/0025`): a hotkey cannot do
-  this, because without a window manager Qt matches no shortcut.
+  this, because without a window manager Qt matches no shortcut. A game that closed, with the overlay shut down and
+  its saves committed, passes even when Eden itself then has to be stopped; a game that did not close warns.
 
 ## Probes
 

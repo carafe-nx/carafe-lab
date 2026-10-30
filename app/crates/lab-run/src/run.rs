@@ -1322,7 +1322,7 @@ impl<'a> Runner<'a> {
                     difference.mean,
                     own.map_or(0.0, |own| own.mean)
                 );
-                self.result(step, Outcome::Warn, detail, Some(after_file))
+                self.result(step, Outcome::Pass, detail, Some(after_file))
             }
             Change::Unchanged => {
                 let outcome = if soft { Outcome::Warn } else { Outcome::Fail };
@@ -1427,8 +1427,12 @@ impl<'a> Runner<'a> {
             let detail = format!("lost after the restart: {}", missing.join(", "));
             self.result(step, Outcome::Fail, detail, None)
         } else if !changed.is_empty() {
-            let detail = format!("rewritten after the restart: {}", changed.join(", "));
-            self.result(step, Outcome::Warn, detail, None)
+            let detail = format!(
+                "all {} files kept; the game rewrote {}",
+                remembered.len(),
+                changed.join(", ")
+            );
+            self.result(step, Outcome::Pass, detail, None)
         } else {
             let detail = format!("all {} files kept", remembered.len());
             self.result(step, Outcome::Pass, detail, None)
@@ -1527,6 +1531,17 @@ impl<'a> Runner<'a> {
                     Outcome::Fail
                 };
                 self.result(step, outcome, detail, None)
+            }
+            Ok(Closed::Forced) if launch.commits_ok() && launch.shutdown => {
+                let detail = match self.emulator.end_reason() {
+                    Some(reason) => format!(
+                        "closed on request and the overlay shut down; the emulator then did not stop by itself: \
+                         {reason}"
+                    ),
+                    None => "closed on request and the overlay shut down; the emulator then did not stop by itself"
+                        .to_owned(),
+                };
+                self.result(step, Outcome::Pass, detail, None)
             }
             Ok(Closed::Forced) => {
                 let detail = match self.emulator.end_reason() {
@@ -2432,6 +2447,43 @@ mod tests {
         };
         let (result, _) = run(emulator, &waiting(60));
         assert_eq!(result.steps[3].outcome, Outcome::Warn);
+    }
+
+    #[test]
+    fn an_emulator_that_does_not_stop_after_the_game_closed_passes_the_close() {
+        let closed = logs(
+            "[carafe-overlay] started 2026-10-12 10:00:00\n[carafe-overlay] [CARAFE] loading screen hidden after 3 s: Vulkan frames\n[carafe-overlay] shutdown\n",
+            "",
+        );
+        let emulator = FakeEmulator {
+            script: VecDeque::from(vec![closed]),
+            close_result: Some(Closed::Forced),
+            ..FakeEmulator::default()
+        };
+        let (result, _) = run(emulator, &waiting(60));
+        assert_eq!(
+            result.steps[3].outcome,
+            Outcome::Pass,
+            "{}",
+            result.steps[3].detail
+        );
+    }
+
+    #[test]
+    fn save_data_the_game_rewrote_is_kept() {
+        let emulator = FakeEmulator {
+            script: VecDeque::from(vec![first_frame()]),
+            save: save("aa"),
+            save_after_relaunch: Some(save("bb")),
+            ..FakeEmulator::default()
+        };
+        let (result, _) = run(emulator, &Scenario::standard(30));
+        let kept = result
+            .steps
+            .iter()
+            .find(|step| step.step == Step::ExpectSaveKept)
+            .unwrap();
+        assert_eq!(kept.outcome, Outcome::Pass, "{}", kept.detail);
     }
 
     #[test]

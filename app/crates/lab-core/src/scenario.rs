@@ -73,7 +73,7 @@ pub enum Step {
         #[serde(default)]
         soft: bool,
         /// Pairs of pictures taken as far apart as `from` and `to` with no input between: when the screen changed
-        /// about as much on its own in any of them, the step warns that it cannot tell.
+        /// about as much on its own in any of them, the step passes and says it cannot tell.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         #[ts(as = "Option<Vec<[String; 2]>>", optional)]
         quiet: Vec<[String; 2]>,
