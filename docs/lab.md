@@ -37,8 +37,10 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    fallback: Vulkan on llvmpipe, everything on the CPU, and the only way to check Eden's Vulkan renderer. Ubuntu does
    not build Dozen, so there is no Vulkan on the graphics card. `carafe-lab gpu` shows what the container sees; on a
    Snapdragon it does not return, because Qualcomm's shader compiler hangs when a program exits.
-7. Optional in `lab.json`: `emulatorCpu` (`dynarmic` or `nce`), `edenImage` — another Eden image, such as one built
-   with diagnostic patches — and `edenSettings`, settings written over Eden's `qt-config.ini`:
+7. Optional in `lab.json`: `emulatorCpu` (`nce`, the default, runs the guest's code natively; `dynarmic` translates
+   it, slower but in the console's proportions; [decision 8](decisions/0008-nce-is-the-default.md)), `edenImage` —
+   another Eden image, such as one built with diagnostic patches — and `edenSettings`, settings written over Eden's
+   `qt-config.ini`:
    `{ "Renderer/gpu_accuracy": "0", "Renderer/debug": "true" }`. `Renderer/debug` makes Eden log the compile and
    link errors of its OpenGL shaders, which it keeps quiet otherwise.
 8. `oneEden` (`true` by default) keeps one container and one Eden for the whole run and loads each game into it

@@ -246,7 +246,7 @@ impl Config {
             Some(text) => Gpu::parse(text).ok_or(ConfigError::Value("gpu", "wsl or software"))?,
         };
         let emulator_cpu = match raw.emulator_cpu.as_deref() {
-            None => EdenCpu::Dynarmic,
+            None => EdenCpu::Nce,
             Some(text) => {
                 EdenCpu::parse(text).ok_or(ConfigError::Value("emulatorCpu", "dynarmic or nce"))?
             }
@@ -1048,11 +1048,11 @@ mod tests {
             cpu,
             Err(ConfigError::Value("emulatorCpu", "dynarmic or nce"))
         );
-        let nce = Config::parse(r#"{"work": "x", "emulatorCpu": "nce"}"#).unwrap();
-        assert_eq!(nce.emulator_cpu, EdenCpu::Nce);
+        let dynarmic = Config::parse(r#"{"work": "x", "emulatorCpu": "dynarmic"}"#).unwrap();
+        assert_eq!(dynarmic.emulator_cpu, EdenCpu::Dynarmic);
         assert_eq!(
             Config::parse(r#"{"work": "x"}"#).unwrap().emulator_cpu,
-            EdenCpu::Dynarmic
+            EdenCpu::Nce
         );
         let zero = Config::parse(r#"{"work": "x", "timeout": 0}"#);
         assert_eq!(
