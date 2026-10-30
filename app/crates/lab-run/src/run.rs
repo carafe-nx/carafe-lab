@@ -30,6 +30,7 @@ use crate::report;
 
 const POLL: Duration = Duration::from_millis(500);
 const GLIMPSE_EVERY: Duration = Duration::from_secs(10);
+const SCREEN_POLL: Duration = Duration::from_secs(2);
 const PROBE_LOG_SETTLE: Duration = Duration::from_secs(10);
 const FILE_SETTLE: Duration = Duration::from_secs(30);
 
@@ -684,6 +685,12 @@ impl<'a> Runner<'a> {
                 self.expect_performance(step, threshold.unwrap_or(self.threshold))
             }
             Step::ExpectFps { min, seconds } => self.expect_fps(step, *min, *seconds),
+            Step::WaitForScreen {
+                name,
+                reference,
+                tolerance,
+                timeout,
+            } => self.wait_for_screen(step, name, reference, *tolerance, *timeout),
             Step::ExpectPattern { name } => self.expect_pattern(step, name),
             Step::ExpectInput => self.expect_input(step),
             Step::ExpectPointer => self.expect_pointer(step),
@@ -1400,6 +1407,60 @@ impl<'a> Runner<'a> {
         self.result(step, Outcome::Pass, detail, None)
     }
 
+    fn wait_for_screen(
+        &mut self,
+        step: &Step,
+        name: &str,
+        reference: &str,
+        tolerance: f32,
+        timeout: u32,
+    ) -> StepResult {
+        let file = format!("{name}.png");
+        let until = self.clock.now() + Duration::from_secs(u64::from(timeout));
+        let mut closest: Option<f64> = None;
+        loop {
+            if self.stopped() {
+                return self.result(step, Outcome::Skip, "the run was stopped".to_owned(), None);
+            }
+            if self.launch_open {
+                let launch = self.current_launch();
+                if matches!(launch.exit, Some(Exit::Code(_))) {
+                    let detail = format!("the game crashed ({})", describe_exit(launch.exit));
+                    return self.result(step, Outcome::Fail, detail, None);
+                }
+            }
+            if self.emulator.screenshot(&self.dir.join(&file)).is_ok() {
+                match self.matches_reference(&file, reference, tolerance) {
+                    Ok((true, difference)) => {
+                        self.screenshots.push((name.to_owned(), file.clone()));
+                        let detail = format!("shows {reference} (difference {difference:.1})");
+                        return self.result(step, Outcome::Pass, detail, Some(file));
+                    }
+                    Ok((false, difference)) => {
+                        closest = Some(closest.map_or(difference, |best| best.min(difference)));
+                    }
+                    Err(why) => {
+                        self.screenshots.push((name.to_owned(), file.clone()));
+                        return self.result(step, Outcome::Fail, why, Some(file));
+                    }
+                }
+            }
+            if self.clock.now() >= until {
+                self.screenshots.push((name.to_owned(), file.clone()));
+                let detail = match closest {
+                    Some(best) => format!(
+                        "did not show {reference} in {timeout} s: the closest picture differed by {best:.1}, more \
+                         than {tolerance}"
+                    ),
+                    None => format!("no picture of the screen in {timeout} s"),
+                };
+                return self.result(step, Outcome::Fail, detail, Some(file));
+            }
+            self.glimpse();
+            self.clock.sleep(SCREEN_POLL);
+        }
+    }
+
     fn expect_fps(&mut self, step: &Step, min: u32, seconds: u32) -> StepResult {
         let samples = self.emulator.launch_perf();
         let since = samples
@@ -1713,7 +1774,9 @@ fn collect_logs(dir: &Path, files: &mut Vec<PathBuf>) {
 fn taken_names(list: &[Step]) -> Vec<String> {
     list.iter()
         .filter_map(|step| match step {
-            Step::Screenshot { name } | Step::ExpectScreen { name, .. } => Some(name.clone()),
+            Step::Screenshot { name }
+            | Step::ExpectScreen { name, .. }
+            | Step::WaitForScreen { name, .. } => Some(name.clone()),
             _ => None,
         })
         .collect()
@@ -1740,6 +1803,17 @@ fn renamed(step: &Step, taken: &[String], suffix: &str) -> Step {
             name: name(shot),
             reference: reference.clone(),
             tolerance: *tolerance,
+        },
+        Step::WaitForScreen {
+            name: shot,
+            reference,
+            tolerance,
+            timeout,
+        } => Step::WaitForScreen {
+            name: name(shot),
+            reference: reference.clone(),
+            tolerance: *tolerance,
+            timeout: *timeout,
         },
         Step::ExpectPattern { name: shot } => Step::ExpectPattern { name: name(shot) },
         Step::ExpectChange {
@@ -2552,6 +2626,42 @@ mod tests {
         assert_eq!(
             result.steps[2].outcome,
             Outcome::Fail,
+            "{}",
+            result.steps[2].detail
+        );
+    }
+
+    #[test]
+    fn waiting_for_a_screen_without_its_reference_fails_at_once() {
+        let scenario = Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::WaitFor {
+                    milestone: Milestone::FirstFrame,
+                    timeout: 60,
+                },
+                Step::WaitForScreen {
+                    name: "menu".to_owned(),
+                    reference: "game/menu.png".to_owned(),
+                    tolerance: 12.0,
+                    timeout: 600,
+                },
+                Step::Close { timeout: 10 },
+            ],
+        };
+        let emulator = FakeEmulator {
+            script: VecDeque::from(vec![first_frame()]),
+            ..FakeEmulator::default()
+        };
+        let (result, _) = run(emulator, &scenario);
+        assert_eq!(
+            result.steps[2].outcome,
+            Outcome::Fail,
+            "{}",
+            result.steps[2].detail
+        );
+        assert!(
+            result.steps[2].detail.contains("reference"),
             "{}",
             result.steps[2].detail
         );

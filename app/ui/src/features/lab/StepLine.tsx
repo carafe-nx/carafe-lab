@@ -53,6 +53,10 @@ export function StepParams({ step }: { step: Step }) {
       params.push(step.reference || "—");
       if (step.tolerance !== 12) params.push(`± ${step.tolerance}`);
       break;
+    case "waitForScreen":
+      params.push(step.reference || "—");
+      params.push(t("units.seconds", { count: step.timeout }));
+      break;
     case "expectChange":
       params.push(`${step.from} → ${step.to}`);
       if (step.quiet?.length) params.push(t("steps.quietCount", { count: step.quiet.length }));

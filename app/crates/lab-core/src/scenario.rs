@@ -145,6 +145,21 @@ pub enum Step {
         #[serde(default = "default_tolerance")]
         tolerance: f32,
     },
+    /// Looks at the screen every few seconds until it shows what the reference picture shows, and keeps the last
+    /// picture under `name`; fails when `timeout` seconds pass first or the game crashes. A recorded pass waits for
+    /// each of its points this way, however long the game takes to get there.
+    #[serde(rename_all = "camelCase")]
+    WaitForScreen {
+        /// Name of the picture, unique in the scenario.
+        name: String,
+        /// The reference picture, a path in `<work>/references`.
+        reference: String,
+        /// The mean brightness difference, 0–255, the screen may have from the reference.
+        #[serde(default = "default_tolerance")]
+        tolerance: f32,
+        /// Seconds to wait.
+        timeout: u32,
+    },
     /// Presses random buttons for `seconds`, to catch a crash or a hang without a scenario; fails when the game ends.
     #[serde(rename_all = "camelCase")]
     RandomPresses {
@@ -303,6 +318,8 @@ fn check_steps<'a>(
                     | Step::Close { .. }
                     | Step::RandomPresses { .. }
                     | Step::ExpectScreen { .. }
+                    | Step::WaitForScreen { .. }
+                    | Step::ExpectFps { .. }
                     | Step::Repeat { .. }
                     | Step::IfScreen { .. }
                     | Step::ExpectInput
@@ -358,10 +375,14 @@ fn check_steps<'a>(
                         )));
                     }
                 }
-                Step::WaitFor { timeout, .. } if *timeout == 0 => {
+                Step::WaitFor { timeout, .. } | Step::WaitForScreen { timeout, .. }
+                    if *timeout == 0 =>
+                {
                     return Err(ScenarioError::Time(number));
                 }
-                Step::Screenshot { name } | Step::ExpectScreen { name, .. } => {
+                Step::Screenshot { name }
+                | Step::ExpectScreen { name, .. }
+                | Step::WaitForScreen { name, .. } => {
                     if screenshots.contains(&name.as_str()) {
                         return Err(ScenarioError::DuplicateScreenshot(number, name.clone()));
                     }

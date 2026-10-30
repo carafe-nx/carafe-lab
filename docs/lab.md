@@ -148,6 +148,10 @@ save data is still there, close it.
   picture `reference`, a path in `<work>/references/`, by the mean brightness difference of 64×36 cells; more than
   `tolerance` (12 by default, of 255) fails. Without the reference picture yet it warns. A screenshot in History
   becomes a reference with "Make it a reference"; game pictures stay in the work folder, outside the repository.
+- `waitForScreen` — `name`, `reference`, `tolerance`, `timeout`: takes a screenshot every 2 s until it matches the
+  reference as `expectScreen` judges it, and keeps the last one as `name`; fails after `timeout` seconds, at once
+  without the reference picture, or when the game crashes. A recorded pass waits for each of its points this way,
+  however long the game takes to get there.
 - `randomPresses` — `seconds`, `seed`: presses random buttons for that long, each held 50–500 ms with 0.1–1 s
   between; fails when the game crashes or ends. The same seed presses the same buttons again.
 - `repeat` — `times`, `steps`: runs the steps that many times; screenshots taken inside get `-1`, `-2`… after

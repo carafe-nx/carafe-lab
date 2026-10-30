@@ -105,6 +105,7 @@
     "randomPresses": "Random presses",
     "seed": "seed",
     "expectScreen": "The screen shows",
+    "waitForScreen": "Wait until the screen shows",
     "repeat": "Repeat",
     "ifScreen": "If the screen shows",
     "shotName": "screenshot name",

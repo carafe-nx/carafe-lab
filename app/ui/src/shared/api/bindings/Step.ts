@@ -94,7 +94,23 @@ reference: string,
 /**
  * The mean brightness difference, 0–255, the two pictures may have.
  */
-tolerance: number, } | { "step": "randomPresses", 
+tolerance: number, } | { "step": "waitForScreen", 
+/**
+ * Name of the picture, unique in the scenario.
+ */
+name: string, 
+/**
+ * The reference picture, a path in `<work>/references`.
+ */
+reference: string, 
+/**
+ * The mean brightness difference, 0–255, the screen may have from the reference.
+ */
+tolerance: number, 
+/**
+ * Seconds to wait.
+ */
+timeout: number, } | { "step": "randomPresses", 
 /**
  * Seconds to press for.
  */
