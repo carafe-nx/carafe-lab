@@ -1228,16 +1228,7 @@ impl Lab {
         } else {
             0.0
         };
-        record(
-            &config.work,
-            &recording::Event::Press {
-                at: unix_ms(),
-                buttons: buttons.clone(),
-                hold,
-                after,
-            },
-            false,
-        );
+        let at = unix_ms();
         if paused {
             self.eden
                 .set_paused(false)
@@ -1249,6 +1240,16 @@ impl Lab {
                 Duration::from_millis(u64::from(self.args.hold_ms)),
             )
             .map_err(|error| error.to_string())?;
+        record(
+            &config.work,
+            &recording::Event::Press {
+                at,
+                buttons: buttons.clone(),
+                hold,
+                after,
+            },
+            false,
+        );
         if paused {
             std::thread::sleep(Duration::from_millis(u64::from(self.args.after_ms)));
             self.eden
@@ -1336,22 +1337,18 @@ impl Lab {
         } else {
             0.0
         };
-        record(
-            &config.work,
-            &recording::Event::Tap {
-                at: unix_ms(),
-                x,
-                y,
-                after,
-            },
-            false,
-        );
+        let at = unix_ms();
         if paused {
             self.eden
                 .set_paused(false)
                 .map_err(|error| error.to_string())?;
         }
         self.eden.tap(x, y).map_err(|error| error.to_string())?;
+        record(
+            &config.work,
+            &recording::Event::Tap { at, x, y, after },
+            false,
+        );
         if paused {
             std::thread::sleep(Duration::from_millis(u64::from(self.args.after_ms)));
             self.eden
