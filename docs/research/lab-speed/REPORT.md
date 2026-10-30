@@ -93,13 +93,11 @@ Docker events with nanosecond times over one run (`docker events`), NSP already 
 
 ## What was tried
 
-- **NCE** (`emulatorCpu: nce`): the race ran at 15–19 fps instead of 31–40, the game thread over 50 ms a frame, and
-  the first picture came after 82 s. In NCE, pages the GPU reads are write-protected
-  (`src/core/memory.cpp:446-460`, `RasterizerMarkRegionCached` → `host_buffer->Protect`) and every write to one is a
-  `SIGSEGV` that ends in `Memory::InvalidateNCE` (`src/core/arm/nce/arm_nce.cpp:168`). DXVK writes its buffers every
-  frame, so every frame pays a signal per page. dynarmic instead moves the faulting access to its slow path once and
-  pays a check from then on. NCE's instruction cache invalidation is only barriers (`arm_nce.cpp:393-404`) and is not
-  the cause.
+- **NCE** (`emulatorCpu: nce`): NCE never ran. Eden turns it on only for a 39-bit address space
+  (`src/common/settings.cpp:198-214`), and Carafe gives Need for Speed Underground 2 a 32-bit one, so Eden logged
+  "Program does not utilize 39-bit address space, unable to natively execute code" and used dynarmic. The slower run
+  (15–19 fps, first picture after 82 s) was dynarmic stopped by the gdb sampler, not NCE. What NCE would take for
+  Carafe is in [lab-nce](../lab-nce/ANALYSIS.md).
 - **CPU accuracy Unsafe** (`Cpu/cpu_accuracy = 2`): the game crashed with `0xc0000005` 149 s in. Unsafe turns on
   `Unsafe_IgnoreGlobalMonitor` (`src/core/arm/dynarmic/arm_dynarmic_64.cpp:334-335`, on by default under Unsafe in
   `src/common/settings.h:328`), which breaks the exclusive accesses FEX builds x86 `lock` instructions from.
@@ -114,7 +112,7 @@ Docker events with nanosecond times over one run (`docker events`), NSP already 
 | Apply A/B settings as the overlay's console-side changes on the virtual SD card instead of a new NSP per variant | 64 s per variant and setting | medium: the overlay already lays changes made on the console over the settings files |
 | Keep `user/shader` (Eden's shader cache) and the container's Mesa cache between runs | seconds of loading | small |
 | Keep one Eden container across runs, not only across the launches of one run | container start and NAND every run | medium |
-| Make NCE track GPU-read pages without a signal per write (dirty bits from the GPU side, or no protection for host-visible Vulkan memory) | possibly the console's speed or more: the guest's code would run natively on a much faster core | large: an Eden change in its memory manager, with correctness risk |
+| Run the guest's code natively with NCE ([lab-nce](../lab-nce/ANALYSIS.md)) | possibly the console's speed or more: the guest's code would run natively on a much faster core | large: several Eden changes, with correctness risk |
 
 Done on 2026-10-30, checked with a short NFSU2 A/B (launch, first picture, close):
 
@@ -128,7 +126,7 @@ Done on 2026-10-30, checked with a short NFSU2 A/B (launch, first picture, close
 - Eden's `user/shader` and the container's `/root/.cache` are Docker volumes. Eden wrote its cache for NFSU2 there; Mesa
   d3d12 wrote nothing to its cache folder, so that half only helps if a later Mesa caches.
 - Not done: one Eden container across runs (after the NAND fix it saves a container start, a few seconds, and risks
-  state carried between runs) and NCE without a signal per write (an Eden change of its own).
+  state carried between runs) and NCE (Eden changes of their own).
 
 Speed numbers from the lab compare two variants under the same slowdown; they do not predict the console's numbers,
 and gains that depend on cross-core hand-offs (DXVK's threads, the orchestrator) look different in the lab.
@@ -138,4 +136,4 @@ and gains that depend on cross-core hand-offs (DXVK's threads, the orchestrator)
 - gdb sampling stops Eden for 1.4–5 s per snapshot; the first attempt that loaded symbols on attach stopped it long
   enough for the lab to give up on the run. Symbols were then loaded before attaching.
 - Thread loads are from `/proc` over 5-second windows; GPU loads from Windows' performance counters every 2.5 s.
-- One run per configuration for NCE and Unsafe: both differ from dynarmic by far more than the run-to-run spread.
+- One run for Unsafe: it differs from dynarmic by far more than the run-to-run spread.

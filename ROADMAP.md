@@ -49,11 +49,16 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` WSL GPU: Qualcomm's shader compiler hangs when a program exits (`llvm_shutdown` in its `fini` waits on a mutex), so `carafe-bench gpu` never returns
 - [ ] `feature` Offer the patches to Eden upstream, with the `eden-cli -c` option bug found on the way
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
-- [ ] `research` Eden NCE runs translated games 2× slower: a SIGSEGV per write to a page the GPU reads (docs/research/lab-speed)
-- [ ] `bug` lab-core's input check tests still expect the controller mapped by position; Carafe maps by label since v0.4.0
+- [ ] `bug` NFSU2 sometimes sits on the race's loading screen for minutes under NCE and does not close (2 runs of ~10)
+- [ ] `research` GPU path: the present still waits for Mesa's driver thread, ~20 ms a frame in a race (docs/research/lab-gpu)
+- [ ] `feature` The CPU clock in every run's report, and a warning when the PC throttles
+- [ ] `bug` The window cannot run a game disabled in `lab.json`: "no games to run"
+- [ ] `bug` lab-core's and lab-run's input check tests (5) still expect the controller mapped by position; Carafe maps by label since v0.4.0
 
 ## Done
 
+- [x] `bug` NFSU2's road, speedometer and minimap drawn black: render targets join the mip-mapped textures sampled from them (`0058`)
+- [x] `feature` NCE runs Carafe's guest code natively and is the default; the GPU path no longer waits on every flush and present (decision 8)
 - [x] `feature` Faster launches: the NAND goes to Eden as one archive (41 s → 1 s), an A/B of options runs both variants from one NSP, Eden's shader cache is kept
 - [x] `feature` The threads probe as a standing check: a ceiling, Direct3D 9 through a refused thread, no leak
 - [x] `bug` A runtime that stops with `[FAIL]` and parks is waited for until the milestone's timeout

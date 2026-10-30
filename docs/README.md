@@ -5,7 +5,11 @@
 - [research/automated-testing/REPORT.md](research/automated-testing/REPORT.md) — why an emulator and which one.
 - [research/cloud-reports/](research/cloud-reports/) — the material of the cloud sessions that brought the bench up.
 - [research/lab-speed/REPORT.md](research/lab-speed/REPORT.md) — why the lab loads and runs games slower than the
-  console: the emulated CPU, the lab's own time, NCE and what can be done.
+  console: the emulated CPU, the lab's own time and what can be done.
+- [research/lab-nce/ANALYSIS.md](research/lab-nce/ANALYSIS.md) — what Eden's NCE needs to run Carafe's guest code
+  natively, what it would still cost, and the plan.
+- [research/lab-gpu/ANALYSIS.md](research/lab-gpu/ANALYSIS.md) — where a frame waits on the GPU path once NCE runs the
+  guest's code: synchronous flushes, a present that waits for the GPU, and what to change.
 - [research/eden-stop-crash.md](research/eden-stop-crash.md) — Eden's crash in Mesa's d3d12 queries when software
   stops on the WSL GPU.
 
