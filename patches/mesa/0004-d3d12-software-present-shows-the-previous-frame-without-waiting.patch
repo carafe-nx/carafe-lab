@@ -1,0 +1,149 @@
+Carafe Lab: a software-window present (drisw, as on Xvfb) no longer waits for the GPU to go idle. It mapped the back
+buffer for reading, which flushed and waited for all queued work, then copied it to the X image, so Eden's GPU thread
+stopped for the whole frame on every present and the GPU got no new work meanwhile. Now each present queues a copy of
+the back buffer into one of two staging buffers and flushes without waiting, then waits for the copy queued by the
+previous present, which has normally finished, and sends that one: the window shows the frame before. The first
+present after a size change maps the back buffer as before.
+MIT, as the files it changes.
+
+--- a/src/gallium/drivers/d3d12/d3d12_resource.h
++++ b/src/gallium/drivers/d3d12/d3d12_resource.h
+@@ -57,6 +57,13 @@
+    struct util_range valid_buffer_range;
+    uint32_t bind_counts[PIPE_SHADER_TYPES][D3D12_RESOURCE_BINDING_TYPES];
+    unsigned generation_id;
++
++   struct pipe_resource *present_buffer[2];
++   struct pipe_fence_handle *present_fence[2];
++   unsigned present_width;
++   unsigned present_height;
++   unsigned present_stride;
++   unsigned present_next;
+ };
+ 
+ struct d3d12_memory_object {
+@@ -140,4 +147,9 @@
+ d3d12_resource_from_resource(struct pipe_screen *pscreen,
+                               ID3D12Resource* inputRes);
+ 
++bool
++d3d12_resource_copy_for_present(struct pipe_context *pctx, struct pipe_resource *pres,
++                                unsigned level, unsigned layer,
++                                struct pipe_resource **buffer, unsigned *stride);
++
+ #endif
+--- a/src/gallium/drivers/d3d12/d3d12_resource.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_resource.cpp
+@@ -88,6 +88,10 @@
+ 
+    if (resource->dt_proxy)
+       pipe_resource_reference(&resource->dt_proxy, NULL);
++   for (unsigned i = 0; i < ARRAY_SIZE(resource->present_buffer); ++i) {
++      pipe_resource_reference(&resource->present_buffer[i], NULL);
++      pscreen->fence_reference(pscreen, &resource->present_fence[i], NULL);
++   }
+    threaded_resource_deinit(presource);
+    if (can_map_directly(presource))
+       util_range_destroy(&resource->valid_buffer_range);
+@@ -1369,6 +1373,37 @@
+    return true;
+ }
+ 
++bool
++d3d12_resource_copy_for_present(struct pipe_context *pctx, struct pipe_resource *pres,
++                                unsigned level, unsigned layer,
++                                struct pipe_resource **buffer, unsigned *stride)
++{
++   struct d3d12_context *ctx = d3d12_context(pctx);
++   struct d3d12_transfer trans = {};
++   struct pipe_transfer *ptrans = &trans.base.b;
++
++   ptrans->level = level;
++   ptrans->usage = PIPE_MAP_READ;
++   u_box_2d_zslice(0, 0, layer, u_minify(pres->width0, level), u_minify(pres->height0, level),
++                   &ptrans->box);
++   ptrans->stride = align(util_format_get_stride(pres->format, ptrans->box.width),
++                          D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
++   ptrans->layer_stride = align(static_cast<uint32_t>(util_format_get_2d_size(pres->format,
++                                                                             ptrans->stride,
++                                                                             ptrans->box.height)),
++                                D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
++
++   if (!*buffer) {
++      *buffer = pipe_buffer_create(pctx->screen, 0, PIPE_USAGE_STAGING,
++                                   static_cast<unsigned>(ptrans->layer_stride));
++      if (!*buffer)
++         return false;
++   }
++
++   *stride = ptrans->stride;
++   return transfer_image_to_buf(ctx, d3d12_resource(pres), d3d12_resource(*buffer), &trans, 0);
++}
++
+ static void
+ transfer_buf_to_buf(struct d3d12_context *ctx,
+                     struct d3d12_resource *src,
+--- a/src/gallium/drivers/d3d12/d3d12_screen.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_screen.cpp
+@@ -719,17 +719,51 @@
+    void *map = winsys->displaytarget_map(winsys, res->dt, 0);
+ 
+    if (map) {
++      struct pipe_context *frontend_ctx = pctx;
+       pctx = threaded_context_unwrap_sync(pctx);
+-      pipe_transfer *transfer = nullptr;
+-      void *res_map = pipe_texture_map(pctx, pres, level, layer, PIPE_MAP_READ, 0, 0,
+-                                        u_minify(pres->width0, level),
+-                                        u_minify(pres->height0, level),
+-                                        &transfer);
+-      if (res_map) {
+-         util_copy_rect((uint8_t*)map, pres->format, res->dt_stride, 0, 0,
+-                        transfer->box.width, transfer->box.height,
+-                        (const uint8_t*)res_map, transfer->stride, 0, 0);
+-         pipe_texture_unmap(pctx, transfer);
++      const unsigned width = u_minify(pres->width0, level);
++      const unsigned height = u_minify(pres->height0, level);
++      if (res->present_width != width || res->present_height != height) {
++         for (unsigned i = 0; i < ARRAY_SIZE(res->present_buffer); ++i) {
++            pipe_resource_reference(&res->present_buffer[i], NULL);
++            pscreen->fence_reference(pscreen, &res->present_fence[i], NULL);
++         }
++         res->present_width = width;
++         res->present_height = height;
++         res->present_next = 0;
++      }
++      const unsigned current = res->present_next;
++      const unsigned previous = current ^ 1;
++      if (d3d12_resource_copy_for_present(pctx, pres, level, layer, &res->present_buffer[current],
++                                          &res->present_stride)) {
++         pscreen->fence_reference(pscreen, &res->present_fence[current], NULL);
++         pctx->flush(pctx, &res->present_fence[current], 0);
++         res->present_next = previous;
++      }
++      bool shown = false;
++      if (res->present_buffer[previous] && res->present_fence[previous] &&
++          pscreen->fence_finish(pscreen, frontend_ctx, res->present_fence[previous],
++                                OS_TIMEOUT_INFINITE)) {
++         pipe_transfer *transfer = nullptr;
++         void *buffer_map = pipe_buffer_map(pctx, res->present_buffer[previous],
++                                            PIPE_MAP_READ | PIPE_MAP_UNSYNCHRONIZED, &transfer);
++         if (buffer_map) {
++            util_copy_rect((uint8_t*)map, pres->format, res->dt_stride, 0, 0, width, height,
++                           (const uint8_t*)buffer_map, res->present_stride, 0, 0);
++            pipe_buffer_unmap(pctx, transfer);
++            shown = true;
++         }
++      }
++      if (!shown) {
++         pipe_transfer *transfer = nullptr;
++         void *res_map = pipe_texture_map(pctx, pres, level, layer, PIPE_MAP_READ, 0, 0,
++                                           width, height, &transfer);
++         if (res_map) {
++            util_copy_rect((uint8_t*)map, pres->format, res->dt_stride, 0, 0,
++                           transfer->box.width, transfer->box.height,
++                           (const uint8_t*)res_map, transfer->stride, 0, 0);
++            pipe_texture_unmap(pctx, transfer);
++         }
+       }
+       winsys->displaytarget_unmap(winsys, res->dt);
+    }
