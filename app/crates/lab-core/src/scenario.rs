@@ -123,6 +123,16 @@ pub enum Step {
         #[ts(optional)]
         threshold: Option<u32>,
     },
+    /// Checks that the game draws at least `min` frames per second: the median of the emulator's readings over the
+    /// last `seconds` with the game drawing. The step fails when it is lower or when there is no such reading.
+    #[serde(rename_all = "camelCase")]
+    ExpectFps {
+        /// The lowest median FPS that passes.
+        min: u32,
+        /// Seconds of readings, counted back from the step.
+        #[serde(default = "default_fps_seconds")]
+        seconds: u32,
+    },
     /// Saves a picture of the screen under `name` and checks that it shows what the reference picture shows: it fails
     /// when the two differ by more than `tolerance`.
     #[serde(rename_all = "camelCase")]
@@ -190,6 +200,10 @@ fn default_tolerance() -> f32 {
 
 fn default_seed() -> u64 {
     1
+}
+
+fn default_fps_seconds() -> u32 {
+    10
 }
 
 fn default_min_threads() -> u32 {

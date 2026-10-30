@@ -101,6 +101,7 @@
     "expectSave": "Save data written",
     "expectSaveKept": "Save data kept",
     "expectPerformance": "No slower than the last version",
+    "expectFps": "Frames per second",
     "randomPresses": "Random presses",
     "seed": "seed",
     "expectScreen": "The screen shows",

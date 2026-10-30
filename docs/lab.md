@@ -141,6 +141,9 @@ save data is still there, close it.
   other Carafe commit in History: fails when either is worse by more than `threshold` percent, or by the game's
   `threshold` in `lab.json` (20 by default). Passes with a note when there is no other commit to compare with. The
   standard scenario has it after the first close.
+- `expectFps` — `min`, `seconds` (10 by default): the median of Eden's FPS readings over the last `seconds` with the
+  game drawing is at least `min`; fails without such a reading. Put it after a `wait` in the part of the game to
+  measure, such as a race.
 - `expectScreen` — `name`, `reference`, `tolerance`: takes the screenshot `name` and compares it with the reference
   picture `reference`, a path in `<work>/references/`, by the mean brightness difference of 64×36 cells; more than
   `tolerance` (12 by default, of 255) fails. Without the reference picture yet it warns. A screenshot in History

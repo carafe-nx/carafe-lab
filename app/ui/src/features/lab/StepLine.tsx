@@ -64,6 +64,10 @@ export function StepParams({ step }: { step: Step }) {
     case "expectPerformance":
       params.push(step.threshold === undefined ? t("steps.gameThreshold") : `${step.threshold} %`);
       break;
+    case "expectFps":
+      params.push(`≥ ${step.min}`);
+      params.push(t("units.seconds", { count: step.seconds }));
+      break;
     case "repeat":
       params.push(`×${step.times}`);
       break;

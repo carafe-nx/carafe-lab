@@ -74,7 +74,15 @@ absent?: Array<string>, } | { "step": "expectSave" } | { "step": "expectSaveKept
 /**
  * The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
  */
-threshold?: number, } | { "step": "expectScreen", 
+threshold?: number, } | { "step": "expectFps", 
+/**
+ * The lowest median FPS that passes.
+ */
+min: number, 
+/**
+ * Seconds of readings, counted back from the step.
+ */
+seconds: number, } | { "step": "expectScreen", 
 /**
  * Name of the picture, unique in the scenario.
  */

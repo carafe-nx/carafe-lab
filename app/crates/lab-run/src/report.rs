@@ -516,6 +516,7 @@ pub fn step_title(step: &StepResult, lang: Lang) -> String {
                 "No slower than the last version",
             )
             .to_owned(),
+        Step::ExpectFps { min, .. } => format!("{} {min} FPS", lang.pick("Не меньше", "At least")),
         Step::Repeat { times, .. } => format!("{} ×{times}", lang.pick("Повтор", "Repeat")),
         Step::IfScreen { reference, .. } => format!(
             "{} {reference}?",

@@ -113,6 +113,7 @@
     "expectSave": "Есть сохранение",
     "expectSaveKept": "Сохранение на месте",
     "expectPerformance": "Не медленнее прошлой версии",
+    "expectFps": "Кадров в секунду",
     "randomPresses": "Случайные нажатия",
     "seed": "зерно",
     "expectScreen": "На экране как на эталоне",

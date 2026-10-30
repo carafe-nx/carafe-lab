@@ -683,6 +683,7 @@ impl<'a> Runner<'a> {
             Step::ExpectPerformance { threshold } => {
                 self.expect_performance(step, threshold.unwrap_or(self.threshold))
             }
+            Step::ExpectFps { min, seconds } => self.expect_fps(step, *min, *seconds),
             Step::ExpectPattern { name } => self.expect_pattern(step, name),
             Step::ExpectInput => self.expect_input(step),
             Step::ExpectPointer => self.expect_pointer(step),
@@ -1399,6 +1400,31 @@ impl<'a> Runner<'a> {
         self.result(step, Outcome::Pass, detail, None)
     }
 
+    fn expect_fps(&mut self, step: &Step, min: u32, seconds: u32) -> StepResult {
+        let samples = self.emulator.launch_perf();
+        let since = samples
+            .last()
+            .map_or(0, |last| last.at.saturating_sub(u64::from(seconds) * 1000));
+        let recent: Vec<PerfSample> = samples
+            .into_iter()
+            .filter(|sample| sample.at >= since)
+            .collect();
+        let Some(summary) = perf::summarize(&recent) else {
+            let detail = format!("no reading with the game drawing in the last {seconds} s");
+            return self.result(step, Outcome::Fail, detail, None);
+        };
+        let detail = format!(
+            "median {:.0} FPS over the last {seconds} s, at least {min} wanted",
+            summary.median_fps
+        );
+        let outcome = if summary.median_fps >= f64::from(min) {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        };
+        self.result(step, outcome, detail, None)
+    }
+
     fn expect_save_kept(&mut self, step: &Step) -> StepResult {
         let remembered = self.remembered.clone().unwrap_or_default();
         let now = self.emulator.save_files(self.title);
@@ -1823,6 +1849,7 @@ mod tests {
         emulator_log: String,
         shots: Vec<Vec<u8>>,
         probe_log: Option<String>,
+        perf: Vec<PerfSample>,
     }
 
     impl Emulator for FakeEmulator {
@@ -1893,6 +1920,9 @@ mod tests {
                 .then(|| self.probe_log.clone())
                 .flatten()
         }
+        fn launch_perf(&self) -> Vec<PerfSample> {
+            self.perf.clone()
+        }
     }
 
     impl FakeEmulator {
@@ -1961,6 +1991,9 @@ mod tests {
         }
         fn find_file(&self, title: TitleId, name: &str) -> Option<String> {
             self.0.borrow().find_file(title, name)
+        }
+        fn launch_perf(&self) -> Vec<PerfSample> {
+            self.0.borrow().launch_perf()
         }
     }
 
@@ -2466,6 +2499,61 @@ mod tests {
             Outcome::Pass,
             "{}",
             result.steps[3].detail
+        );
+    }
+
+    #[test]
+    fn fps_counts_only_the_last_seconds() {
+        let reading = |at: u64, fps: f64| PerfSample {
+            at,
+            fps,
+            speed: 1.0,
+            frametime: 16.0,
+            shaders: 0,
+        };
+        let scenario = |min: u32| Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::WaitFor {
+                    milestone: Milestone::FirstFrame,
+                    timeout: 60,
+                },
+                Step::ExpectFps { min, seconds: 10 },
+                Step::Close { timeout: 10 },
+            ],
+        };
+        let perf = vec![
+            reading(0, 60.0),
+            reading(5_000, 60.0),
+            reading(20_000, 24.0),
+            reading(25_000, 26.0),
+            reading(30_000, 25.0),
+        ];
+        let emulator = |perf: Vec<PerfSample>| FakeEmulator {
+            script: VecDeque::from(vec![first_frame()]),
+            perf,
+            ..FakeEmulator::default()
+        };
+        let (result, _) = run(emulator(perf.clone()), &scenario(20));
+        assert_eq!(
+            result.steps[2].outcome,
+            Outcome::Pass,
+            "{}",
+            result.steps[2].detail
+        );
+        let (result, _) = run(emulator(perf), &scenario(30));
+        assert_eq!(
+            result.steps[2].outcome,
+            Outcome::Fail,
+            "{}",
+            result.steps[2].detail
+        );
+        let (result, _) = run(emulator(Vec::new()), &scenario(20));
+        assert_eq!(
+            result.steps[2].outcome,
+            Outcome::Fail,
+            "{}",
+            result.steps[2].detail
         );
     }
 
