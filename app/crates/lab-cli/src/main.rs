@@ -56,6 +56,7 @@ const KEPT_IMAGES: &str = "carafe-lab-eden-kept";
 const REFERENCES_DIR: &str = "references";
 const SCENARIOS_DIR: &str = "scenarios";
 const RECORDING_FILE: &str = "recording.jsonl";
+const RESUME_SETTLE: Duration = Duration::from_millis(200);
 const RUNTIME_VERSION: &str = match option_env!("CARAFE_RUNTIME_VERSION") {
     Some(version) => version,
     None => "dev",
@@ -1233,6 +1234,7 @@ impl Lab {
             self.eden
                 .set_paused(false)
                 .map_err(|error| error.to_string())?;
+            std::thread::sleep(RESUME_SETTLE);
         }
         self.eden
             .press(
@@ -1342,6 +1344,7 @@ impl Lab {
             self.eden
                 .set_paused(false)
                 .map_err(|error| error.to_string())?;
+            std::thread::sleep(RESUME_SETTLE);
         }
         self.eden.tap(x, y).map_err(|error| error.to_string())?;
         record(

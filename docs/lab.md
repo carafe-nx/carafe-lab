@@ -359,8 +359,9 @@ For Claude and for quick looks, one call each:
 - `play <game>` builds the game if needed, launches it and keeps it running for `--minutes` (30 by default) or until
   `stop`; it holds the emulator in the queue like any run. `--nsp <file>` plays a ready NSP as that game instead of
   building it;
-- `press <A+ZR>` presses buttons together in the running game, `--hold <s>` long; a paused game goes on for the
-  press and `--after <s>` more (0.5 by default) and stands again;
+- `press <A+ZR>` presses buttons together in the running game, `--hold <s>` long; a paused game goes on 0.2 s
+  before the press, so it sees a short one, then for the press and `--after <s>` more (0.5 by default), and stands
+  again;
 - `pause` and `resume` stop the running game and let it go on, as Eden's Pause does (`patches/eden/0059`): a player
   who looks at the screen and decides what to press gets all the time it needs;
 - `tap <x> <y>` touches the running game's screen at a point of 1280×720: Eden takes a click on its window for a
