@@ -1,0 +1,27 @@
+Carafe Lab: the control channel pauses and resumes the running software: `pause` stops the emulated cores as
+Eden's Pause does and answers `paused`, `resume` lets them go on and answers `resumed`; either answers at once
+when the software already is in that state, and `error idle` when no software runs. A player that looks at the
+screen and decides what to press gets all the time it needs while the game stands still.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/yuzu/main_window.cpp
++++ b/src/yuzu/main_window.cpp
+@@ -2005,6 +2005,18 @@ void MainWindow::OnControlTick() {
+             }
+             ControlReply(QStringLiteral("released"));
+         });
++    } else if (verb == QStringLiteral("pause") || verb == QStringLiteral("resume")) {
++        if (!emulation_running) {
++            ControlReply(QStringLiteral("error idle"));
++            return;
++        }
++        const bool pause = verb == QStringLiteral("pause");
++        if (pause && emu_thread->IsRunning()) {
++            OnPauseGame();
++        } else if (!pause && !emu_thread->IsRunning()) {
++            OnStartGame();
++        }
++        ControlReply(pause ? QStringLiteral("paused") : QStringLiteral("resumed"));
+     } else {
+         ControlReply(QStringLiteral("error unknown %1").arg(verb));
+     }

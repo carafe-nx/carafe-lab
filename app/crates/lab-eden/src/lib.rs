@@ -154,6 +154,19 @@ pub fn replies_after(text: &str, after: u64) -> Vec<Reply> {
         .collect()
 }
 
+fn paused_in(replies: &[Reply]) -> bool {
+    replies
+        .iter()
+        .rev()
+        .take_while(|reply| !reply.text.starts_with("booting "))
+        .find_map(|reply| match reply.text.as_str() {
+            "paused" => Some(true),
+            "resumed" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(false)
+}
+
 impl Eden {
     /// Creates the emulator.
     ///
@@ -302,6 +315,43 @@ impl Eden {
             diagnostics: Vec::new(),
         });
         true
+    }
+
+    /// Pauses the game of the joined Eden the way Eden's Pause does, or lets it go on.
+    ///
+    /// # Errors
+    ///
+    /// [`EmulatorError::Control`] when no Eden with a control channel runs, it runs no game or it does not answer.
+    pub fn set_paused(&mut self, paused: bool) -> Result<(), EmulatorError> {
+        let seen = self
+            .session
+            .as_ref()
+            .map(|session| session.seen)
+            .ok_or_else(|| {
+                EmulatorError::Control("no Eden with a control channel runs".to_owned())
+            })?;
+        let (verb, answer) = if paused {
+            ("pause", "paused")
+        } else {
+            ("resume", "resumed")
+        };
+        self.send(verb)?;
+        let replies = self.wait_for_reply(seen, PRESS_GRACE, |text| {
+            text == answer || text.starts_with("error")
+        })?;
+        match replies.iter().find(|reply| reply.text.starts_with("error")) {
+            Some(reply) => Err(EmulatorError::Control(format!(
+                "Eden did not {verb}: {}",
+                reply.text
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// Returns whether the game of the joined Eden stands paused: the last pause or resume since its boot paused it.
+    #[must_use]
+    pub fn paused(&self) -> bool {
+        paused_in(&self.replies(0))
     }
 
     /// Returns the Title ID of the game this emulator launched or, after [`Eden::join_running`], the one the joined
@@ -1198,7 +1248,7 @@ impl Emulator for Eden {
     }
 
     fn screenshot(&mut self, dest: &Path) -> Result<(), EmulatorError> {
-        let frame = if self.session.is_some() {
+        let frame = if self.session.is_some() && !self.paused() {
             self.frame_shot().ok()
         } else {
             None
@@ -1906,6 +1956,19 @@ mod tests {
         assert_eq!(texts, ["booted", "stopped exited"]);
         assert_eq!(fresh[0].number, 3);
         assert!(replies_after(text, 4).is_empty());
+    }
+
+    #[test]
+    fn a_game_stands_paused_until_it_resumes_or_another_boots() {
+        let paused = replies_after("1 booting /nsp/a.nsp\n2 booted\n3 paused\n4 pressed C\n", 0);
+        assert!(paused_in(&paused));
+        let resumed = replies_after("1 booting /nsp/a.nsp\n2 paused\n3 resumed\n", 0);
+        assert!(!paused_in(&resumed));
+        let rebooted = replies_after(
+            "1 booting /nsp/a.nsp\n2 paused\n3 booting /nsp/b.nsp\n4 booted\n",
+            0,
+        );
+        assert!(!paused_in(&rebooted));
     }
 
     #[test]

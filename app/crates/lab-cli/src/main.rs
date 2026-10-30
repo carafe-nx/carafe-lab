@@ -254,6 +254,8 @@ fn start(args: Args) -> Result<ExitCode, String> {
             let file = file.ok_or("screen needs a file to save the picture to")?;
             lab.screen(&config, &file)
         }
+        Command::Pause => lab.set_paused(&config, true),
+        Command::Resume => lab.set_paused(&config, false),
         Command::Logs => lab.show_logs(&config),
         Command::Help
         | Command::Status
@@ -1133,12 +1135,36 @@ impl Lab {
             })
             .collect::<Result<_, _>>()?;
         self.eden.join_running();
+        let paused = self.eden.paused();
+        if paused {
+            self.eden
+                .set_paused(false)
+                .map_err(|error| error.to_string())?;
+        }
         self.eden
             .press(
                 &buttons,
                 Duration::from_millis(u64::from(self.args.hold_ms)),
             )
             .map_err(|error| error.to_string())?;
+        if paused {
+            std::thread::sleep(Duration::from_millis(u64::from(self.args.after_ms)));
+            self.eden
+                .set_paused(true)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn set_paused(mut self, config: &Config, paused: bool) -> Result<ExitCode, String> {
+        self.require_running(config)?;
+        if !self.eden.join_running() {
+            return Err("no Eden with a control channel runs".to_owned());
+        }
+        self.eden
+            .set_paused(paused)
+            .map_err(|error| error.to_string())?;
+        println!("{}", if paused { "paused" } else { "resumed" });
         Ok(ExitCode::SUCCESS)
     }
 

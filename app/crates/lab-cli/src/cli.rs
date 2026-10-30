@@ -24,9 +24,13 @@ Usage:
   carafe-lab play <game>           launches the game and keeps it running for --minutes (default 30) or
                                    until stop, for hands or for the commands below; --nsp <file> plays a
                                    ready NSP as the game
-  carafe-lab press <A+B…>          presses buttons together in the running game; --hold <s>, default 0.15
+  carafe-lab press <A+B…>          presses buttons together in the running game; --hold <s>, default 0.15;
+                                   a paused game goes on for the press and --after <s> (default 0.5), then
+                                   stands again
+  carafe-lab pause                 pauses the running game, so the next move can wait as long as it takes
+  carafe-lab resume                lets the paused game go on
   carafe-lab tap <x> <y>           taps the running game's screen at a point of 1280×720, as a finger would
-  carafe-lab screen <file.png>     saves the running game's screen
+  carafe-lab screen <file.png>     saves the running game's screen, paused or not
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
   carafe-lab nsp <file> [--json]   what a ready NSP was built from: runtime version, settings, game folder
@@ -130,6 +134,10 @@ pub enum Command {
         /// Where to save the picture.
         file: Option<PathBuf>,
     },
+    /// Pause the running game.
+    Pause,
+    /// Let the paused game go on.
+    Resume,
     /// Show the emulator's recent performance.
     Perf,
     /// Show the running game's stages and the problems of its logs.
@@ -190,6 +198,8 @@ pub struct Args {
     pub minutes: u32,
     /// `--hold`, in milliseconds.
     pub hold_ms: u32,
+    /// `--after`, in milliseconds.
+    pub after_ms: u32,
     /// `--build-only`.
     pub build_only: bool,
     /// `--clean`.
@@ -260,6 +270,8 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("press") => Command::Press { buttons: None },
         Some("tap") => Command::Tap { x: None, y: None },
         Some("screen") => Command::Screen { file: None },
+        Some("pause") => Command::Pause,
+        Some("resume") => Command::Resume,
         Some("perf") => Command::Perf,
         Some("logs") => Command::Logs,
         Some("tidy") => Command::Tidy,
@@ -285,6 +297,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         bad: None,
         minutes: 30,
         hold_ms: 150,
+        after_ms: 500,
         build_only: false,
         clean: false,
         apply: false,
@@ -383,6 +396,16 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                     return Err(ArgsError::Value(arg.clone(), "seconds from 0.01 to 60"));
                 }
                 parsed.hold_ms = Duration::from_secs_f64(seconds)
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u32::MAX);
+            }
+            "--after" => {
+                let seconds: f64 = number(arg, value("seconds")?, "seconds")?;
+                if !(0.0..=60.0).contains(&seconds) {
+                    return Err(ArgsError::Value(arg.clone(), "seconds from 0 to 60"));
+                }
+                parsed.after_ms = Duration::from_secs_f64(seconds)
                     .as_millis()
                     .try_into()
                     .unwrap_or(u32::MAX);
