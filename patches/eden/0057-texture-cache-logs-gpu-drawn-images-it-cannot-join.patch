@@ -1,0 +1,52 @@
+Carafe Lab: Eden's texture cache logs an image the GPU has drawn into that a new image overlaps but cannot join or
+alias, and one it drops. The new image is then filled from guest memory, which does not hold what the GPU drew, so a
+texture rendered by the game and sampled later reads black. The first 300 such cases are logged with the formats,
+types, sizes, levels, layers, samples and block layout of both images.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -1584,6 +1584,27 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
+     join_copies_to_do.clear();
+     join_alias_indices.clear();
+     const bool this_is_linear = info.type == ImageType::Linear;
++    static std::atomic<u32> logged_lost_drawings{};
++    const auto log_lost_drawing = [&](const char* what, const ImageBase& overlap) {
++        if (False(overlap.flags & ImageFlagBits::GpuModified) ||
++            logged_lost_drawings.fetch_add(1, std::memory_order_relaxed) >= 300) {
++            return;
++        }
++        const ImageInfo& drawn = overlap.info;
++        LOG_WARNING(HW_GPU,
++                    "Texture cache {} a GPU-drawn image: new {:#x} format {} type {} {}x{}x{} levels {} "
++                    "layers {} samples {} block {}/{}/{} spacing {}; drawn {:#x} format {} type {} "
++                    "{}x{}x{} levels {} layers {} samples {} block {}/{}/{} spacing {}",
++                    what, gpu_addr, static_cast<int>(new_info.format),
++                    static_cast<int>(new_info.type), new_info.size.width, new_info.size.height,
++                    new_info.size.depth, new_info.resources.levels, new_info.resources.layers,
++                    new_info.num_samples, new_info.block.width, new_info.block.height,
++                    new_info.block.depth, new_info.tile_width_spacing, overlap.gpu_addr,
++                    static_cast<int>(drawn.format), static_cast<int>(drawn.type), drawn.size.width,
++                    drawn.size.height, drawn.size.depth, drawn.resources.levels,
++                    drawn.resources.layers, drawn.num_samples, drawn.block.width,
++                    drawn.block.height, drawn.block.depth, drawn.tile_width_spacing);
++    };
+     const auto region_check = [&](ImageId overlap_id, ImageBase& overlap) {
+         if (True(overlap.flags & ImageFlagBits::Remapped)) {
+             join_ignore_textures.insert(overlap_id);
+@@ -1624,6 +1645,7 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
+             overlap.flags |= ImageFlagBits::Alias;
+             join_copies_to_do.emplace_back(JoinCopy{true, overlap_id});
+         } else {
++            log_lost_drawing("cannot join", overlap);
+             join_bad_overlap_ids.push_back(overlap_id);
+         }
+     };
+@@ -1678,6 +1700,7 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
+ 
+     for (const ImageId overlap_id : join_ignore_textures) {
+         Image& overlap = slot_images[overlap_id];
++        log_lost_drawing("drops", overlap);
+         if (True(overlap.flags & ImageFlagBits::GpuModified)) {
+             UNIMPLEMENTED();
+         }
