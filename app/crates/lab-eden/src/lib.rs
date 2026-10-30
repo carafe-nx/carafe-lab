@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::thread;
@@ -72,7 +72,7 @@ const PUSH_NAND: &str = "set -e
 R=/to/system/Contents/registered
 S=/to/system/.carafe-firmware
 find /to -mindepth 1 ! -path /to/system ! -path /to/system/Contents ! -path $R ! -path \"$R/*\" ! -path $S -delete
-cp -a /from/. /to/
+tar -xf /from.tar -C /to
 if [ -n \"$FIRMWARE\" ]; then
   if [ \"$(cat $S 2>/dev/null)\" != \"$FIRMWARE\" ]; then
     rm -rf $R && mkdir -p $R
@@ -82,6 +82,12 @@ if [ -n \"$FIRMWARE\" ]; then
 elif [ -f $S ]; then
   rm -rf $R $S
 fi";
+const NAND_ARCHIVE: &str = "nand.tar";
+const CHANGES_FILE: &str = "switch/wine/carafe/changes.txt";
+const CACHE_VOLUMES: [(&str, &str); 2] = [
+    ("carafe-lab-eden-shader", "/work/user/shader"),
+    ("carafe-lab-eden-host-cache", "/root/.cache"),
+];
 const ZERO_USER: &str = "00000000000000000000000000000000";
 const KEEP_FILE: &str = ".carafe-lab";
 const SHARED_DIRS: [&str; 7] = [
@@ -103,6 +109,7 @@ pub struct Eden {
     image: String,
     settings: BTreeMap<String, String>,
     title: Option<TitleId>,
+    console_changes: Option<String>,
     ended: Option<String>,
     one_eden: bool,
     fresh: bool,
@@ -167,6 +174,7 @@ impl Eden {
             image: IMAGE.to_owned(),
             settings: BTreeMap::new(),
             title: None,
+            console_changes: None,
             ended: None,
             one_eden: false,
             fresh: false,
@@ -426,12 +434,12 @@ impl Eden {
     }
 
     fn push_nand(&self) -> Result<(), EmulatorError> {
-        let nand = self.user_dir.join("nand");
+        let archive = self.pack_nand()?;
         let mut args = vec![
             "run".to_owned(),
             "--rm".to_owned(),
             "-v".to_owned(),
-            format!("{}:/from:ro", nand.display()),
+            format!("{}:/from.tar:ro", archive.display()),
             "-v".to_owned(),
             format!("{NAND_VOLUME}:/to"),
         ];
@@ -453,6 +461,81 @@ impl Eden {
             PUSH_NAND.to_owned(),
         ]);
         docker_owned(&args).map(|_| ())
+    }
+
+    fn changes_path(&self) -> Option<String> {
+        let title = self.title?.to_string().to_uppercase();
+        Some(format!("user/save/device/{title}/0/{CHANGES_FILE}"))
+    }
+
+    fn write_console_changes(&self) -> Result<(), EmulatorError> {
+        let (Some(text), Some(path)) = (&self.console_changes, self.changes_path()) else {
+            return Ok(());
+        };
+        let file = self.user_dir.join("nand").join(path);
+        if text.is_empty() {
+            let _ = fs::remove_file(&file);
+            return Ok(());
+        }
+        if let Some(parent) = file.parent() {
+            fs::create_dir_all(parent).map_err(io)?;
+        }
+        fs::write(&file, text).map_err(io)
+    }
+
+    fn send_console_changes(&self) -> Result<(), EmulatorError> {
+        let (Some(text), Some(path)) = (&self.console_changes, self.changes_path()) else {
+            return Ok(());
+        };
+        let file = format!("/work/user/nand/{path}");
+        if text.is_empty() {
+            return docker(&["exec", CONTAINER, "rm", "-f", &file]).map(|_| ());
+        }
+        let dir = file.rsplit_once('/').map_or("/", |(dir, _)| dir);
+        let script = format!("mkdir -p '{dir}' && cat > '{file}'");
+        let mut child = Command::new("docker")
+            .args(["exec", "-i", CONTAINER, "sh", "-c", &script])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| EmulatorError::Control(format!("docker: {error}")))?;
+        if let Some(mut input) = child.stdin.take() {
+            input.write_all(text.as_bytes()).map_err(io)?;
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|error| EmulatorError::Control(format!("docker: {error}")))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(EmulatorError::Control(format!(
+                "docker exec: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
+        }
+    }
+
+    fn pack_nand(&self) -> Result<PathBuf, EmulatorError> {
+        let nand = self.user_dir.join("nand");
+        let archive = self.user_dir.join(NAND_ARCHIVE);
+        let output = Command::new("tar")
+            .arg("-cf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&nand)
+            .arg(".")
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| EmulatorError::Control(format!("tar: {error}")))?;
+        if output.status.success() {
+            Ok(archive)
+        } else {
+            Err(EmulatorError::Control(format!(
+                "tar: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
+        }
     }
 
     fn pull_nand(&self) {
@@ -595,6 +678,7 @@ impl Eden {
         self.prepare()?;
         self.remove_container();
         let _ = fs::remove_file(self.user_dir.join("log").join(RESOURCES_FILE));
+        self.write_console_changes()?;
         self.push_nand()?;
         self.ended = None;
         let mut args = self.container_args(dir);
@@ -734,6 +818,7 @@ impl Eden {
         if let Some(session) = self.session.as_mut() {
             session.log_from = log_from;
         }
+        self.send_console_changes()?;
         self.send(&format!("boot /nsp/{name}"))?;
         let replies = self.wait_for_reply(seen, BOOT_TIMEOUT, |text| {
             text == "booted" || text.starts_with("error")
@@ -964,6 +1049,10 @@ impl Eden {
                 ));
             }
         }
+        for (volume, path) in CACHE_VOLUMES {
+            args.push("-v".to_owned());
+            args.push(format!("{volume}:{path}"));
+        }
         args.extend([
             "-v".to_owned(),
             format!("{}:/work/user/keys/prod.keys:ro", self.keys.display()),
@@ -1013,6 +1102,10 @@ impl Emulator for Eden {
             .filter(|diagnostic| !diagnostic.in_the_nsp())
             .copied()
             .collect();
+    }
+
+    fn console_changes(&mut self, changes: Option<&str>) {
+        self.console_changes = changes.map(str::to_owned);
     }
 
     fn backtraces(&mut self) -> Option<String> {

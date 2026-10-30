@@ -100,10 +100,10 @@ pub fn random(seed: u64, count: usize) -> Vec<Combination> {
 
 fn required_pairs() -> Vec<(usize, usize, usize, usize)> {
     let mut pairs = Vec::new();
-    for p in 0..SIZES.len() {
-        for q in p + 1..SIZES.len() {
-            for a in 0..SIZES[p] {
-                for b in 0..SIZES[q] {
+    for (p, &size_p) in SIZES.iter().enumerate() {
+        for (q, &size_q) in SIZES.iter().enumerate().skip(p + 1) {
+            for a in 0..size_p {
+                for b in 0..size_q {
                     pairs.push((p, a, q, b));
                 }
             }

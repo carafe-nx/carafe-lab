@@ -49,9 +49,12 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` WSL GPU: Qualcomm's shader compiler hangs when a program exits (`llvm_shutdown` in its `fini` waits on a mutex), so `carafe-bench gpu` never returns
 - [ ] `feature` Offer the patches to Eden upstream, with the `eden-cli -c` option bug found on the way
 - [ ] `feature` Report the d3d12 query recursion to Mesa with the patch (decision 2)
+- [ ] `research` Eden NCE runs translated games 2× slower: a SIGSEGV per write to a page the GPU reads (docs/research/lab-speed)
+- [ ] `bug` lab-core's input check tests still expect the controller mapped by position; Carafe maps by label since v0.4.0
 
 ## Done
 
+- [x] `feature` Faster launches: the NAND goes to Eden as one archive (41 s → 1 s), an A/B of options runs both variants from one NSP, Eden's shader cache is kept
 - [x] `feature` The threads probe as a standing check: a ceiling, Direct3D 9 through a refused thread, no leak
 - [x] `bug` A runtime that stops with `[FAIL]` and parks is waited for until the milestone's timeout
 - [x] `bug` A program that crashes during a wait step still passes: the threads probe died in DXVK and every step passed

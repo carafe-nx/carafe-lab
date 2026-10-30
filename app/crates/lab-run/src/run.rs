@@ -221,6 +221,10 @@ pub trait Emulator {
     /// that are not the emulator's, or that it does not have, are left alone.
     fn diagnose(&mut self, _diagnostics: &[Diagnostic]) {}
 
+    /// Sets the settings changes the next launches find as made on the console's settings menu: a text is written
+    /// as the game's `changes.txt`, an empty text removes it, `None` leaves the game's save data as it is.
+    fn console_changes(&mut self, _changes: Option<&str>) {}
+
     /// Returns the stacks of every thread of the running game and the modules it has loaded, read without stopping
     /// it for good; `None` when [`Diagnostic::Stacks`] is off or the stacks cannot be read.
     fn backtraces(&mut self) -> Option<String> {

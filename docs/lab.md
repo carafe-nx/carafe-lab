@@ -306,8 +306,11 @@ emulator.
   there. Buttons pressed within 80 ms of each other become one press. "Save as the game's scenario" writes launch,
   first frame, the recorded steps and close as the game's scenario file.
 - `run --games G --repeat <n> --ab '<settings>'` is an A/B run: G as it is (`G · A`) and with the settings merged over
-  its own (`G · B`, in the shape of `carafe.json`'s `settings`), alternating. Each variant is its own NSP with its own
-  Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame
+  its own (`G · B`, in the shape of `carafe.json`'s `settings`), alternating. When the settings are only `options`,
+  both variants run from `G · A`'s NSP and Title ID: before each launch of `G · B` its settings are written as changes
+  made on the console's settings menu (`switch/wine/carafe/changes.txt` in the game's device save data, which the
+  runtime lays over the NSP's settings files), and before each launch of `G · A` they are removed. Other settings give
+  each variant its own NSP and Title ID. `summary.json` ends with a verdict: runs passed and the median and spread of the time to the first frame
   of each variant; a difference counts only when it is larger than the spread of either variant.
 - `--ab-runtime <r>` instead of `--ab` keeps the settings and changes the runtime: `G · B` is built with `r`, a kept
   release (`release:v0.2.2`, `release:latest`) or any runtime archive, into `<work>/nsp/alternate`. The Plans
@@ -363,4 +366,7 @@ A step marked "for the console" failed because the emulator's log shows it does 
 runtime needs; check that game on the console.
 
 Other folders: `nsp/` — the built NSPs; `eden/user/` — Eden's data: SD card, NAND, logs; `probes/` — the probe game
-folders.
+folders. The NAND reaches Eden's volume as one archive, `eden/user/nand.tar`, made again before each new Eden: copying
+the folder itself through WSL's file sharing took 33 s. Eden's shader cache and the cache folder of the container's
+user live in the Docker volumes `carafe-lab-eden-shader` and `carafe-lab-eden-host-cache`, so they outlive the
+container.

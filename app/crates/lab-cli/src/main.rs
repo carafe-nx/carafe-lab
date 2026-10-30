@@ -19,6 +19,7 @@ use carafe_folder::DiskFolderInspector;
 use carafe_pack::HacBrewPacker;
 use lab_core::bisect;
 use lab_core::config::{self, Config, Game};
+use lab_core::console_changes::console_changes;
 use lab_core::diagnostics::Diagnostic;
 use lab_core::emulator::{EdenCpu, Gpu};
 use lab_core::lang::Lang;
@@ -872,6 +873,7 @@ impl Lab {
                 nsp: NspSource::Rebuild(Box::new(record)),
                 diagnostics: Vec::new(),
                 save: save.clone(),
+                console_changes: None,
             };
             return with_diagnostics(planned, &self.args.diagnostics);
         }
@@ -897,6 +899,7 @@ impl Lab {
             nsp: NspSource::Ready(Box::new(nsp)),
             diagnostics: Vec::new(),
             save,
+            console_changes: None,
         };
         with_diagnostics(planned, &of_emulator)
     }
@@ -936,12 +939,27 @@ impl Lab {
             let settings_b = config::settings_over(&game.settings, &overrides)
                 .map_err(|error| format!("--ab: {error}"))?;
             what = format!("A/B {}", game.name);
+            let options_only = overrides
+                .as_object()
+                .is_some_and(|map| map.keys().all(|key| key == "options"));
             (0..repeat)
                 .flat_map(|_| {
-                    [
-                        self.plan(game, format!("{}{VARIANT_A}", game.name), &game.settings),
-                        self.plan(game, format!("{}{VARIANT_B}", game.name), &settings_b),
-                    ]
+                    let name_a = format!("{}{VARIANT_A}", game.name);
+                    if !options_only {
+                        return [
+                            self.plan(game, name_a, &game.settings),
+                            self.plan(game, format!("{}{VARIANT_B}", game.name), &settings_b),
+                        ];
+                    }
+                    let mut variant_a = self.plan(game, name_a, &game.settings);
+                    let mut variant_b = variant_a.clone();
+                    variant_a.console_changes = Some(String::new());
+                    variant_b.name = variant_a.name.replacen(VARIANT_A, VARIANT_B, 1);
+                    variant_b.label = settings_label(&settings_b);
+                    variant_b.console_changes = variant_b.request.as_ref().ok().map(|request| {
+                        console_changes(&request.source.executable, &game.settings, &settings_b)
+                    });
+                    [variant_a, variant_b]
                 })
                 .collect()
         } else if let Some((_, _, label)) = &self.alternate {
@@ -1014,6 +1032,7 @@ impl Lab {
             nsp: NspSource::Build,
             diagnostics: Vec::new(),
             save: game.save.as_ref().map(|save| self.work.join(save)),
+            console_changes: None,
         };
         with_diagnostics(planned, &self.args.diagnostics)
     }
@@ -1397,6 +1416,7 @@ fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> 
         nsp: NspSource::Build,
         diagnostics: Vec::new(),
         save: None,
+        console_changes: None,
     }
 }
 

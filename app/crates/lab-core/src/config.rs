@@ -851,9 +851,11 @@ mod tests {
 
     #[test]
     fn invalid_settings_name_their_game() {
-        let limit = r#"{"name": "A", "folder": "x", "settings": {"graphics": {"frameLimit": 1000}}}"#;
+        let limit =
+            r#"{"name": "A", "folder": "x", "settings": {"graphics": {"frameLimit": 1000}}}"#;
         assert!(matches!(config(limit, ""), Err(ConfigError::Settings(name, _)) if name == "A"));
-        let unknown = r#"{"name": "A", "folder": "x", "settings": {"system": {"windows": "qemu"}}}"#;
+        let unknown =
+            r#"{"name": "A", "folder": "x", "settings": {"system": {"windows": "qemu"}}}"#;
         assert!(matches!(
             config(unknown, ""),
             Err(ConfigError::Settings(..))

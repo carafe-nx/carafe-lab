@@ -6,6 +6,7 @@
 
 pub mod bisect;
 pub mod config;
+pub mod console_changes;
 pub mod crash;
 pub mod diagnostics;
 pub mod emulator;

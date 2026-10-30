@@ -47,6 +47,9 @@ pub struct Planned {
     pub diagnostics: Vec<Diagnostic>,
     /// The folder whose files become its save data before the first launch; `None` starts it without save data.
     pub save: Option<PathBuf>,
+    /// Settings changes its launches find as made on the console's settings menu; see
+    /// [`Emulator::console_changes`].
+    pub console_changes: Option<String>,
 }
 
 /// Where a planned game's NSP comes from.
@@ -495,6 +498,8 @@ impl Engine<'_> {
             self.stamp.carafe_commit.as_deref(),
         );
         self.emulator.diagnose(&game.diagnostics);
+        self.emulator
+            .console_changes(game.console_changes.as_deref());
         let runner = Runner::new(&mut *self.emulator, clock, record.title_id, nsp, &game_dir)
             .with_baseline(baseline, game.threshold)
             .with_input(record.settings.input.clone())
@@ -776,6 +781,7 @@ mod tests {
             nsp: NspSource::Build,
             diagnostics: Vec::new(),
             save: None,
+            console_changes: None,
         };
         let stalled = detailed(&planned, &failed_at(wait.clone(), "not reached in 120 s")).unwrap();
         assert_eq!(stalled.name, "G · detailed");
