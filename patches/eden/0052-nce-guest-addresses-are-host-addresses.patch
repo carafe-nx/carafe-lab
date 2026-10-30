@@ -1,0 +1,94 @@
+Carafe Lab: under NCE a guest address is the same host address, as on the console, and 32-bit address spaces
+may run natively too. Eden placed a natively run process at a random host address above 64 GiB, which leaves
+no guest memory below 4 GiB for a 32-bit Windows program under WOW64, and turned NCE off for 32-bit address
+spaces. The guest address space is now reserved at host address 0x200000 and up, with nothing accessible
+until the guest maps it; a host mapping already there stops Eden with a message.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/common/host_memory.cpp
++++ b/src/common/host_memory.cpp
+@@ -72,6 +72,7 @@ namespace Common {
+ 
+ [[maybe_unused]] constexpr size_t PageAlignment = 0x1000;
+ [[maybe_unused]] constexpr size_t HugePageSize = 0x200000;
++[[maybe_unused]] constexpr uintptr_t DirectMappedStart = 0x200000;
+ 
+ #ifdef _WIN32
+ 
+@@ -613,7 +614,28 @@ public:
+     }
+ 
+     void EnableDirectMappedAddress() {
++        if (virtual_base == nullptr) {
++            return;
++        }
++        free_manager.AllocateBlock(virtual_map_base, virtual_size);
++        const int unmapped = munmap(virtual_map_base, virtual_size);
++        ASSERT_MSG(unmapped == 0, "munmap failed: {}", strerror(errno));
++#ifdef MAP_FIXED_NOREPLACE
++        constexpr int fixed = MAP_FIXED_NOREPLACE;
++#else
++        constexpr int fixed = 0;
++#endif
++        u8* const start = reinterpret_cast<u8*>(DirectMappedStart);
++        void* const reserved = mmap(start, virtual_size, PROT_NONE,
++                                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | fixed, -1, 0);
++        ASSERT_MSG(reserved == start, "guest address space at {:#x} is not free: {}",
++                   DirectMappedStart, strerror(errno));
++#if defined(__linux__)
++        madvise(start, virtual_size, MADV_HUGEPAGE);
++#endif
++        virtual_map_base = start;
+         virtual_base = nullptr;
++        free_manager.SetAddressSpace(virtual_map_base, virtual_size);
+     }
+ 
+     const size_t backing_size; ///< Size of the backing memory in bytes
+@@ -731,7 +753,7 @@ void HostMemory::ClearBackingRegion(size_t physical_offset, size_t length, u32 f
+ void HostMemory::EnableDirectMappedAddress() {
+     if (impl) {
+         impl->EnableDirectMappedAddress();
+-        virtual_size += reinterpret_cast<uintptr_t>(virtual_base);
++        virtual_base_offset = 0;
+     }
+ }
+ 
+--- a/src/core/loader/deconstructed_rom_directory.cpp
++++ b/src/core/loader/deconstructed_rom_directory.cpp
+@@ -182,8 +182,11 @@ AppLoader_DeconstructedRomDirectory::LoadResult AppLoader_DeconstructedRomDirect
+     // Enable NCE only for applications with 39-bit address space.
+     const bool is_39bit =
+         metadata.GetAddressSpaceType() == FileSys::ProgramAddressSpaceType::Is39Bit;
++    const bool is_32bit =
++        metadata.GetAddressSpaceType() == FileSys::ProgramAddressSpaceType::Is32Bit ||
++        metadata.GetAddressSpaceType() == FileSys::ProgramAddressSpaceType::Is32BitNoMap;
+     const bool is_application = metadata.GetPoolPartition() == FileSys::PoolPartition::Application;
+-    Settings::SetNceEnabled(is_39bit);
++    Settings::SetNceEnabled(is_39bit || is_32bit);
+ 
+     const std::array static_modules = {"rtld",    "main",    "subsdk0", "subsdk1", "subsdk2",
+                                        "subsdk3", "subsdk4", "subsdk5", "subsdk6", "subsdk7",
+@@ -217,9 +220,7 @@ AppLoader_DeconstructedRomDirectory::LoadResult AppLoader_DeconstructedRomDirect
+     // Enable direct memory mapping in case of NCE.
+     const u64 fastmem_base = [&]() -> size_t {
+         if (is_application && Settings::IsNceEnabled()) {
+-            auto& buffer = system.DeviceMemory().buffer;
+-            buffer.EnableDirectMappedAddress();
+-            return reinterpret_cast<u64>(buffer.VirtualBasePointer());
++            system.DeviceMemory().buffer.EnableDirectMappedAddress();
+         }
+         return 0;
+     }();
+--- a/src/core/loader/nro.cpp
++++ b/src/core/loader/nro.cpp
+@@ -234,9 +234,7 @@ static bool LoadNroImpl(Core::System& system, Kernel::KProcess& process,
+     // Enable direct memory mapping in case of NCE.
+     const u64 fastmem_base = [&]() -> size_t {
+         if (Settings::IsNceEnabled()) {
+-            auto& buffer = system.DeviceMemory().buffer;
+-            buffer.EnableDirectMappedAddress();
+-            return reinterpret_cast<u64>(buffer.VirtualBasePointer());
++            system.DeviceMemory().buffer.EnableDirectMappedAddress();
+         }
+         return 0;
+     }();

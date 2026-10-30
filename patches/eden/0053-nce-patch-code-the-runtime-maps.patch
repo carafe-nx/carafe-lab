@@ -1,0 +1,265 @@
+Carafe Lab: under NCE code the guest maps at run time is patched too. Carafe's loader maps the runtime itself
+with svcMapProcessCodeMemory and makes its text executable with svcSetProcessMemoryPermission; Eden patched
+only modules it loaded at boot, so the runtime's svc instructions would have reached the host kernel. When an
+executable range starts with an NRO header, its supervisor calls and system register accesses go through a
+patch section placed in free address space within branch range; the section goes away with the mapping. Other
+executable mappings, such as x86 images and Wine's PE modules, are left as they are. The return points are
+looked up under a lock. Patch sections of boot modules are made inaccessible to the guest before they are
+made executable on the host, so the host mapping stays executable.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/arm/nce/arm_nce.cpp
++++ b/src/core/arm/nce/arm_nce.cpp
+@@ -224,9 +224,8 @@ HaltReason ArmNce::RunThread(Kernel::KThread* thread) {
+ 
+     // TODO: finding and creating the post handler needs to be locked
+     // to deal with dynamic loading of NROs.
+-    const auto& post_handlers = process->GetPostHandlers();
+-    if (auto it = post_handlers.find(m_guest_ctx.pc); it != post_handlers.end()) {
+-        hr = ReturnToRunCodeByTrampoline(thread_params, &m_guest_ctx, it->second);
++    if (const auto trampoline = process->FindPostHandler(m_guest_ctx.pc)) {
++        hr = ReturnToRunCodeByTrampoline(thread_params, &m_guest_ctx, *trampoline);
+     } else {
+         hr = ReturnToRunCodeByExceptionLevelChange(m_thread_id, thread_params);  // Android: Use "process handle SIGUSR2 -n true -p true -s false" (and SIGURG) in LLDB when debugging
+     }
+--- a/src/core/arm/nce/patcher.h
++++ b/src/core/arm/nce/patcher.h
+@@ -64,6 +64,10 @@ public:
+         return mode;
+     }
+ 
++    void SetPatchSectionDistance(size_t distance) noexcept {
++        total_program_size = distance;
++    }
++
+ private:
+     using ModuleDestLabel = uintptr_t;
+     ModuleID module_id{};
+--- a/src/core/hle/kernel/k_process.cpp
++++ b/src/core/hle/kernel/k_process.cpp
+@@ -22,6 +22,7 @@
+ #include "core/arm/dynarmic/arm_dynarmic_64.h"
+ #ifdef HAS_NCE
+ #include "core/arm/nce/arm_nce.h"
++#include "core/arm/nce/patcher.h"
+ #endif
+ 
+ namespace Kernel {
+@@ -1277,6 +1278,10 @@ void KProcess::LoadModule(CodeSet code_set, KProcessAddress base_addr) {
+     const auto& patch = code_set.PatchSegment();
+     const auto& post_patch = code_set.PostPatchSegment();
+     if (this->IsApplication() && Settings::IsNceEnabled() && patch.size != 0) {
++        ReprotectSegment(code_set.PatchSegment(), Svc::MemoryPermission::None);
++        if (post_patch.size != 0) {
++            ReprotectSegment(code_set.PostPatchSegment(), Svc::MemoryPermission::None);
++        }
+         auto& buffer = m_kernel.System().DeviceMemory().buffer;
+         const auto& code = code_set.CodeSegment();
+         buffer.Protect(GetInteger(base_addr + code.addr), code.size,
+@@ -1288,14 +1293,132 @@ void KProcess::LoadModule(CodeSet code_set, KProcessAddress base_addr) {
+             buffer.Protect(GetInteger(base_addr + post_patch.addr), post_patch.size,
+                            Common::MemoryPermission::Read | Common::MemoryPermission::Execute);
+         }
+-        ReprotectSegment(code_set.PatchSegment(), Svc::MemoryPermission::None);
+-        if (post_patch.size != 0) {
+-            ReprotectSegment(code_set.PostPatchSegment(), Svc::MemoryPermission::None);
+-        }
+     }
+ #endif
+ }
+ 
++#ifdef HAS_NCE
++std::optional<u64> KProcess::FindPostHandler(u64 pc) {
++    std::shared_lock lk{m_post_handlers_lock};
++    if (const auto it = m_post_handlers.find(pc); it != m_post_handlers.end()) {
++        return it->second;
++    }
++    return std::nullopt;
++}
++
++void KProcess::PatchRuntimeCode(KProcessAddress address, size_t size) {
++    constexpr u32 NroMagic = 0x304F524E;
++    constexpr size_t NroMagicOffset = 0x10;
++    constexpr size_t NroHeaderEnd = 0x80;
++    constexpr size_t PatcherSkippedBytes = 0x24;
++    constexpr size_t MaxRelativeBranch = 128ULL << 20;
++
++    if (!this->IsApplication() || !Settings::IsNceEnabled() || size <= NroHeaderEnd) {
++        return;
++    }
++    const u64 module_start = GetInteger(address);
++    if (m_memory.Read32(module_start + NroMagicOffset) != NroMagic) {
++        return;
++    }
++    for (const auto& known : m_runtime_patches) {
++        if (module_start < known.code_end && known.code_start < module_start + size) {
++            return;
++        }
++    }
++
++    const u64 text_start = module_start + NroHeaderEnd - PatcherSkippedBytes;
++    const size_t text_size = size - (NroHeaderEnd - PatcherSkippedBytes);
++    std::vector<u8> image(text_size);
++    m_memory.ReadBlock(text_start, image.data(), text_size);
++
++    Core::NCE::Patcher patcher;
++    const CodeSet::Segment text{.offset = 0, .addr = 0, .size = static_cast<u32>(text_size)};
++    if (!patcher.PatchText(image, text) ||
++        patcher.GetPatchMode() != Core::NCE::PatchMode::PostData) {
++        LOG_ERROR(Kernel, "NCE: code at {:#x} ({:#x} bytes) is too large to patch", module_start,
++                  size);
++        return;
++    }
++    const size_t patch_size = patcher.GetSectionSize();
++
++    KProcessAddress patch_address = 0;
++    u64 candidate = Common::AlignUp(text_start + text_size, PageSize);
++    while (candidate + patch_size - text_start <= MaxRelativeBranch) {
++        KMemoryInfo info;
++        Svc::PageInfo page_info;
++        if (R_FAILED(m_page_table.QueryInfo(&info, &page_info, candidate))) {
++            break;
++        }
++        const bool fits = info.GetState() == KMemoryState::Free &&
++                          candidate + patch_size <= info.GetEndAddress() &&
++                          m_page_table.CanContain(candidate, patch_size, KMemoryState::AliasCode);
++        if (fits) {
++            patch_address = candidate;
++            break;
++        }
++        candidate = info.GetEndAddress();
++    }
++    if (patch_address == 0 ||
++        R_FAILED(m_page_table.MapPages(patch_address, patch_size / PageSize,
++                                       KMemoryState::AliasCode,
++                                       KMemoryPermission::UserReadWrite))) {
++        LOG_ERROR(Kernel, "NCE: no room for the patch of the code at {:#x}", module_start);
++        return;
++    }
++
++    Core::NCE::EntryTrampolines trampolines;
++    patcher.SetPatchSectionDistance(GetInteger(patch_address) - text_start);
++    patcher.RelocateAndCopy(text_start, text, image, &trampolines);
++    m_memory.WriteBlock(text_start, image.data(), text_size);
++    m_memory.WriteBlock(patch_address, image.data() + text_size, patch_size);
++
++    auto* const text_pointer = reinterpret_cast<char*>(text_start);
++    auto* const patch_pointer = reinterpret_cast<char*>(GetInteger(patch_address));
++    __builtin___clear_cache(text_pointer, text_pointer + text_size);
++    __builtin___clear_cache(patch_pointer, patch_pointer + patch_size);
++
++    m_page_table.SetProcessMemoryPermission(patch_address, patch_size,
++                                            Svc::MemoryPermission::None);
++    m_kernel.System().DeviceMemory().buffer.Protect(
++        GetInteger(patch_address), patch_size,
++        Common::MemoryPermission::Read | Common::MemoryPermission::Execute);
++
++    {
++        std::unique_lock lk{m_post_handlers_lock};
++        m_post_handlers.insert(trampolines.begin(), trampolines.end());
++    }
++    m_runtime_patches.push_back({module_start, module_start + size, patch_address, patch_size});
++    LOG_INFO(Kernel, "NCE: patched code at {:#x} ({:#x} bytes), {} entries, patch at {:#x}",
++             module_start, size, trampolines.size(), GetInteger(patch_address));
++}
++
++void KProcess::ForgetRuntimeCode(KProcessAddress address, size_t size) {
++    const u64 start = GetInteger(address);
++    const u64 end = start + size;
++    for (auto it = m_runtime_patches.begin(); it != m_runtime_patches.end();) {
++        if (it->code_start < start || end < it->code_end) {
++            ++it;
++            continue;
++        }
++        {
++            std::unique_lock lk{m_post_handlers_lock};
++            std::vector<u64> stale;
++            for (const auto& [pc, trampoline] : m_post_handlers) {
++                if (it->code_start <= pc && pc <= it->code_end) {
++                    stale.push_back(pc);
++                }
++            }
++            for (const u64 pc : stale) {
++                m_post_handlers.erase(pc);
++            }
++        }
++        m_page_table.UnmapPages(it->patch_address, it->patch_size / PageSize,
++                                KMemoryState::AliasCode);
++        it = m_runtime_patches.erase(it);
++    }
++}
++#endif
++
+ void KProcess::InitializeInterfaces() {
+     m_exclusive_monitor =
+         Core::MakeExclusiveMonitor(this->GetMemory(), Core::Hardware::NUM_CPU_CORES);
+--- a/src/core/hle/kernel/k_process.h
++++ b/src/core/hle/kernel/k_process.h
+@@ -7,6 +7,9 @@
+ #pragma once
+ 
+ #include <map>
++#include <optional>
++#include <shared_mutex>
++#include <vector>
+ 
+ #include "core/arm/arm_interface.h"
+ #include "core/file_sys/program_metadata.h"
+@@ -78,7 +81,16 @@ private:
+     std::array<DebugWatchpoint, Core::Hardware::NUM_WATCHPOINTS> m_watchpoints{};
+     std::map<KProcessAddress, u64> m_debug_page_refcounts{};
+ #ifdef HAS_NCE
++    struct RuntimePatch {
++        u64 code_start;
++        u64 code_end;
++        KProcessAddress patch_address;
++        size_t patch_size;
++    };
++
+     ankerl::unordered_dense::map<u64, u64> m_post_handlers{};
++    std::shared_mutex m_post_handlers_lock{};
++    std::vector<RuntimePatch> m_runtime_patches{};
+ #endif
+     std::unique_ptr<Core::ExclusiveMonitor> m_exclusive_monitor;
+     Core::Memory::Memory m_memory;
+@@ -496,6 +508,10 @@ public:
+     ankerl::unordered_dense::map<u64, u64>& GetPostHandlers() noexcept {
+         return m_post_handlers;
+     }
++
++    std::optional<u64> FindPostHandler(u64 pc);
++    void PatchRuntimeCode(KProcessAddress address, size_t size);
++    void ForgetRuntimeCode(KProcessAddress address, size_t size);
+ #endif
+ 
+     Core::ArmInterface* GetArmInterface(size_t core_index) const {
+--- a/src/core/hle/kernel/svc/svc_process_memory.cpp
++++ b/src/core/hle/kernel/svc/svc_process_memory.cpp
+@@ -56,7 +56,13 @@ Result SetProcessMemoryPermission(Core::System& system, Handle process_handle, u
+     R_UNLESS(page_table.Contains(address, size), ResultInvalidCurrentMemory);
+ 
+     // Set the memory permission.
+-    R_RETURN(page_table.SetProcessMemoryPermission(address, size, perm));
++    R_TRY(page_table.SetProcessMemoryPermission(address, size, perm));
++#ifdef HAS_NCE
++    if (perm == Svc::MemoryPermission::ReadExecute) {
++        process->PatchRuntimeCode(address, size);
++    }
++#endif
++    R_SUCCEED();
+ }
+ 
+ Result MapProcessMemory(Core::System& system, u64 dst_address, Handle process_handle,
+@@ -250,7 +256,11 @@ Result UnmapProcessCodeMemory(Core::System& system, Handle process_handle, u64 d
+         R_THROW(ResultInvalidCurrentMemory);
+     }
+ 
+-    R_RETURN(page_table.UnmapCodeMemory(dst_address, src_address, size));
++    R_TRY(page_table.UnmapCodeMemory(dst_address, src_address, size));
++#ifdef HAS_NCE
++    process->ForgetRuntimeCode(dst_address, size);
++#endif
++    R_SUCCEED();
+ }
+ 
+ Result SetProcessMemoryPermission64(Core::System& system, Handle process_handle, uint64_t address,

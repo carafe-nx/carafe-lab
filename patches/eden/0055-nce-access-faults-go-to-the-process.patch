@@ -1,0 +1,130 @@
+Carafe Lab: under NCE an access the guest may not make goes to the process's exception handler as a data
+abort with its address, as under the JIT, instead of skipping the instruction; the runtime commits reserved
+memory and swaps pages in from these aborts. A fault on a page the guest maps but may not access that way is a
+permission fault instead of a retry of the same instruction forever. An unaligned exclusive access, which the
+PC's CPU faults on as the console's does and Eden's interpreter cannot run, is an alignment fault (DFSC 0x21),
+which the runtime reports as a misaligned access. A read of a page the GPU caches first downloads what the GPU
+wrote there, as the JIT's reads do since 0012; Eden only invalidated the GPU's copy, so the CPU read stale data
+such as query results.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/arm/arm_interface.h
++++ b/src/core/arm/arm_interface.h
+@@ -45,6 +45,7 @@ struct MemoryAbort {
+     u64 address;
+     bool write;
+     bool permission{};
++    bool alignment{};
+ };
+ 
+ enum class Architecture {
+--- a/src/core/arm/nce/arm_nce.cpp
++++ b/src/core/arm/nce/arm_nce.cpp
+@@ -29,6 +29,7 @@ struct sigaction g_orig_segv_action;
+ struct sigaction g_orig_ill_action;
+ struct sigaction g_orig_trap_action;
+ 
++constexpr u64 EsrWriteNotRead = 1ULL << 6;
+ constexpr u32 MrsRegisterMask = 0x1F;
+ constexpr u32 MrsCntpctEl0 = 0xD53BE020;
+ constexpr u32 MrsCntvctEl0 = 0xD53BE040;
+@@ -47,6 +48,17 @@ fpsimd_context* GetFloatingPointState(mcontext_t& host_ctx) {
+     return reinterpret_cast<fpsimd_context*>(header);
+ }
+ 
++u64 GetFaultSyndrome(mcontext_t& host_ctx) {
++    auto* header = reinterpret_cast<_aarch64_ctx*>(&host_ctx.__reserved);
++    while (header->magic != 0) {
++        if (header->magic == ESR_MAGIC) {
++            return reinterpret_cast<esr_context*>(header)->esr;
++        }
++        header = reinterpret_cast<_aarch64_ctx*>(reinterpret_cast<char*>(header) + header->size);
++    }
++    return 0;
++}
++
+ using namespace Common::Literals;
+ constexpr u32 StackSize = 128_KiB;
+ 
+@@ -127,12 +139,19 @@ bool ArmNce::HandleFailedGuestFault(GuestContext* guest_ctx, void* raw_info, voi
+     // For data aborts, skip the instruction and return to guest code.
+     // This will allow games to continue in many scenarios where they would otherwise crash.
+     if (!is_prefetch_abort) {
+-        host_ctx.pc += 4;
+-        return true;
++        const u64 fault_address = reinterpret_cast<u64>(info->si_addr);
++        auto& memory = guest_ctx->parent->m_running_thread->GetOwnerProcess()->GetMemory();
++        guest_ctx->parent->m_memory_abort = MemoryAbort{
++            .address = fault_address,
++            .write = (GetFaultSyndrome(host_ctx) & EsrWriteNotRead) != 0,
++            .permission = memory.IsValidVirtualAddressRange(fault_address, 1),
++            .alignment = info->si_signo == SIGBUS,
++        };
+     }
+ 
+     // This is a prefetch abort.
+-    guest_ctx->esr_el1.fetch_or(static_cast<u64>(HaltReason::PrefetchAbort));
++    guest_ctx->esr_el1.fetch_or(static_cast<u64>(is_prefetch_abort ? HaltReason::PrefetchAbort
++                                                                   : HaltReason::DataAbort));
+ 
+     // Forcibly mark the context as locked. We are still running.
+     // We may race with SignalInterrupt here:
+@@ -171,7 +190,12 @@ bool ArmNce::HandleGuestAccessFault(GuestContext* guest_ctx, void* raw_info, voi
+     const Common::ProcessAddress addr =
+         (reinterpret_cast<u64>(info->si_addr) & ~Memory::YUZU_PAGEMASK);
+     auto& memory = guest_ctx->parent->m_running_thread->GetOwnerProcess()->GetMemory();
+-    if (memory.InvalidateNCE(addr, Memory::YUZU_PAGESIZE)) {
++    auto& host_ctx = static_cast<ucontext_t*>(raw_context)->uc_mcontext;
++    const u64 fault_address = reinterpret_cast<u64>(info->si_addr);
++    const bool write = (GetFaultSyndrome(host_ctx) & EsrWriteNotRead) != 0;
++    const bool allowed = host_ctx.pc != fault_address &&
++                         !memory.FirstDeniedAddress(fault_address, 1, write).has_value();
++    if (allowed && memory.InvalidateNCE(addr, Memory::YUZU_PAGESIZE, write)) {
+         // We handled the access successfully and are returning to guest code.
+         return true;
+     }
+--- a/src/core/hle/kernel/physical_core.cpp
++++ b/src/core/hle/kernel/physical_core.cpp
+@@ -33,7 +33,9 @@ bool EnterUserExceptionHandler(KernelCore& kernel, KProcess& process, Core::ArmI
+     u64 far = 0;
+     u64 type = Svc::ExceptionTypeInstructionAbort;
+     if (memory_abort) {
+-        const u32 fault_status = memory_abort->permission ? 0x0FU : 0x07U;
++        const u32 fault_status = memory_abort->alignment    ? 0x21U
++                                 : memory_abort->permission ? 0x0FU
++                                                            : 0x07U;
+         esr |= (0x24U << 26) | (memory_abort->write ? 1U << 6 : 0U) | fault_status;
+         far = memory_abort->address;
+         type = Svc::ExceptionTypeDataAbort;
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -1034,7 +1034,7 @@ void Memory::MarkRegionDebug(Common::ProcessAddress vaddr, u64 size, bool debug)
+     impl->MarkRegionDebug(GetInteger(vaddr), size, debug);
+ }
+ 
+-bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size) {
++bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size, bool write) {
+     [[maybe_unused]] bool mapped = true;
+     [[maybe_unused]] bool rasterizer = false;
+ 
+@@ -1047,6 +1047,9 @@ bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size) {
+         },
+         [&] { rasterizer = true; });
+     if (rasterizer) {
++        if (!write) {
++            impl->HandleRasterizerDownload(GetInteger(vaddr), size, true);
++        }
+         impl->InvalidateGPUMemory(ptr, size);
+     }
+ 
+--- a/src/core/memory.h
++++ b/src/core/memory.h
+@@ -496,7 +496,7 @@ public:
+ 
+     void SetGPUDirtyManagers(std::span<Core::GPUDirtyMemoryManager> managers);
+ 
+-    bool InvalidateNCE(Common::ProcessAddress vaddr, size_t size);
++    bool InvalidateNCE(Common::ProcessAddress vaddr, size_t size, bool write = true);
+ 
+     bool InvalidateSeparateHeap(void* fault_address);
+ 

@@ -1,0 +1,221 @@
+Carafe Lab: counter reads, traps and host signals in natively run guest code. Eden's patcher stopped on a read
+of CNTFRQ_EL0, which Carafe's runtime makes once; it now gets the console's 19.2 MHz from a trampoline like the
+other registers. FEX reads CNTPCT_EL0 in the code it generates, which Linux does not let user code read; the
+counter runs at the console's 19.2 MHz on the lab PC, so the trapped instruction is rewritten into a read of
+CNTVCT_EL0 and runs on. Any other undefined instruction and every brk go to the process's exception handler as
+under the JIT; the runtime continues contexts through one. The cores' threads block the signals sent to the whole
+process, such as the lab's SIGUSR1 close, so their handlers never run on a guest stack with guest registers.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/arm/nce/arm_nce.cpp
++++ b/src/core/arm/nce/arm_nce.cpp
+@@ -26,6 +26,12 @@ namespace {
+ 
+ struct sigaction g_orig_bus_action;
+ struct sigaction g_orig_segv_action;
++struct sigaction g_orig_ill_action;
++struct sigaction g_orig_trap_action;
++
++constexpr u32 MrsRegisterMask = 0x1F;
++constexpr u32 MrsCntpctEl0 = 0xD53BE020;
++constexpr u32 MrsCntvctEl0 = 0xD53BE040;
+ 
+ // Verify assembly offsets.
+ using NativeExecutionParameters = Kernel::KThread::NativeExecutionParameters;
+@@ -174,6 +180,43 @@ bool ArmNce::HandleGuestAccessFault(GuestContext* guest_ctx, void* raw_info, voi
+     return HandleFailedGuestFault(guest_ctx, raw_info, raw_context);
+ }
+ 
++bool ArmNce::HandleGuestTrap(GuestContext* guest_ctx, void* raw_info, void* raw_context) {
++    auto* info = static_cast<siginfo_t*>(raw_info);
++    auto& host_ctx = static_cast<ucontext_t*>(raw_context)->uc_mcontext;
++    auto& thread_params = guest_ctx->parent->m_running_thread->GetNativeExecutionParameters();
++
++    if (info->si_signo == SIGILL) {
++        auto* const instruction = reinterpret_cast<u32*>(host_ctx.pc);
++        const u32 opcode = *instruction & ~MrsRegisterMask;
++        if (opcode == MrsCntvctEl0) {
++            return true;
++        }
++        if (opcode == MrsCntpctEl0) {
++            auto& memory = guest_ctx->parent->m_running_thread->GetOwnerProcess()->GetMemory();
++            memory.Write32(host_ctx.pc, MrsCntvctEl0 | (*instruction & MrsRegisterMask));
++            auto* const start = reinterpret_cast<char*>(instruction);
++            __builtin___clear_cache(start, start + sizeof(u32));
++            return true;
++        }
++    }
++
++    guest_ctx->esr_el1.fetch_or(static_cast<u64>(HaltReason::InstructionBreakpoint));
++    thread_params.lock.store(SpinLockLocked);
++    SaveGuestContext(guest_ctx, raw_context);
++    return false;
++}
++
++void ArmNce::HandleHostTrap(int sig, void* raw_info, void* raw_context) {
++    const auto& original = sig == SIGILL ? g_orig_ill_action : g_orig_trap_action;
++    if ((original.sa_flags & SA_SIGINFO) != 0 && original.sa_sigaction != nullptr) {
++        return original.sa_sigaction(sig, static_cast<siginfo_t*>(raw_info), raw_context);
++    }
++    if (original.sa_handler != SIG_DFL && original.sa_handler != SIG_IGN) {
++        return original.sa_handler(sig);
++    }
++    signal(sig, SIG_DFL);
++}
++
+ void ArmNce::HandleHostAlignmentFault(int sig, void* raw_info, void* raw_context) {
+     return g_orig_bus_action.sa_sigaction(sig, static_cast<siginfo_t*>(raw_info), raw_context);
+ }
+@@ -278,6 +321,14 @@ ArmNce::~ArmNce() = default;
+ void ArmNce::Initialize() {
+     if (m_thread_id == -1) {
+         m_thread_id = gettid();
++
++        sigset_t host_signals;
++        sigemptyset(&host_signals);
++        for (const int sig : {SIGHUP, SIGINT, SIGQUIT, SIGUSR1, SIGPIPE, SIGALRM, SIGTERM, SIGCHLD,
++                              SIGWINCH}) {
++            sigaddset(&host_signals, sig);
++        }
++        pthread_sigmask(SIG_BLOCK, &host_signals, nullptr);
+     }
+ 
+     // Configure signal stack.
+@@ -301,6 +352,8 @@ void ArmNce::Initialize() {
+         sigaddset(&signal_mask, BreakFromRunCodeSignal);
+         sigaddset(&signal_mask, GuestAlignmentFaultSignal);
+         sigaddset(&signal_mask, GuestAccessFaultSignal);
++        sigaddset(&signal_mask, SIGILL);
++        sigaddset(&signal_mask, SIGTRAP);
+ 
+         struct sigaction return_to_run_code_action {};
+         return_to_run_code_action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+@@ -330,6 +383,14 @@ void ArmNce::Initialize() {
+             reinterpret_cast<HandlerType>(&ArmNce::GuestAccessFaultSignalHandler);
+         access_fault_action.sa_mask = signal_mask;
+         Common::SigAction(GuestAccessFaultSignal, &access_fault_action, &g_orig_segv_action);
++
++        struct sigaction trap_action {};
++        trap_action.sa_flags = SA_SIGINFO | SA_ONSTACK;
++        trap_action.sa_sigaction =
++            reinterpret_cast<HandlerType>(&ArmNce::GuestTrapSignalHandler);
++        trap_action.sa_mask = signal_mask;
++        Common::SigAction(SIGILL, &trap_action, &g_orig_ill_action);
++        Common::SigAction(SIGTRAP, &trap_action, &g_orig_trap_action);
+     });
+ }
+ 
+--- a/src/core/arm/nce/arm_nce.h
++++ b/src/core/arm/nce/arm_nce.h
+@@ -63,6 +63,7 @@ private:
+     static void BreakFromRunCodeSignalHandler(int sig, void* info, void* raw_context);
+     static void GuestAlignmentFaultSignalHandler(int sig, void* info, void* raw_context);
+     static void GuestAccessFaultSignalHandler(int sig, void* info, void* raw_context);
++    static void GuestTrapSignalHandler(int sig, void* info, void* raw_context);
+ 
+     static void LockThreadParameters(void* tpidr);
+     static void UnlockThreadParameters(void* tpidr);
+@@ -76,6 +77,8 @@ private:
+     static bool HandleGuestAccessFault(GuestContext* ctx, void* info, void* raw_context);
+     static void HandleHostAlignmentFault(int sig, void* info, void* raw_context);
+     static void HandleHostAccessFault(int sig, void* info, void* raw_context);
++    static bool HandleGuestTrap(GuestContext* ctx, void* info, void* raw_context);
++    static void HandleHostTrap(int sig, void* info, void* raw_context);
+ 
+ public:
+     Core::System& m_system;
+--- a/src/core/arm/nce/arm_nce.s
++++ b/src/core/arm/nce/arm_nce.s
+@@ -223,6 +223,43 @@ _ZN4Core6ArmNce29GuestAccessFaultSignalHandlerEiPvS1_:
+     ret
+ 
+ 
++.section    .text._ZN4Core6ArmNce22GuestTrapSignalHandlerEiPvS1_, "ax", %progbits
++.global     _ZN4Core6ArmNce22GuestTrapSignalHandlerEiPvS1_
++.type       _ZN4Core6ArmNce22GuestTrapSignalHandlerEiPvS1_, %function
++_ZN4Core6ArmNce22GuestTrapSignalHandlerEiPvS1_:
++    mrs     x8, tpidr_el0
++    ldr     w9, [x8, #(TpidrEl0TlsMagic)]
++
++    LOAD_IMMEDIATE_32(w10, TlsMagic)
++
++    cmp     w9, w10
++    b.eq    1f
++
++    b       _ZN4Core6ArmNce14HandleHostTrapEiPvS1_
++
++1:
++    stp     x29, x30, [sp, #-0x20]!
++    str     x19, [sp, #0x10]
++    mov     x29, sp
++
++    mov     x19, x8
++
++    ldr     x0, [x8, #(TpidrEl0NativeContext)]
++    ldr     x3, [x0, #(GuestContextHostContext + HostContextTpidrEl0)]
++    msr     tpidr_el0, x3
++
++    bl      _ZN4Core6ArmNce15HandleGuestTrapEPNS_12GuestContextEPvS3_
++
++    cbz     x0, 2f
++
++    msr     tpidr_el0, x19
++
++2:
++    ldr     x19, [sp, #0x10]
++    ldp     x29, x30, [sp], #0x20
++    ret
++
++
+ /* static void Core::ArmNce::LockThreadParameters(void* tpidr) */
+ .section    .text._ZN4Core6ArmNce20LockThreadParametersEPv, "ax", %progbits
+ .global     _ZN4Core6ArmNce20LockThreadParametersEPv
+--- a/src/core/arm/nce/patcher.cpp
++++ b/src/core/arm/nce/patcher.cpp
+@@ -12,6 +12,7 @@
+ #include "core/arm/nce/patcher.h"
+ #include "core/core.h"
+ #include "core/core_timing.h"
++#include "core/hardware_properties.h"
+ #include "core/hle/kernel/svc.h"
+ #include "core/memory.h"
+ #include "core/hle/kernel/k_thread.h"
+@@ -145,7 +146,11 @@ bool Patcher::PatchText(std::span<const u8> program_image, const Kernel::CodeSet
+ 
+         // MRS Xn, CNTFRQ_EL0
+         if (auto mrs = MRS{inst}; mrs.Verify() && mrs.GetSystemReg() == CntfrqEl0) {
+-            UNREACHABLE();
++            bool pre_buffer = false;
++            auto ret = AddRelocations(pre_buffer);
++            WriteCntfrqHandler(ret, oaknut::XReg{static_cast<int>(mrs.GetRt())},
++                               pre_buffer ? c_pre : c);
++            continue;
+         }
+ 
+         // MSR TPIDR_EL0, Xn
+@@ -577,6 +582,15 @@ void Patcher::WriteMsrHandler(ModuleDestLabel module_dest, oaknut::XReg src_reg,
+         this->BranchToModule(module_dest);
+ }
+ 
++void Patcher::WriteCntfrqHandler(ModuleDestLabel module_dest, oaknut::XReg dest_reg,
++                                 oaknut::VectorCodeGenerator& cg) {
++    cg.MOV(dest_reg, Core::Hardware::CNTFREQ);
++    if (&cg == &c_pre)
++        this->BranchToModulePre(module_dest);
++    else
++        this->BranchToModule(module_dest);
++}
++
+ void Patcher::WriteCntpctHandler(ModuleDestLabel module_dest, oaknut::XReg dest_reg, oaknut::VectorCodeGenerator& cg) {
+     static Common::Arm64::NativeClock clock{};
+     const auto factor = clock.GetGuestCNTFRQFactor();
+--- a/src/core/arm/nce/patcher.h
++++ b/src/core/arm/nce/patcher.h
+@@ -85,6 +85,7 @@ private:
+     void WriteMrsHandler(ModuleDestLabel module_dest, oaknut::XReg dest_reg, oaknut::SystemReg src_reg, oaknut::VectorCodeGenerator& code);
+     void WriteMsrHandler(ModuleDestLabel module_dest, oaknut::XReg src_reg, oaknut::VectorCodeGenerator& code);
+     void WriteCntpctHandler(ModuleDestLabel module_dest, oaknut::XReg dest_reg, oaknut::VectorCodeGenerator& code);
++    void WriteCntfrqHandler(ModuleDestLabel module_dest, oaknut::XReg dest_reg, oaknut::VectorCodeGenerator& code);
+ 
+     // Convenience wrappers using default code generator
+     void WriteLoadContext() { WriteLoadContext(c); }
