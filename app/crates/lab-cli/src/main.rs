@@ -27,6 +27,7 @@ use lab_core::local::{self, LocalSettings};
 use lab_core::matrix;
 use lab_core::milestones::{Launch, Stage};
 use lab_core::perf;
+use lab_core::picture::Thumbnail;
 use lab_core::probes::{self, ProbeRun};
 use lab_core::problems;
 use lab_core::recording;
@@ -515,7 +516,13 @@ fn save_recording(config: &Config, name: &str) -> Result<ExitCode, String> {
         recording::Event::Start { game, .. } => Some(game.clone()),
         _ => None,
     });
-    let (scenario, points) = recording::scenario(&events, name, config.timeout);
+    let thumbnail = |file: &str| {
+        fs::read(file)
+            .ok()
+            .and_then(|png| Thumbnail::from_png(&png).ok())
+    };
+    let distance = |a: &str, b: &str| Some(thumbnail(a)?.difference(&thumbnail(b)?).mean);
+    let (scenario, points) = recording::scenario(&events, name, config.timeout, &distance);
     scenario.check().map_err(|error| error.to_string())?;
     for point in &points {
         let dest = config.work.join(REFERENCES_DIR).join(&point.reference);

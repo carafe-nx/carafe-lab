@@ -378,7 +378,9 @@ For Claude and for quick looks, one call each:
   picture taken becomes a `waitForScreen` on it, copied to `<work>/references/<name>/point-<n>.png`; each press keeps
   the time the game ran before it, and time it stood paused does not count. Start a pass with a picture, so the
   replay knows where the first press goes. The replay also waits the time the game ran from its first frame to that
-  picture, and from the last action to `record`;
+  picture, and from the last action to `record`. A picture within 1 of the point before it shows the same screen and
+  is no point of its own; any other point matches within half its distance from the point before it (at most 12),
+  so a replay does not take a loading screen for the next one that differs from it by a line of text;
 - during a game's loading, let it load without live commands: a picture or a pause while Need for Speed Underground
   2 loads a race crashed Eden in 3 passes of 3;
 - `perf` prints the median and worst-tenth FPS and the speed over the last 10 seconds; `--json` prints the readings.

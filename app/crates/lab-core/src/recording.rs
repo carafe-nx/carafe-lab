@@ -9,6 +9,12 @@ use crate::scenario::{Milestone, Scenario, Step};
 /// The shortest stretch of the game running between two presses that the replay waits out.
 const SHORTEST_WAIT_MS: u64 = 200;
 
+/// The distance under which a picture shows the same screen as the point before it.
+pub const DISTINCT_AT_LEAST: f64 = 1.0;
+
+const TIGHTEST_TOLERANCE: f64 = 0.5;
+const LOOSEST_TOLERANCE: f64 = 12.0;
+
 /// Seconds a replay waits for each recorded picture at least.
 const SCREEN_TIMEOUT_MIN: u32 = 60;
 
@@ -87,8 +93,17 @@ pub struct Point {
 /// The replay launches the game and waits for its first frame, then waits for each recorded picture until the
 /// screen matches it, presses what the player pressed and waits out the time the game ran between two presses;
 /// time it stood paused does not count. It ends by closing the game.
+///
+/// `distance` gives the mean brightness difference, 0–255, of two picture files. A picture within
+/// [`DISTINCT_AT_LEAST`] of the point before it shows the same screen and is no point of its own; any other point
+/// matches within half its distance from the point before it, so the replay cannot take one screen for the other.
 #[must_use]
-pub fn scenario(events: &[Event], name: &str, first_frame_timeout: u32) -> (Scenario, Vec<Point>) {
+pub fn scenario(
+    events: &[Event],
+    name: &str,
+    first_frame_timeout: u32,
+    distance: &dyn Fn(&str, &str) -> Option<f64>,
+) -> (Scenario, Vec<Point>) {
     let mut steps = vec![
         Step::Launch,
         Step::WaitFor {
@@ -160,6 +175,12 @@ pub fn scenario(events: &[Event], name: &str, first_frame_timeout: u32) -> (Scen
             }
             Event::Screen { at, file } => {
                 run_until(*at, &mut since, &mut ran_ms, paused);
+                let apart = points
+                    .last()
+                    .and_then(|last: &Point| distance(&last.file, file));
+                if apart.is_some_and(|apart| apart < DISTINCT_AT_LEAST) {
+                    continue;
+                }
                 if first_frame && !seen_point && ran_ms >= SHORTEST_WAIT_MS {
                     steps.push(Step::Wait {
                         seconds: ran_ms as f32 / 1000.0,
@@ -168,10 +189,13 @@ pub fn scenario(events: &[Event], name: &str, first_frame_timeout: u32) -> (Scen
                 let number = points.len() + 1;
                 let reference = format!("{name}/point-{number}.png");
                 let timeout = SCREEN_TIMEOUT_MIN.max((ran_ms / 1000) as u32 * 3);
+                let tolerance = apart.map_or(LOOSEST_TOLERANCE, |apart| {
+                    (apart / 2.0).clamp(TIGHTEST_TOLERANCE, LOOSEST_TOLERANCE)
+                });
                 steps.push(Step::WaitForScreen {
                     name: format!("point-{number}"),
                     reference: reference.clone(),
-                    tolerance: 12.0,
+                    tolerance: tolerance as f32,
                     timeout,
                 });
                 points.push(Point {
@@ -243,7 +267,7 @@ mod tests {
                 file: "b.png".to_owned(),
             },
         ];
-        let (scenario, points) = scenario(&events, "g-menu", 300);
+        let (scenario, points) = scenario(&events, "g-menu", 300, &|_, _| None);
         assert_eq!(
             scenario.steps,
             vec![
@@ -294,7 +318,7 @@ mod tests {
             press(31_000, 0.0),
             press(33_200, 0.0),
         ];
-        let (scenario, _) = scenario(&events, "g", 300);
+        let (scenario, _) = scenario(&events, "g", 300, &|_, _| None);
         assert_eq!(scenario.steps[3], Step::Wait { seconds: 1.0 });
         assert_eq!(scenario.steps[5], Step::Wait { seconds: 2.0 });
     }
@@ -319,7 +343,7 @@ mod tests {
             },
             press(60_000, 0.5),
         ];
-        let (scenario, _) = scenario(&events, "g", 300);
+        let (scenario, _) = scenario(&events, "g", 300, &|_, _| None);
         assert_eq!(scenario.steps[3], Step::Tap { x: 640, y: 360 });
         assert_eq!(scenario.steps[4], Step::Wait { seconds: 1.5 });
     }
@@ -339,11 +363,48 @@ mod tests {
             },
             press(50_000, 3.0),
         ];
-        let (scenario, _) = scenario(&events, "g", 300);
+        let (scenario, _) = scenario(&events, "g", 300, &|_, _| None);
         assert_eq!(scenario.steps[2], Step::Wait { seconds: 12.0 });
         assert!(matches!(scenario.steps[3], Step::WaitForScreen { .. }));
         assert_eq!(scenario.steps[5], Step::Wait { seconds: 3.0 });
         assert_eq!(scenario.steps[6], Step::Close { timeout: 60 });
+    }
+
+    #[test]
+    fn a_point_must_stand_apart_from_the_one_before() {
+        let shot = |at: u64, file: &str| Event::Screen {
+            at,
+            file: file.to_owned(),
+        };
+        let events = vec![
+            Event::Start {
+                at: 0,
+                game: "G".to_owned(),
+            },
+            Event::Pause { at: 1_000 },
+            shot(2_000, "loading.png"),
+            shot(3_000, "loading-again.png"),
+            shot(4_000, "click.png"),
+            shot(5_000, "menu.png"),
+        ];
+        let distance = |a: &str, b: &str| -> Option<f64> {
+            Some(match (a, b) {
+                ("loading.png", "loading-again.png") => 0.2,
+                ("loading.png", "click.png") => 3.0,
+                _ => 40.0,
+            })
+        };
+        let (scenario, points) = scenario(&events, "g", 300, &distance);
+        assert_eq!(points.len(), 3);
+        let tolerances: Vec<f32> = scenario
+            .steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::WaitForScreen { tolerance, .. } => Some(*tolerance),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tolerances, vec![12.0, 1.5, 12.0]);
     }
 
     #[test]
