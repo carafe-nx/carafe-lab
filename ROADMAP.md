@@ -12,6 +12,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 ## Planned
 
 - [ ] **`feature` Live passes: a card per game, a paused player, the pass written down as the game's scenario**
+- [ ] `bug` Dead Space does not build: the work folder's staging path makes its longest file path 299 bytes, over hacBrewPack's 259
+- [ ] `research` Dead Space hangs after its intro in the lab: DXVK's thread spins in NVK's buffer-to-image copy (NCE or Eden?)
 - [ ] `bug` Eden crashes (SIGSEGV) when live commands reach it while Need for Speed Underground 2 loads a race
 - [ ] `bug` After a crashed session the next launch can hang before its first frame, with thousands of threads started
 - [ ] `bug` While Carafe's on-screen keyboard is open over a Vulkan game, Eden shows the whole frame with red and blue swapped
