@@ -13,7 +13,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 - [ ] **`feature` Live passes: a card per game, a paused player, the pass written down as the game's scenario**
 - [ ] `bug` HoMM IV's main menu does not answer: black after the intro until an input, then a picture one input behind, clicks do nothing; with and without NCE. Wine loads its own ddraw (wined3d), not the game's Verok `DDRAW.dll`: the wrapper has no `CompanyName`, so Wine's load-order heuristic picks the builtin. Console behaviour to ask
-- [ ] `bug` Dead Space under NCE: its intro video shows rows of stale lines; the menu background stays black and a ponytail stretches to the floor
+- [ ] `research` Dead Space under NCE: with `0060` the opening cut-scene shows stretched untextured triangles at 2–4 fps and one page faults hundreds of times; without `0060` it hung before that scene, so whether `0060` causes the triangles is unknown; intro video has stale lines, ponytail stretches
 - [ ] `bug` Eden crashes (SIGSEGV) when live commands reach it while Need for Speed Underground 2 loads a race
 - [ ] `bug` After a crashed session the next launch can hang before its first frame, with thousands of threads started
 - [ ] `bug` While Carafe's on-screen keyboard is open over a Vulkan game, Eden shows the whole frame with red and blue swapped
