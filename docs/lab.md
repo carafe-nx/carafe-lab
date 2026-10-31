@@ -366,7 +366,8 @@ For Claude and for quick looks, one call each:
   who looks at the screen and decides what to press gets all the time it needs;
 - `tap <x> <y>` touches the running game's screen at a point of 1280×720: Eden takes a click on its window for a
   touch, and Carafe moves the mouse cursor there;
-- `screen <file.png>` saves the running game's screen, paused or not;
+- `screen <file.png>` saves the running game's screen, paused or not; with `--no-point` the picture stays out of the
+  recorded pass, for play the replay cannot repeat picture by picture, such as driving;
 - `record <name>` writes the pass since `play` down as `<work>/scenarios/<name>.json` (decision 9). `play` starts
   `<work>/recording.jsonl` afresh, and `press`, `screen`, `pause` and `resume` add to it. In the scenario each
   picture taken becomes a `waitForScreen` on it, copied to `<work>/references/<name>/point-<n>.png`; each press keeps

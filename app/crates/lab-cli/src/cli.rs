@@ -33,7 +33,8 @@ Usage:
                                    taken becomes a point the replay waits for, with its picture in
                                    references/<name>/; presses keep the game time between them
   carafe-lab tap <x> <y>           taps the running game's screen at a point of 1280×720, as a finger would
-  carafe-lab screen <file.png>     saves the running game's screen, paused or not
+  carafe-lab screen <file.png>     saves the running game's screen, paused or not; --no-point keeps it out of
+                                   the recorded pass, for pictures of play the replay cannot repeat
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
   carafe-lab nsp <file> [--json]   what a ready NSP was built from: runtime version, settings, game folder
@@ -224,6 +225,8 @@ pub struct Args {
     pub nsp: Vec<PathBuf>,
     /// `--rebuild`.
     pub rebuild: bool,
+    /// `--no-point`.
+    pub no_point: bool,
     /// `--scenario`: `standard` or a scenario file relative to the work folder.
     pub scenario: Option<String>,
     /// `--args`: the program arguments every game of the plan gets instead of its own.
@@ -315,6 +318,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         like: None,
         nsp: Vec::new(),
         rebuild: false,
+        no_point: false,
         scenario: None,
         arguments: None,
         video: Video::Full,
@@ -398,6 +402,7 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
             "--like" => parsed.like = Some(value("a run folder")?),
             "--nsp" => parsed.nsp.push(PathBuf::from(value("an NSP file")?)),
             "--rebuild" => parsed.rebuild = true,
+            "--no-point" => parsed.no_point = true,
             "--minutes" => parsed.minutes = number(arg, value("minutes")?, "minutes")?,
             "--hold" => {
                 let seconds: f64 = number(arg, value("seconds")?, "seconds")?;

@@ -1368,15 +1368,17 @@ impl Lab {
         self.eden
             .screenshot(file)
             .map_err(|error| error.to_string())?;
-        let whole = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
-        record(
-            &config.work,
-            &recording::Event::Screen {
-                at: unix_ms(),
-                file: whole.display().to_string(),
-            },
-            false,
-        );
+        if !self.args.no_point {
+            let whole = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+            record(
+                &config.work,
+                &recording::Event::Screen {
+                    at: unix_ms(),
+                    file: whole.display().to_string(),
+                },
+                false,
+            );
+        }
         println!("{}", file.display());
         Ok(ExitCode::SUCCESS)
     }
