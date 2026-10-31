@@ -18,7 +18,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` Eden crashes (SIGSEGV) when live commands reach it while Need for Speed Underground 2 loads a race
 - [ ] `bug` After a crashed session the next launch can hang before its first frame, with thousands of threads started
 - [ ] `bug` While Carafe's on-screen keyboard is open over a Vulkan game, Eden shows the whole frame with red and blue swapped
-- [ ] `bug` A recorded point matches a different picture: two random OpenTTD maps, or a black screen and a dark one, differ by under 12
+- [ ] `bug` A recorded point of a random scene still matches another random scene: two OpenTTD maps differ by under 12
 - [ ] `research` Need for Speed Carbon in a detailed retry: Eden shows black while the game reports 27 FPS
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
@@ -66,6 +66,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `bug` Recorded points of dark screens no longer match each other: each point matches within half its distance from the one before
 - [x] `bug` NFSU2's road, speedometer and minimap drawn black: render targets join the mip-mapped textures sampled from them (`0058`)
 - [x] `feature` NCE runs Carafe's guest code natively and is the default; the GPU path no longer waits on every flush and present (decision 8)
 - [x] `feature` Faster launches: the NAND goes to Eden as one archive (41 s → 1 s), an A/B of options runs both variants from one NSP, Eden's shader cache is kept
