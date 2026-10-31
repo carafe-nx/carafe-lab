@@ -638,6 +638,13 @@ impl<'a> Runner<'a> {
                                 format!("the game crashed ({})", describe_exit(launch.exit));
                             return self.result(step, Outcome::Fail, detail, None);
                         }
+                        if !self.emulator.running() {
+                            let detail = match self.emulator.end_reason() {
+                                Some(reason) => format!("the emulator ended: {reason}"),
+                                None => "the emulator ended".to_owned(),
+                            };
+                            return self.result(step, Outcome::Fail, detail, None);
+                        }
                     }
                     self.glimpse();
                     self.clock

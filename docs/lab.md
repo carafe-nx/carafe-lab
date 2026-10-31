@@ -371,7 +371,10 @@ For Claude and for quick looks, one call each:
   `<work>/recording.jsonl` afresh, and `press`, `screen`, `pause` and `resume` add to it. In the scenario each
   picture taken becomes a `waitForScreen` on it, copied to `<work>/references/<name>/point-<n>.png`; each press keeps
   the time the game ran before it, and time it stood paused does not count. Start a pass with a picture, so the
-  replay knows where the first press goes;
+  replay knows where the first press goes. The replay also waits the time the game ran from its first frame to that
+  picture, and from the last action to `record`;
+- during a game's loading, let it load without live commands: a picture or a pause while Need for Speed Underground
+  2 loads a race crashed Eden in 3 passes of 3;
 - `perf` prints the median and worst-tenth FPS and the speed over the last 10 seconds; `--json` prints the readings.
 - `logs` prints how far the running game got (loading screen, first frame, stalls) and the error and warning lines of
   Eden's log since its boot, the overlay's and the runtime's, grouped; `--json` prints the milestones and every group.

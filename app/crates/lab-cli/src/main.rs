@@ -25,7 +25,7 @@ use lab_core::emulator::{EdenCpu, Gpu};
 use lab_core::lang::Lang;
 use lab_core::local::{self, LocalSettings};
 use lab_core::matrix;
-use lab_core::milestones::Launch;
+use lab_core::milestones::{Launch, Stage};
 use lab_core::perf;
 use lab_core::probes::{self, ProbeRun};
 use lab_core::problems;
@@ -507,7 +507,8 @@ fn save_recording(config: &Config, name: &str) -> Result<ExitCode, String> {
     }
     let text = fs::read_to_string(config.work.join(RECORDING_FILE))
         .map_err(|_| "nothing is recorded: start a game with carafe-lab play <game>".to_owned())?;
-    let events = recording::parse(&text);
+    let mut events = recording::parse(&text);
+    events.push(recording::Event::Pause { at: unix_ms() });
     let game = events.iter().find_map(|event| match event {
         recording::Event::Start { game, .. } => Some(game.clone()),
         _ => None,
@@ -1494,9 +1495,18 @@ impl Lab {
             references: self.references.clone(),
             stop,
         };
+        let playing = matches!(self.args.command, Command::Play { .. });
+        let work = self.work.clone();
         let mut on_event = |event: &Event| {
             if let (Event::RunStarted { dir, .. }, Some(holding)) = (event, &holding) {
                 holding.set_run_dir(dir);
+            }
+            if playing && matches!(event, Event::Reached { stage } if *stage == Stage::FirstFrame) {
+                record(
+                    &work,
+                    &recording::Event::FirstFrame { at: unix_ms() },
+                    false,
+                );
             }
             if json {
                 if let Ok(line) = serde_json::to_string(event) {

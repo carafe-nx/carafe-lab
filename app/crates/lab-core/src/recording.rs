@@ -24,6 +24,11 @@ pub enum Event {
         /// The game's name in `lab.json`.
         game: String,
     },
+    /// The game drew its first frame.
+    FirstFrame {
+        /// Unix milliseconds.
+        at: u64,
+    },
     /// The game stood still.
     Pause {
         /// Unix milliseconds.
@@ -96,12 +101,19 @@ pub fn scenario(events: &[Event], name: &str, first_frame_timeout: u32) -> (Scen
     let mut since: Option<u64> = None;
     let mut ran_ms: u64 = 0;
     let mut seen_point = false;
+    let mut first_frame = false;
     for event in events {
         match event {
             Event::Start { at, .. } => {
                 since = Some(*at);
                 ran_ms = 0;
                 paused = false;
+                first_frame = false;
+            }
+            Event::FirstFrame { at } => {
+                since = Some(*at);
+                ran_ms = 0;
+                first_frame = true;
             }
             Event::Pause { at } => {
                 run_until(*at, &mut since, &mut ran_ms, paused);
@@ -148,6 +160,11 @@ pub fn scenario(events: &[Event], name: &str, first_frame_timeout: u32) -> (Scen
             }
             Event::Screen { at, file } => {
                 run_until(*at, &mut since, &mut ran_ms, paused);
+                if first_frame && !seen_point && ran_ms >= SHORTEST_WAIT_MS {
+                    steps.push(Step::Wait {
+                        seconds: ran_ms as f32 / 1000.0,
+                    });
+                }
                 let number = points.len() + 1;
                 let reference = format!("{name}/point-{number}.png");
                 let timeout = SCREEN_TIMEOUT_MIN.max((ran_ms / 1000) as u32 * 3);
@@ -165,6 +182,11 @@ pub fn scenario(events: &[Event], name: &str, first_frame_timeout: u32) -> (Scen
                 ran_ms = 0;
             }
         }
+    }
+    if seen_point && ran_ms >= SHORTEST_WAIT_MS {
+        steps.push(Step::Wait {
+            seconds: ran_ms as f32 / 1000.0,
+        });
     }
     steps.push(Step::Close { timeout: 60 });
     (Scenario { steps }, points)
@@ -300,6 +322,28 @@ mod tests {
         let (scenario, _) = scenario(&events, "g", 300);
         assert_eq!(scenario.steps[3], Step::Tap { x: 640, y: 360 });
         assert_eq!(scenario.steps[4], Step::Wait { seconds: 1.5 });
+    }
+
+    #[test]
+    fn the_time_before_the_first_picture_and_after_the_last_press_is_kept() {
+        let events = vec![
+            Event::Start {
+                at: 0,
+                game: "G".to_owned(),
+            },
+            Event::FirstFrame { at: 30_000 },
+            Event::Pause { at: 42_000 },
+            Event::Screen {
+                at: 43_000,
+                file: "a.png".to_owned(),
+            },
+            press(50_000, 3.0),
+        ];
+        let (scenario, _) = scenario(&events, "g", 300);
+        assert_eq!(scenario.steps[2], Step::Wait { seconds: 12.0 });
+        assert!(matches!(scenario.steps[3], Step::WaitForScreen { .. }));
+        assert_eq!(scenario.steps[5], Step::Wait { seconds: 3.0 });
+        assert_eq!(scenario.steps[6], Step::Close { timeout: 60 });
     }
 
     #[test]
