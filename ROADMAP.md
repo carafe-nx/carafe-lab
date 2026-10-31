@@ -22,6 +22,10 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
 - [ ] `bug` "No slower than the last version" compares runs of different scenarios, such as a hands-on session in the menu against the standard one
+- [ ] `bug` The loader's restart for a fixed image base counts as the game's end: the first frame step fails at once
+- [ ] `bug` The Run screen keeps the last game's picture and stages while the next game's NSP is built
+- [ ] `bug` A stopped run leaves its NSP build folder in `nspDir`
+- [ ] `bug` After a game crashed the session, the next game's device save can fail to be created: Carafe's files are not mounted
 
 ### Research and later ideas (not the app)
 

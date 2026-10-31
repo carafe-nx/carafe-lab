@@ -1,0 +1,60 @@
+Carafe Lab: under NCE a 39-bit process keeps its whole 512 GiB address space, as on the console. Eden cut it to
+256 GiB and reserved as much host space for phones with a 39-bit host address space; the lab's host has 48 bits.
+Autorun refuses to start an AMD64 program when the address space ends below 512 GiB ("AMD64 requires the 39-bit
+forwarder"), so every 64-bit game stopped before its first frame. Under NCE the guest's addresses are the host's,
+and Eden maps guest memory only inside its host reservation, which sat at a random place from 64 GiB up: guest
+pages below it were never mapped. The reservation now starts at 128 MiB, where the guest's address space starts,
+and covers all of it; a random place is tried as before when that range is taken.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/common/host_memory.cpp
++++ b/src/common/host_memory.cpp
+@@ -404,6 +404,19 @@ static void* ChooseVirtualBase(size_t virtual_size) {
+ 
+     // We want to ensure we are allocating at an address aligned to the L2 block size.
+     // For Qualcomm devices, we must also allocate memory above 36 bits.
++    constexpr uintptr_t GuestSpaceStart = 128ULL << 20;
++    void* guest_window = mmap(reinterpret_cast<void*>(GuestSpaceStart), virtual_size, PROT_READ | PROT_WRITE,
++                              MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
++    if (reinterpret_cast<uintptr_t>(guest_window) == GuestSpaceStart) {
++        return guest_window;
++    }
++    if (guest_window != MAP_FAILED) {
++        munmap(guest_window, virtual_size);
++    }
++    if (virtual_size >= Map39BitSize - Map36BitSize) {
++        return MAP_FAILED;
++    }
++
+     const size_t lower = Map36BitSize / HugePageSize;
+     const size_t upper = (Map39BitSize - virtual_size) / HugePageSize;
+     const size_t range = upper - lower;
+--- a/src/core/device_memory.cpp
++++ b/src/core/device_memory.cpp
+@@ -6,11 +6,7 @@
+ 
+ namespace Core {
+ 
+-#ifdef HAS_NCE
+-constexpr size_t VirtualReserveSize = 1ULL << 38;
+-#else
+ constexpr size_t VirtualReserveSize = 1ULL << 39;
+-#endif
+ 
+ DeviceMemory::DeviceMemory()
+     : buffer{Kernel::Board::Nintendo::Nx::KSystemControl::Init::GetIntendedMemorySize(),
+--- a/src/core/hle/kernel/k_address_space_info.cpp
++++ b/src/core/hle/kernel/k_address_space_info.cpp
+@@ -25,12 +25,7 @@ constexpr std::array<KAddressSpaceInfo, 13> AddressSpaceInfos{{
+    { .bit_width = 36, .address = 2_GiB       , .size = 64_GiB  - 2_GiB  , .type = KAddressSpaceInfo::Type::MapLarge, },
+    { .bit_width = 36, .address = Size_Invalid, .size = 8_GiB            , .type = KAddressSpaceInfo::Type::Heap,     },
+    { .bit_width = 36, .address = Size_Invalid, .size = 6_GiB            , .type = KAddressSpaceInfo::Type::Alias,    },
+-#ifdef HAS_NCE
+-   // With NCE, we use a 38-bit address space due to memory limitations. This should (safely) truncate ASLR region.
+-   { .bit_width = 39, .address = 128_MiB     , .size = 256_GiB - 128_MiB, .type = KAddressSpaceInfo::Type::Map39Bit, },
+-#else
+    { .bit_width = 39, .address = 128_MiB     , .size = 512_GiB - 128_MiB, .type = KAddressSpaceInfo::Type::Map39Bit, },
+-#endif
+    { .bit_width = 39, .address = Size_Invalid, .size = 64_GiB           , .type = KAddressSpaceInfo::Type::MapSmall  },
+    { .bit_width = 39, .address = Size_Invalid, .size = 8_GiB            , .type = KAddressSpaceInfo::Type::Heap,     },
+    { .bit_width = 39, .address = Size_Invalid, .size = 64_GiB           , .type = KAddressSpaceInfo::Type::Alias,    },
