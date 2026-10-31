@@ -1,0 +1,27 @@
+Carafe Lab: under NCE a guest access that faults on a page Eden keeps cached for the GPU always leaves it uncached.
+InvalidateNCE asked the GPU caches to let go of the page and let the access run again; when no cache tracked the
+page's device address the host protection stayed, the access faulted again and the guest thread spun on one store
+forever (Dead Space: DXVK's thread in NVK's buffer-to-image copy, memcpy's first store). A page still marked cached
+after the caches were asked is now marked uncached, and Eden logs it once per fault.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -1054,6 +1054,17 @@ bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size, bool write
+             impl->HandleRasterizerDownload(GetInteger(vaddr), size, true);
+         }
+         impl->InvalidateGPUMemory(ptr, size);
++        const u64 first = GetInteger(vaddr) & ~YUZU_PAGEMASK;
++        const u64 last = (GetInteger(vaddr) + (std::max)(size, size_t{1}) - 1) & ~YUZU_PAGEMASK;
++        for (u64 page = first; page <= last; page += YUZU_PAGESIZE) {
++            if (impl->current_page_table->entries[page >> YUZU_PAGEBITS].ptr.Type() !=
++                Common::PageType::RasterizerCachedMemory) {
++                continue;
++            }
++            LOG_WARNING(HW_Memory, "NCE {} fault on GPU-cached page {:#x} that no cache let go: uncached",
++                        write ? "write" : "read", page);
++            impl->RasterizerMarkRegionCached(page, YUZU_PAGESIZE, false);
++        }
+     }
+ 
+ #ifdef __ANDROID__

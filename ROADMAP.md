@@ -13,7 +13,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 - [ ] **`feature` Live passes: a card per game, a paused player, the pass written down as the game's scenario**
 - [ ] `bug` HoMM IV's main menu does not answer: black after the intro until an input, then a picture one input behind, clicks do nothing; with and without NCE. Wine loads its own ddraw (wined3d), not the game's Verok `DDRAW.dll`: the wrapper has no `CompanyName`, so Wine's load-order heuristic picks the builtin. Console behaviour to ask
-- [ ] `bug` Dead Space hangs after its intro under NCE (DXVK's thread spins in NVK's buffer-to-image copy); dynarmic plays on at 3–4 fps and goes black in the first level
+- [ ] `bug` Dead Space under NCE: its intro video shows rows of stale lines; the menu background stays black and a ponytail stretches to the floor
 - [ ] `bug` Eden crashes (SIGSEGV) when live commands reach it while Need for Speed Underground 2 loads a race
 - [ ] `bug` After a crashed session the next launch can hang before its first frame, with thousands of threads started
 - [ ] `bug` While Carafe's on-screen keyboard is open over a Vulkan game, Eden shows the whole frame with red and blue swapped
@@ -65,6 +65,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `bug` Dead Space no longer hangs under NCE: a fault on a GPU-cached page no cache tracks now uncaches it (`0060`)
 - [x] `bug` Dead Space builds: `nspDir` puts the NSPs in a short folder; a game can have its own `emulatorCpu`
 - [x] `bug` Recorded points of dark screens no longer match each other: each point matches within half its distance from the one before
 - [x] `bug` NFSU2's road, speedometer and minimap drawn black: render targets join the mip-mapped textures sampled from them (`0058`)
