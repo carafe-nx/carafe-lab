@@ -12,7 +12,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 ## Planned
 
 - [ ] **`feature` Live passes: a card per game, a paused player, the pass written down as the game's scenario**
-- [ ] `bug` HoMM IV's main menu does not answer: black after the intro until an input, then a picture one input behind, clicks do nothing; with and without NCE and Carafe's 0083 (Mesa 0004's late present next to check)
+- [ ] `bug` HoMM IV's main menu does not answer: black after the intro until an input, then a picture one input behind, clicks do nothing; with and without NCE. Wine loads its own ddraw (wined3d), not the game's Verok `DDRAW.dll`: the wrapper has no `CompanyName`, so Wine's load-order heuristic picks the builtin. Console behaviour to ask
 - [ ] `bug` Dead Space does not build: the work folder's staging path makes its longest file path 299 bytes, over hacBrewPack's 259
 - [ ] `bug` Dead Space hangs after its intro under NCE (DXVK's thread spins in NVK's buffer-to-image copy); with dynarmic it plays on
 - [ ] `bug` Eden crashes (SIGSEGV) when live commands reach it while Need for Speed Underground 2 loads a race
