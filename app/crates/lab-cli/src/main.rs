@@ -91,6 +91,7 @@ struct Lab {
     scenario: Option<Scenario>,
     alternate: Option<(HacBrewPacker, PathBuf, String)>,
     references: PathBuf,
+    nsp_root: PathBuf,
 }
 
 struct KeptParts {
@@ -222,6 +223,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         });
     let lab = Lab {
         references: config.work.join(REFERENCES_DIR),
+        nsp_root: nsp_root(&config),
         alternate,
         work: config.work.clone(),
         gpu,
@@ -542,22 +544,28 @@ fn save_recording(config: &Config, name: &str) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn tidy_plan(work: &Path) -> tidy::TidyPlan {
+fn nsp_root(config: &Config) -> PathBuf {
+    config
+        .nsp_dir
+        .clone()
+        .unwrap_or_else(|| config.work.join(NSP_DIR))
+}
+
+fn tidy_plan(work: &Path, nsp: &Path) -> tidy::TidyPlan {
     let runs = work.join("runs");
-    let nsp = work.join(NSP_DIR);
     let runtimes = work.join("runtimes");
     let dumps = std::env::temp_dir().join("wsl-crashes");
     let places = tidy::Places {
         runs: &runs,
-        nsp: &nsp,
+        nsp,
         runtimes: &runtimes,
         dumps: Some(&dumps),
     };
     tidy::plan(places, tidy::KEPT_WHOLE)
 }
 
-fn tidy_after_run(work: &Path) {
-    let _ = tidy::apply(&tidy_plan(work));
+fn tidy_after_run(work: &Path, nsp: &Path) {
+    let _ = tidy::apply(&tidy_plan(work, nsp));
     remove_images(&unused_images(work));
     let containers = stopped_containers();
     if !containers.is_empty() {
@@ -599,7 +607,7 @@ fn remove_images(images: &[String]) {
 }
 
 fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, String> {
-    let plan = tidy_plan(&config.work);
+    let plan = tidy_plan(&config.work, &nsp_root(config));
     if json && !apply {
         print_json(&plan)?;
         return Ok(ExitCode::SUCCESS);
@@ -1008,6 +1016,7 @@ impl Lab {
                 diagnostics: Vec::new(),
                 save: save.clone(),
                 console_changes: None,
+                emulator_cpu: game.and_then(|game| game.emulator_cpu),
             };
             return with_diagnostics(planned, &self.args.diagnostics);
         }
@@ -1034,6 +1043,7 @@ impl Lab {
             diagnostics: Vec::new(),
             save,
             console_changes: None,
+            emulator_cpu: game.and_then(|game| game.emulator_cpu),
         };
         with_diagnostics(planned, &of_emulator)
     }
@@ -1167,6 +1177,7 @@ impl Lab {
             diagnostics: Vec::new(),
             save: game.save.as_ref().map(|save| self.work.join(save)),
             console_changes: None,
+            emulator_cpu: game.emulator_cpu,
         };
         with_diagnostics(planned, &self.args.diagnostics)
     }
@@ -1474,6 +1485,7 @@ impl Lab {
                 self.desktop.join("binaries").join(hacbrewpack_name()),
             ],
             work: &self.work,
+            nsp_root: self.nsp_root.clone(),
             lang,
             runtime_version: RUNTIME_VERSION,
             emulator_label,
@@ -1526,7 +1538,7 @@ impl Lab {
             &mut on_event,
         )?;
         drop(holding);
-        tidy_after_run(&self.work);
+        tidy_after_run(&self.work, &self.nsp_root);
         let [_, _, _, failed] = report.counts();
         Ok(if failed == 0 {
             ExitCode::SUCCESS
@@ -1653,6 +1665,7 @@ fn probe_plan(run: &ProbeRun, folder: PathBuf, prepared: Result<(), String>) -> 
         diagnostics: Vec::new(),
         save: None,
         console_changes: None,
+        emulator_cpu: None,
     }
 }
 

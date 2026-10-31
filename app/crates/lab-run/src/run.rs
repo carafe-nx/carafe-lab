@@ -12,6 +12,7 @@ use ts_rs::TS;
 
 use lab_core::crash;
 use lab_core::diagnostics::Diagnostic;
+use lab_core::emulator::EdenCpu;
 use lab_core::frames::{self, FrameSummary};
 use lab_core::input_check::{self, PressCheck};
 use lab_core::lang::Lang;
@@ -232,6 +233,9 @@ pub trait Emulator {
     /// Turns on the emulator's diagnostics in `diagnostics` for the next launches and turns off the others; those
     /// that are not the emulator's, or that it does not have, are left alone.
     fn diagnose(&mut self, _diagnostics: &[Diagnostic]) {}
+
+    /// Runs the next launches' processor code the way `cpu` says; `None` goes back to the emulator's own choice.
+    fn use_cpu(&mut self, _cpu: Option<EdenCpu>) {}
 
     /// Sets the settings changes the next launches find as made on the console's settings menu: a text is written
     /// as the game's `changes.txt`, an empty text removes it, `None` leaves the game's save data as it is.

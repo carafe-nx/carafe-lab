@@ -12,6 +12,7 @@ use carafe_core::cancel::CancelToken;
 use carafe_core::ports::{BuildProgress, PackTarget, Packer};
 use carafe_core::wizard::{self, BuildRequest};
 use lab_core::diagnostics::{self, Diagnostic};
+use lab_core::emulator::EdenCpu;
 use lab_core::lang::Lang;
 use lab_core::milestones::Stage;
 use lab_core::redact::redact;
@@ -50,6 +51,8 @@ pub struct Planned {
     /// Settings changes its launches find as made on the console's settings menu; see
     /// [`Emulator::console_changes`].
     pub console_changes: Option<String>,
+    /// How the emulator runs its processor code; `None` keeps the emulator's own choice.
+    pub emulator_cpu: Option<EdenCpu>,
 }
 
 /// Where a planned game's NSP comes from.
@@ -92,6 +95,15 @@ struct Built {
     size_bytes: u64,
     reused: bool,
     nsp: PathBuf,
+}
+
+/// Returns the short name of the NSP folder of the run in `folder`, such as `31011410` for `2026-10-31_01-14-10`:
+/// the day and the time, so the build paths of a game stay short.
+#[must_use]
+pub fn nsp_folder(folder: &str) -> String {
+    let digits: String = folder.chars().filter(char::is_ascii_digit).collect();
+    let skip = digits.len().saturating_sub(8);
+    digits[skip..].to_owned()
 }
 
 struct Scratch(PathBuf);
@@ -208,8 +220,10 @@ pub struct Engine<'a> {
     pub keys: &'a Path,
     /// Files whose change makes every NSP stale: the runtime archive and hacBrewPack.
     pub build_inputs: Vec<PathBuf>,
-    /// The work folder: `nsp/` and `runs/` inside it.
+    /// The work folder: `runs/` inside it.
     pub work: &'a Path,
+    /// The folder runs build their NSPs in, each in a folder of its own.
+    pub nsp_root: PathBuf,
     /// Language of `report.html`.
     pub lang: Lang,
     /// The runtime version the build records carry.
@@ -341,7 +355,7 @@ impl Engine<'_> {
         on_event: &mut dyn FnMut(&Event),
     ) -> Result<RunReport, String> {
         let run_dir = self.work.join("runs").join(folder);
-        let nsp_dir = self.work.join(NSP_DIR).join(folder);
+        let nsp_dir = self.nsp_root.join(nsp_folder(folder));
         fs::create_dir_all(&run_dir).map_err(|error| format!("{}: {error}", run_dir.display()))?;
         fs::create_dir_all(&nsp_dir).map_err(|error| format!("{}: {error}", nsp_dir.display()))?;
         let _built = Scratch(nsp_dir.clone());
@@ -511,6 +525,7 @@ impl Engine<'_> {
             self.stamp.carafe_commit.as_deref(),
         );
         self.emulator.diagnose(&game.diagnostics);
+        self.emulator.use_cpu(game.emulator_cpu);
         self.emulator
             .console_changes(game.console_changes.as_deref());
         let runner = Runner::new(&mut *self.emulator, clock, record.title_id, nsp, &game_dir)
@@ -735,6 +750,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_run_builds_in_a_folder_named_by_its_day_and_time() {
+        assert_eq!(nsp_folder("2026-10-31_01-14-10"), "31011410");
+        assert_eq!(nsp_folder("2026-10-31_01-14-10 · B"), "31011410");
+    }
+
+    #[test]
     fn events_read_as_tagged_json() {
         let json = serde_json::to_string(&Event::Built {
             title_id: "0100000000001000".to_owned(),
@@ -795,6 +816,7 @@ mod tests {
             diagnostics: Vec::new(),
             save: None,
             console_changes: None,
+            emulator_cpu: None,
         };
         let stalled = detailed(&planned, &failed_at(wait.clone(), "not reached in 120 s")).unwrap();
         assert_eq!(stalled.name, "G · detailed");

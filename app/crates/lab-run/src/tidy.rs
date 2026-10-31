@@ -11,6 +11,7 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 use serde::Serialize;
 
+use crate::engine::nsp_folder;
 use crate::history::{self, RunSummary};
 use crate::run::{Outcome, PROBLEMS_FILE, TIMELINE_DIR};
 
@@ -66,10 +67,10 @@ pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
         runs: list.len(),
         ..TidyPlan::default()
     };
-    let going: Vec<&str> = list
+    let going: Vec<String> = list
         .iter()
         .filter(|run| !run.finished)
-        .map(|run| run.dir.as_str())
+        .map(|run| nsp_folder(&run.dir))
         .collect();
     let mut stale = left_nsps(places.nsp, &going);
     let packed: Vec<&str> = list
@@ -154,7 +155,7 @@ pub fn apply(plan: &TidyPlan) -> io::Result<u64> {
     Ok(freed)
 }
 
-fn left_nsps(nsp: &Path, going: &[&str]) -> Vec<PathBuf> {
+fn left_nsps(nsp: &Path, going: &[String]) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(nsp) else {
         return Vec::new();
     };
@@ -166,7 +167,7 @@ fn left_nsps(nsp: &Path, going: &[&str]) -> Vec<PathBuf> {
                 .metadata()
                 .and_then(|metadata| metadata.modified())
                 .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age < GOING_AT_MOST));
-            !(going.contains(&name.as_str()) && fresh)
+            !(going.contains(&name) && fresh)
         })
         .map(|entry| entry.path())
         .collect();
@@ -323,8 +324,8 @@ mod tests {
         let nsp = runs.join("nsp");
         let runtimes = runs.join("runtimes");
         let dumps = runs.join("dumps");
-        write(&nsp.join("2026-01-04_00-00-00").join("t.nsp"), "going");
-        write(&nsp.join("2026-01-03_00-00-00").join("t.nsp"), "over");
+        write(&nsp.join("04000000").join("t.nsp"), "going");
+        write(&nsp.join("03000000").join("t.nsp"), "over");
         write(&nsp.join("0100aaaa.nsp"), "old");
         write(&nsp.join("0100aaaa.build-key"), "old");
         write(&runtimes.join("aaaaaaaaaaaa.bin"), "packed");
@@ -350,8 +351,8 @@ mod tests {
         assert!(plan.compress[0].ends_with("eden_log.txt"));
         assert_eq!(plan.stale.len(), 5);
         apply(&plan).unwrap();
-        assert!(nsp.join("2026-01-04_00-00-00").join("t.nsp").exists());
-        assert!(!nsp.join("2026-01-03_00-00-00").exists() && !nsp.join("0100aaaa.nsp").exists());
+        assert!(nsp.join("04000000").join("t.nsp").exists());
+        assert!(!nsp.join("03000000").exists() && !nsp.join("0100aaaa.nsp").exists());
         assert!(
             runtimes.join("aaaaaaaaaaaa.bin").exists()
                 && !runtimes.join("bbbbbbbbbbbb.bin").exists()

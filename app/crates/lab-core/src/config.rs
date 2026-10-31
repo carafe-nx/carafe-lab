@@ -69,6 +69,7 @@ pub enum ConfigError {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawConfig {
     work: PathBuf,
+    nsp_dir: Option<PathBuf>,
     gpu: Option<String>,
     emulator_cpu: Option<String>,
     carafe: Option<PathBuf>,
@@ -103,6 +104,7 @@ struct RawGame {
     notes: Option<String>,
     threshold: Option<u32>,
     save: Option<PathBuf>,
+    emulator_cpu: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +123,9 @@ fn enabled_by_default() -> bool {
 pub struct Config {
     /// The lab's own folder: NSPs, the emulator's data, runs.
     pub work: PathBuf,
+    /// The folder runs build their NSPs in; `None` means `nsp` in the work folder. A short one keeps a game's
+    /// longest file path within what hacBrewPack reads.
+    pub nsp_dir: Option<PathBuf>,
     /// What draws the emulator's picture.
     pub gpu: Gpu,
     /// How the emulator runs the Switch's processor code.
@@ -176,6 +181,8 @@ pub struct Game {
     /// A folder whose files become the game's save data before its first launch of a run, such as a save pulled
     /// from the console; relative to the work folder. `None` starts the game without save data.
     pub save: Option<PathBuf>,
+    /// How the emulator runs this game's processor code; `None` means the lab's `emulatorCpu`.
+    pub emulator_cpu: Option<EdenCpu>,
 }
 
 /// Returns the folder the scenario files of the lab file `text` are named relative to: its work folder, taken
@@ -309,6 +316,13 @@ impl Config {
             }
             let settings = merged_settings(game.settings.as_ref())
                 .map_err(|message| ConfigError::Settings(game.name.clone(), message))?;
+            let game_cpu = game
+                .emulator_cpu
+                .as_deref()
+                .map(|text| {
+                    EdenCpu::parse(text).ok_or(ConfigError::Value("emulatorCpu", "dynarmic or nce"))
+                })
+                .transpose()?;
             games.push(Game {
                 name: game.name,
                 folder: game.folder,
@@ -324,6 +338,7 @@ impl Config {
                 notes: game.notes,
                 threshold: game.threshold.unwrap_or(versions::DEFAULT_THRESHOLD),
                 save: game.save,
+                emulator_cpu: game_cpu,
             });
         }
         for (set, names) in &raw.sets {
@@ -338,6 +353,7 @@ impl Config {
         }
         Ok(Self {
             work: raw.work,
+            nsp_dir: raw.nsp_dir,
             gpu,
             emulator_cpu,
             carafe: raw.carafe,
@@ -1054,6 +1070,12 @@ mod tests {
             Config::parse(r#"{"work": "x"}"#).unwrap().emulator_cpu,
             EdenCpu::Nce
         );
+        let own = Config::parse(
+            r#"{"work": "x", "nspDir": "D:\\nsp", "games": [{"name": "G", "folder": "g", "emulatorCpu": "dynarmic"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(own.games[0].emulator_cpu, Some(EdenCpu::Dynarmic));
+        assert_eq!(own.nsp_dir, Some(PathBuf::from("D:\\nsp")));
         let zero = Config::parse(r#"{"work": "x", "timeout": 0}"#);
         assert_eq!(
             zero,

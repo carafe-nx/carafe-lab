@@ -38,7 +38,9 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    not build Dozen, so there is no Vulkan on the graphics card. `carafe-lab gpu` shows what the container sees; on a
    Snapdragon it does not return, because Qualcomm's shader compiler hangs when a program exits.
 7. Optional in `lab.json`: `emulatorCpu` (`nce`, the default, runs the guest's code natively; `dynarmic` translates
-   it, slower but in the console's proportions; [decision 8](decisions/0008-nce-is-the-default.md)), `edenImage` —
+   it, slower but in the console's proportions; [decision 8](decisions/0008-nce-is-the-default.md)), `nspDir` — the
+   folder runs build their NSPs in, `nsp` in the work folder by default; a short one, such as `D:\\lab-nsp`, keeps a
+   game's longest file path within the 259 bytes hacBrewPack reads — `edenImage` —
    another Eden image, such as one built with diagnostic patches — and `edenSettings`, settings written over Eden's
    `qt-config.ini`:
    `{ "Renderer/gpu_accuracy": "0", "Renderer/debug": "true" }`. `Renderer/debug` makes Eden log the compile and
@@ -98,6 +100,8 @@ build wizard would take it: the largest game `.exe`, its product name, default s
 `save` is a folder, relative to the work folder, laid out like the game's save data (`switch/…`, `carafe/…`), as
 DBI shows a console save under "Saves". Its files become the save data after it is emptied at the start of the run,
 so a game that fails only with a profile or a career can start from one made on the console.
+
+A game's own `emulatorCpu` overrides the lab's for it alone; Eden starts again when the next game wants the other one.
 
 `scenario` is a file relative to the work folder or the steps themselves: `{ "steps": [ … ] }`. Scenario files are
 your own, like the runs, so they live in the work folder, outside the repository; the Scenarios screen saves them to
@@ -243,8 +247,9 @@ Each run gets `<work>/runs/<date>/`:
   `summary.json` keeps the peak memory, the processor use and the counts for the History screen, which lists a
   game's problems and highlights those its run before did not have.
 
-A run builds its NSPs into `<work>/nsp/<run folder>` and removes that folder when it ends: a game is packed again on
-every run, and a repeat inside one run uses the NSP built for it.
+A run builds its NSPs into a folder of its own in `nspDir` (`<work>/nsp` by default), named by the run's day and
+time, such as `31011410`, and removes that folder when it ends: a game is packed again on every run, and a repeat
+inside one run uses the NSP built for it.
 
 Every run ends by tidying, and `carafe-lab tidy` shows what tidying would do and changes nothing; `tidy --apply` does
 it. The 10 newest runs stay whole. Older failed or unfinished runs get their logs compressed into `.gz` next to them,

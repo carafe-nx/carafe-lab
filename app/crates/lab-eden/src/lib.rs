@@ -106,6 +106,7 @@ pub struct Eden {
     keys: PathBuf,
     gpu: Gpu,
     cpu: EdenCpu,
+    default_cpu: EdenCpu,
     image: String,
     settings: BTreeMap<String, String>,
     title: Option<TitleId>,
@@ -128,6 +129,7 @@ struct Session {
     booted_at: u64,
     log_from: usize,
     diagnostics: Vec<Diagnostic>,
+    cpu: EdenCpu,
 }
 
 /// A numbered answer of Eden's control channel (`patches/eden/0046`).
@@ -184,6 +186,7 @@ impl Eden {
             keys: keys.into(),
             gpu,
             cpu,
+            default_cpu: cpu,
             image: IMAGE.to_owned(),
             settings: BTreeMap::new(),
             title: None,
@@ -301,6 +304,7 @@ impl Eden {
             booted_at: last.number,
             log_from: log.rfind("Control: booting").unwrap_or(0),
             diagnostics: Vec::new(),
+            cpu: self.cpu,
         });
         true
     }
@@ -827,7 +831,9 @@ impl Eden {
 
     fn boot_in_session(&mut self, dir: &Path, name: &str) -> Result<(), EmulatorError> {
         let alive = self.session.as_ref().is_some_and(|session| {
-            session.nsp_dir == dir && session.diagnostics == self.diagnostics
+            session.nsp_dir == dir
+                && session.diagnostics == self.diagnostics
+                && session.cpu == self.cpu
         }) && self.container_running();
         let readings = if alive {
             self.memory_readings()
@@ -907,6 +913,7 @@ impl Eden {
             booted_at: 0,
             log_from: 0,
             diagnostics: self.diagnostics.clone(),
+            cpu: self.cpu,
         });
         Ok(())
     }
@@ -1140,6 +1147,10 @@ impl Emulator for Eden {
             .filter(|diagnostic| !diagnostic.in_the_nsp())
             .copied()
             .collect();
+    }
+
+    fn use_cpu(&mut self, cpu: Option<EdenCpu>) {
+        self.cpu = cpu.unwrap_or(self.default_cpu);
     }
 
     fn console_changes(&mut self, changes: Option<&str>) {
