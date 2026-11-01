@@ -22,7 +22,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
 - [ ] `bug` "No slower than the last version" compares runs of different scenarios, such as a hands-on session in the menu against the standard one
-- [ ] `bug` The loader's restart for a fixed image base counts as the game's end: the first frame step fails at once
+- [ ] `bug` A relaunch in the same Eden session rarely ends Eden with SIGSEGV; each time right after the guest range 0x0–0x8000000 is mapped into the start of the host window (`0062`'s line)
 - [ ] `bug` The Run screen keeps the last game's picture and stages while the next game's NSP is built
 - [ ] `bug` A stopped run leaves its NSP build folder in `nspDir`
 - [ ] `bug` After a game crashed the session, the next game's device save can fail to be created: Carafe's files are not mounted
@@ -69,6 +69,10 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `bug` A restart Carafe's loader asks for is no longer taken for the game's end (unit test; no restart came in a run since)
+- [x] `bug` A guest range wholly outside the host window no longer reaches mmap with a length of 0 (`0064`)
+- [x] `bug` A pixel format Eden's OpenGL has no format for is drawn as RGBA8 instead of ending Eden (`0063`)
+- [x] `feature` Eden logs its host window for guest memory and the guest ranges outside it (`0062`)
 - [x] `bug` Dead Space no longer hangs under NCE: a fault on a GPU-cached page no cache tracks now uncaches it (`0060`)
 - [x] `bug` Dead Space builds: `nspDir` puts the NSPs in a short folder; a game can have its own `emulatorCpu`
 - [x] `bug` Recorded points of dark screens no longer match each other: each point matches within half its distance from the one before
