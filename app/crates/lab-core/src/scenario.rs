@@ -520,7 +520,8 @@ impl Scenario {
         }
     }
 
-    /// Returns the scenario for the input probe: every Switch button pressed once, then the probe's log checked.
+    /// Returns the scenario for the input probe: every Switch button pressed once, two touches, then the probe's log
+    /// checked.
     #[must_use]
     pub fn input_probe(first_frame_timeout: u32) -> Self {
         let mut steps = vec![
@@ -546,6 +547,10 @@ impl Scenario {
             Step::Screenshot {
                 name: "after".to_owned(),
             },
+            Step::Tap { x: 640, y: 360 },
+            Step::Wait { seconds: 1.5 },
+            Step::Tap { x: 320, y: 200 },
+            Step::Wait { seconds: 1.5 },
             Step::ExpectInput,
             Step::Close {
                 timeout: default_close_timeout(),

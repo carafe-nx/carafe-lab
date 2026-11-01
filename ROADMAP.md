@@ -18,6 +18,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` After a crashed session the next launch can hang before its first frame, with thousands of threads started
 - [ ] `bug` While Carafe's on-screen keyboard is open over a Vulkan game, Eden shows the whole frame with red and blue swapped
 - [ ] `bug` A recorded point of a random scene still matches another random scene: two OpenTTD maps differ by under 12
+- [ ] `bug` The input_check tests of lab-core still expect the controller layout from before Carafe 0.4.0 (A by position)
 - [ ] `research` Need for Speed Carbon in a detailed retry: Eden shows black while the game reports 27 FPS
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column

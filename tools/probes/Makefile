@@ -2,7 +2,7 @@ OUT ?= $(CURDIR)/build
 PROBES := input gdi d3d9 d3d11 d3d12 gl screen threads registry files
 ARCHES := i686 x86_64
 
-LIBS_input :=
+LIBS_input := -ldinput -ldxguid
 LIBS_gdi := -lgdi32
 LIBS_d3d9 := -ld3d9
 LIBS_d3d11 := -ld3d11 -ldxgi -ldxguid

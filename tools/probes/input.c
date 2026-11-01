@@ -1,5 +1,7 @@
 #include "probe.h"
 
+#define DIRECTINPUT_VERSION 0x0700
+#include <dinput.h>
 #include <xinput.h>
 
 typedef DWORD (WINAPI *get_state_fn)(DWORD, XINPUT_STATE *);
@@ -114,12 +116,103 @@ static get_state_fn load_xinput(void)
     return NULL;
 }
 
+static IDirectInputDeviceA *dinput_mouse;
+static IDirectInputDeviceA *dinput_keyboard;
+static BYTE dinput_buttons[4];
+static BYTE dinput_keys[256];
+static LONG dinput_move_x, dinput_move_y;
+
+static IDirectInputDeviceA *open_dinput_device(IDirectInputA *dinput, HWND window, REFGUID guid,
+                                               LPCDIDATAFORMAT format, const char *name)
+{
+    IDirectInputDeviceA *device = NULL;
+    HRESULT hr;
+
+    if (FAILED(hr = IDirectInput_CreateDevice(dinput, guid, &device, NULL)))
+    {
+        probe_log("dinput %s device failed 0x%08lx", name, (unsigned long)hr);
+        return NULL;
+    }
+    IDirectInputDevice_SetDataFormat(device, format);
+    IDirectInputDevice_SetCooperativeLevel(device, window, DISCL_NONEXCLUSIVE | DISCL_FOREGROUND);
+    hr = IDirectInputDevice_Acquire(device);
+    probe_log("dinput %s acquire 0x%08lx", name, (unsigned long)hr);
+    return device;
+}
+
+static void open_dinput(HWND window)
+{
+    IDirectInputA *dinput = NULL;
+    HRESULT hr = DirectInputCreateA(GetModuleHandleA(NULL), DIRECTINPUT_VERSION, &dinput, NULL);
+
+    if (FAILED(hr))
+    {
+        probe_log("dinput missing 0x%08lx", (unsigned long)hr);
+        return;
+    }
+    probe_log("dinput 7 ready");
+    dinput_mouse = open_dinput_device(dinput, window, &GUID_SysMouse, &c_dfDIMouse, "mouse");
+    dinput_keyboard = open_dinput_device(dinput, window, &GUID_SysKeyboard, &c_dfDIKeyboard, "keyboard");
+}
+
+static HRESULT read_dinput(IDirectInputDeviceA *device, DWORD size, void *data)
+{
+    HRESULT hr = IDirectInputDevice_GetDeviceState(device, size, data);
+
+    if (hr == DIERR_INPUTLOST || hr == DIERR_NOTACQUIRED)
+    {
+        IDirectInputDevice_Acquire(device);
+        hr = IDirectInputDevice_GetDeviceState(device, size, data);
+    }
+    return hr;
+}
+
+static void poll_dinput(HWND window)
+{
+    DIMOUSESTATE mouse;
+    BYTE keys[256];
+    int i;
+
+    if (dinput_mouse && SUCCEEDED(read_dinput(dinput_mouse, sizeof(mouse), &mouse)))
+    {
+        dinput_move_x += mouse.lX;
+        dinput_move_y += mouse.lY;
+        for (i = 0; i < 4; i++)
+        {
+            if ((mouse.rgbButtons[i] & 0x80) == (dinput_buttons[i] & 0x80))
+                continue;
+            remember("dinput button %d %s", i, mouse.rgbButtons[i] & 0x80 ? "down" : "up");
+            dinput_buttons[i] = mouse.rgbButtons[i];
+            InvalidateRect(window, NULL, FALSE);
+        }
+    }
+    if (dinput_keyboard && SUCCEEDED(read_dinput(dinput_keyboard, sizeof(keys), keys)))
+    {
+        for (i = 0; i < 256; i++)
+        {
+            if ((keys[i] & 0x80) == (dinput_keys[i] & 0x80))
+                continue;
+            remember("dinput key 0x%02x %s", i, keys[i] & 0x80 ? "down" : "up");
+            dinput_keys[i] = keys[i];
+            InvalidateRect(window, NULL, FALSE);
+        }
+    }
+}
+
+static DWORD settle_until;
+
 static void poll_cursor(void)
 {
     POINT cursor;
 
     if (!GetCursorPos(&cursor))
         return;
+    if ((LONG)(GetTickCount() - settle_until) < 0)
+    {
+        have_cursor = FALSE;
+        dinput_move_x = dinput_move_y = 0;
+        return;
+    }
     if (have_cursor)
     {
         move_x += cursor.x - last_cursor.x;
@@ -137,6 +230,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     BOOL have_last = FALSE;
     DWORD connected = ERROR_DEVICE_NOT_CONNECTED;
     DWORD last_move = GetTickCount();
+    DWORD last_paint = GetTickCount();
 
     (void)instance;
     (void)previous;
@@ -145,6 +239,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
     probe_open_log("input");
     window = probe_window("Carafe input probe", input_proc);
     get_state = load_xinput();
+    open_dinput(window);
+    settle_until = GetTickCount() + 3000;
     memset(&last, 0, sizeof(last));
     while (probe_pump())
     {
@@ -171,12 +267,24 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, i
             }
         }
         poll_cursor();
+        poll_dinput(window);
+        if (GetTickCount() - last_paint >= 40)
+        {
+            InvalidateRect(window, NULL, FALSE);
+            last_paint = GetTickCount();
+        }
         if (GetTickCount() - last_move >= 100)
         {
             if (move_x || move_y)
             {
                 remember("move %ld %ld", move_x, move_y);
                 move_x = move_y = 0;
+                InvalidateRect(window, NULL, FALSE);
+            }
+            if (dinput_move_x || dinput_move_y)
+            {
+                remember("dinput move %ld %ld", dinput_move_x, dinput_move_y);
+                dinput_move_x = dinput_move_y = 0;
                 InvalidateRect(window, NULL, FALSE);
             }
             last_move = GetTickCount();
