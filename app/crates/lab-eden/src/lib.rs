@@ -49,6 +49,8 @@ const FRAME_WAIT: Duration = Duration::from_secs(5);
 const CONTAINER_END_FILE: &str = "container-end.log";
 const SESSION_FILE: &str = "session.log";
 const RESOURCES_FILE: &str = "resources.log";
+const LOADER_LOG_FILE: &str = "carafe-loader.log";
+const LOADER_RESTART: &str = "[carafe-loader] restarting the program";
 const CACHE_ROOT: &str = "drive_c";
 const CACHES_FILE: &str = "caches.txt";
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
@@ -154,6 +156,27 @@ pub fn replies_after(text: &str, after: u64) -> Vec<Reply> {
             })
         })
         .collect()
+}
+
+/// Returns whether the game stopped in `replies`: a stop that was asked for, or more stops of its own than the
+/// restarts Carafe's loader asked for in `loader_log`. Eden answers such a restart with `stopped self` and starts
+/// the program again.
+fn stopped_beyond_restarts(replies: &[Reply], loader_log: &str) -> bool {
+    let restarts = loader_log
+        .lines()
+        .filter(|line| line.starts_with(LOADER_RESTART))
+        .count();
+    let mut by_itself = 0;
+    for reply in replies
+        .iter()
+        .filter(|reply| reply.text.starts_with("stopped"))
+    {
+        if reply.text != "stopped self" {
+            return true;
+        }
+        by_itself += 1;
+    }
+    by_itself > restarts
 }
 
 fn paused_in(replies: &[Reply]) -> bool {
@@ -1029,9 +1052,11 @@ impl Eden {
 
     fn stopped_since_boot(&self) -> bool {
         self.session.as_ref().is_some_and(|session| {
-            self.replies(session.booted_at)
-                .iter()
-                .any(|reply| reply.text.starts_with("stopped"))
+            let loader_log = self
+                .title
+                .map(|title| read_text(&self.logs_dir(title).join(LOADER_LOG_FILE)))
+                .unwrap_or_default();
+            stopped_beyond_restarts(&self.replies(session.booted_at), &loader_log)
         })
     }
 
@@ -1962,6 +1987,21 @@ mod tests {
         assert_eq!(texts, ["booted", "stopped exited"]);
         assert_eq!(fresh[0].number, 3);
         assert!(replies_after(text, 4).is_empty());
+    }
+
+    #[test]
+    fn a_restart_the_loader_asked_for_is_not_the_games_end() {
+        let restart = "[carafe-loader] start: fixed image 0x400000-0xf74000, attempt 0, save data open\n\
+                       [carafe-loader] restarting the program (1 of 4)\n";
+        let once = replies_after("1 booting /nsp/a.nsp\n2 booted\n3 stopped self\n", 0);
+        assert!(!stopped_beyond_restarts(&once, restart));
+        assert!(stopped_beyond_restarts(&once, ""));
+        let twice = replies_after("1 booted\n2 stopped self\n3 stopped self\n", 0);
+        assert!(stopped_beyond_restarts(&twice, restart));
+        let asked = replies_after("1 booted\n2 stopped exited\n", 0);
+        assert!(stopped_beyond_restarts(&asked, restart));
+        let running = replies_after("1 booted\n", 0);
+        assert!(!stopped_beyond_restarts(&running, ""));
     }
 
     #[test]
