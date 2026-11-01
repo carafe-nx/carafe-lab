@@ -1,0 +1,42 @@
+Carafe Lab: a pixel format the OpenGL renderer has no format for is logged once and used as RGBA8, where
+Eden ended with "unreachable" and SIGTRAP; the lab's GPU is not the Switch's, and a game must not take
+the emulator down with it.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/renderer_opengl/maxwell_to_gl.h
++++ b/src/video_core/renderer_opengl/maxwell_to_gl.h
+@@ -6,8 +6,11 @@
+ 
+ #pragma once
+ 
++#include <atomic>
++
+ #include <glad/glad.h>
+ 
++#include "common/logging.h"
+ #include "video_core/engines/maxwell_3d.h"
+ #include "video_core/surface.h"
+ 
+@@ -128,13 +131,20 @@ constexpr std::array<FormatTuple, VideoCore::Surface::MaxPixelFormat> FORMAT_TAB
+     SURFACE_FORMAT_LIST
+ #undef SURFACE_FORMAT_ELEM
+ }};
+-constexpr FormatTuple GetFormatTuple(VideoCore::Surface::PixelFormat pixel_format) noexcept {
++inline FormatTuple GetFormatTuple(VideoCore::Surface::PixelFormat pixel_format) noexcept {
+     switch (pixel_format) {
+ #define SURFACE_FORMAT_ELEM(a1, a2, a3, name) case VideoCore::Surface::PixelFormat::name: return {a1, a2, a3};
+     SURFACE_FORMAT_LIST
+ #undef SURFACE_FORMAT_ELEM
+ #undef SURFACE_FORMAT_LIST
+-    default: UNREACHABLE();
++    default: {
++        static std::atomic_flag reported;
++        if (!reported.test_and_set()) {
++            LOG_ERROR(Render_OpenGL, "Pixel format {} has no OpenGL format, used as RGBA8",
++                      static_cast<u32>(pixel_format));
++        }
++        return {GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE};
++    }
+     }
+ }
+ 
