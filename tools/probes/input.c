@@ -65,6 +65,33 @@ static LRESULT CALLBACK input_proc(HWND window, UINT message, WPARAM wparam, LPA
         remember("mouse up %s", mouse_button(message, wparam));
         InvalidateRect(window, NULL, FALSE);
         return message == WM_XBUTTONUP ? TRUE : 0;
+    case WM_NCLBUTTONDOWN: case WM_NCRBUTTONDOWN: case WM_NCMBUTTONDOWN:
+    {
+        POINT cursor = {0, 0};
+        RECT frame = {0, 0, 0, 0};
+        RECT clip = {0, 0, 0, 0};
+
+        GetCursorPos(&cursor);
+        GetWindowRect(window, &frame);
+        GetClipCursor(&clip);
+        probe_log("frame %s down hit %d at %d,%d cursor %ld,%ld window %ld,%ld-%ld,%ld screen %dx%d"
+                  " clip %ld,%ld-%ld,%ld",
+                  message == WM_NCLBUTTONDOWN ? "left" : message == WM_NCRBUTTONDOWN ? "right" : "middle",
+                  (int)wparam, (short)LOWORD(lparam), (short)HIWORD(lparam), cursor.x, cursor.y,
+                  frame.left, frame.top, frame.right, frame.bottom,
+                  GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                  clip.left, clip.top, clip.right, clip.bottom);
+    }
+        return probe_default_proc(window, message, wparam, lparam);
+    case WM_CONTEXTMENU:
+        probe_log("context menu");
+        return probe_default_proc(window, message, wparam, lparam);
+    case WM_ENTERMENULOOP:
+        probe_log("menu loop entered");
+        return probe_default_proc(window, message, wparam, lparam);
+    case WM_EXITMENULOOP:
+        probe_log("menu loop left");
+        return probe_default_proc(window, message, wparam, lparam);
     case WM_MOUSEWHEEL:
         remember("wheel %s", GET_WHEEL_DELTA_WPARAM(wparam) > 0 ? "up" : "down");
         InvalidateRect(window, NULL, FALSE);
@@ -200,6 +227,7 @@ static void poll_dinput(HWND window)
 }
 
 static DWORD settle_until;
+static BOOL centred;
 
 static void poll_cursor(void)
 {
@@ -210,6 +238,14 @@ static void poll_cursor(void)
     if ((LONG)(GetTickCount() - settle_until) < 0)
     {
         have_cursor = FALSE;
+        dinput_move_x = dinput_move_y = 0;
+        return;
+    }
+    if (!centred)
+    {
+        SetCursorPos(GetSystemMetrics(SM_CXSCREEN) / 2, GetSystemMetrics(SM_CYSCREEN) / 2);
+        probe_log("cursor centred");
+        centred = TRUE;
         dinput_move_x = dinput_move_y = 0;
         return;
     }
