@@ -1,0 +1,37 @@
+Carafe Lab: under NCE a guest range that lies wholly outside the host window, such as the first 2 MiB a
+process unmaps at its end, is left alone. Eden passed it on with a length of 0: mmap failed with EINVAL and
+the empty block went into the list of free regions.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/common/host_memory.cpp
++++ b/src/common/host_memory.cpp
+@@ -574,6 +574,9 @@ public:
+     void Map(size_t virtual_offset, size_t host_offset, size_t length, MemoryPermission perms) {
+         // Intersect the range with our address space.
+         AdjustMap(&virtual_offset, &length);
++        if (length == 0) {
++            return;
++        }
+ 
+         // We are removing a placeholder.
+         free_manager.AllocateBlock(virtual_base + virtual_offset, length);
+@@ -599,6 +602,9 @@ public:
+ 
+         // Intersect the range with our address space.
+         AdjustMap(&virtual_offset, &length);
++        if (length == 0) {
++            return;
++        }
+ 
+         // Merge with any adjacent placeholder mappings.
+         auto [merged_pointer, merged_size] =
+@@ -611,6 +617,9 @@ public:
+     void Protect(size_t virtual_offset, size_t length, bool read, bool write, bool execute) {
+         // Intersect the range with our address space.
+         AdjustMap(&virtual_offset, &length);
++        if (length == 0) {
++            return;
++        }
+ 
+         int flags = PROT_NONE;
+         if (read) {
