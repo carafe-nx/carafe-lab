@@ -1,0 +1,34 @@
+Carafe Lab: Eden logs where its host window for guest memory lies, and the first 16 guest ranges it
+maps only in part or not at all because they lie outside that window. Under NCE the guest's addresses are the
+host's, so a guest page outside the window stays unmapped and the next access to it ends Eden with SIGSEGV.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/common/host_memory.cpp
++++ b/src/common/host_memory.cpp
+@@ -562,6 +562,8 @@ public:
+         madvise(virtual_base, virtual_size, MADV_HUGEPAGE);
+ #endif
+         free_manager.SetAddressSpace(virtual_base, virtual_size);
++        LOG_INFO(HW_Memory, "Host window for guest memory {}-{:#x}", fmt::ptr(virtual_base),
++                 reinterpret_cast<uintptr_t>(virtual_base) + virtual_size);
+     }
+ 
+     ~Impl() {
+@@ -674,8 +676,17 @@ private:
+             *virtual_offset = (std::max)(intended_start, address_space_start);
+             *length = (std::min)(intended_end, address_space_end) - *virtual_offset;
+         }
++        if ((*virtual_offset != intended_start || *length != intended_end - intended_start) &&
++            outside_reports < 16) {
++            ++outside_reports;
++            LOG_WARNING(HW_Memory, "Guest range {:#x}-{:#x} lies outside the host window {:#x}-{:#x}; mapped {:#x}+{:#x}",
++                        intended_start, intended_end, address_space_start, address_space_end, *virtual_offset,
++                        *length);
++        }
+     }
+ 
++    unsigned int outside_reports{};
++
+     int fd{-1}; // memfd file descriptor, -1 is the error value of memfd_create
+     FreeRegionManager free_manager{};
+ };
