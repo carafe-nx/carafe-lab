@@ -143,3 +143,13 @@ not known; the game's thread stacks are needed.
 1. The counters patch, one Eden build, one race run under NCE: the breakdown of a frame.
 2. The change that removes the largest wait, built and checked with the same race.
 3. The next one, and so on, while the race gains.
+
+## Text drawn as dots
+
+Cat Mail Co's menu buttons (Unity, TextMeshPro) show rows of dots in the lab and their labels on the console. The
+same launch with Eden's OpenGL renderer on llvmpipe (`gpu: software` with `Renderer/backend` 0, run
+`2026-11-04_01-38-26`) and with its Vulkan renderer on lavapipe (`gpu: software`, run `2026-11-04_01-42-16`) shows the
+buttons with no text at all. The text is wrong with both of Eden's renderers and three drivers, so the fault is in
+the part of Eden both renderers share (the shader recompiler, the texture cache), not in Mesa's d3d12 driver or the
+Adreno. Eden on Windows with Qualcomm's Vulkan driver would not draw it either; the next step is the text's shader
+and its texture in Eden.

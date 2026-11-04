@@ -22,6 +22,9 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `research` Need for Speed Carbon in a detailed retry: Eden shows black while the game reports 27 FPS
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
+- [ ] `feature` Reuse an Eden by the memory the game took on its last run, not by one figure for every game
+- [ ] `bug` Cat Mail Co's menu text is dots on the GPU and missing on llvmpipe and lavapipe: Eden's shared GPU emulation, not the driver
+- [ ] `bug` Eden asserts in `memory_manager.cpp:268` and crashes when HoMM IV is closed: the GPU reads memory the game already gave back
 - [ ] `bug` "No slower than the last version" compares runs of different scenarios, such as a hands-on session in the menu against the standard one
 - [ ] `bug` A relaunch in the same Eden session rarely ends Eden with SIGSEGV; each time right after the guest range 0x0–0x8000000 is mapped into the start of the host window (`0062`'s line)
 - [ ] `bug` The Run screen keeps the last game's picture and stages while the next game's NSP is built
