@@ -50,8 +50,9 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    `screenshot <file>`, `press <ms> <keys>` (`patches/eden/0049`), `quit` — and a numbered `replies` file in
    `<work>/eden/user/control/`. Button presses go through the channel, inside Eden, instead of `xdotool`. An Eden that
    crashed, stopped answering or wrote no status line for 45 s is replaced at the next launch, and the reason with the
-   last lines of the container goes into the launch's `container-end.log`. Before each boot Lab reads the container's
-   memory and starts a new Eden when less than 5 GB of its 6 GB is left; the launch's `session.log` has the reading
+   last lines of the container goes into the launch's `container-end.log`. Before each boot Lab reads the memory the
+   container holds apart from file pages (`anon` and `shmem` of its `memory.stat`; file pages are given back when
+   needed) and starts a new Eden when less than 5.25 GB of its 6 GB is left; the launch's `session.log` has the reading
    and the choice. `--clean`, or the Plans screen's "Clean start", gives every launch of one run a new Eden, still
    driven through the control channel. `false` starts a container for every launch the old way, closing games through
    `SIGUSR1` and pressing through `xdotool`.
@@ -201,6 +202,14 @@ what else it does:
   how long it took, how many waits for it were longer than 100 ms and the longest (`lock storm …`);
 - `dxvk-late`: as `dxvk`, with half of the threads ending 40 s after the device is asked for;
 - `lifecycle`: suspends, reads the registers of, resumes and terminates a thread, checks an exit code and a user APC;
+- `suspend`: 18 checks of `SuspendThread` as on Windows: a thread waiting in ten kinds of wait (an event, an address,
+  an SRW lock, a condition variable, a critical section, a keyed event, a sleep, an alertable sleep, spinning, short
+  sleeps) is suspended, gives registers on its own stack and in a known module, stays put and goes on waiting after
+  resume without ending its wait early; then 300 rounds over nine such threads, `SetThreadContext` of a spinning and
+  of a sleeping thread, 200 suspensions of a thread computing in SSE registers that must keep their values, and
+  `TerminateThread` of four kinds of wait within a second (`suspend: … of 18 ok`);
+- `syscalls`: the time of a system call, best of five rounds of 200 000 calls each, for `NtGetCurrentProcessorNumber`,
+  `NtQuerySystemTime` and `NtQueryInformationThread` (`syscalls: … ns a call`);
 - `crash` and `abort`: after the device, write to a page with no access or call `abort()`, for Carafe's error screen.
 
 `lab.json` has one entry for the probe. A plan picks the mode with the program arguments and the scenario that goes
@@ -249,7 +258,8 @@ Each run gets `<work>/runs/<date>/`:
 
 A run builds its NSPs into a folder of its own in `nspDir` (`<work>/nsp` by default), named by the run's day and
 time, such as `31011410`, and removes that folder when it ends: a game is packed again on every run, and a repeat
-inside one run uses the NSP built for it.
+inside one run uses the NSP built for it. While one game runs, the next game of the run is packed beside it, so it
+boots as soon as the first one closes; its build stages and `build.log` appear when its turn comes.
 
 Every run ends by tidying, and `carafe-lab tidy` shows what tidying would do and changes nothing; `tidy --apply` does
 it. The 10 newest runs stay whole. Older failed or unfinished runs get their logs compressed into `.gz` next to them,
@@ -342,7 +352,8 @@ emulator.
 - `carafe-lab release <tag>` builds the runtime of a Carafe release once and keeps it as
   `<work>/runtimes/release-<tag>.bin`. All of it runs in Linux containers with the build limits (2 CPUs, 2 jobs,
   4 GB), so Git for Windows never touches line endings: the tag is checked out in one clone of the Carafe checkout,
-  `<work>/releases/carafe`, with the submodules taken from the checkout's own and Autorun's vendored Box64 and
+  `<work>/releases/carafe`, which first takes the checkout's new branches and tags, with the submodules taken from
+  the checkout's own and Autorun's vendored Box64 and
   FFmpeg copied, so nothing is downloaded. A revision whose submodule commits or build image the checkout does not
   have stops and says so instead of downloading. The first time, the checkout's `runtime/build` is copied too, every
   file dated long ago except those the revision changes, so only the changed part is compiled; later revisions build

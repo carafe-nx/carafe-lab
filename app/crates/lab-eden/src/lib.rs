@@ -68,7 +68,7 @@ const GDB_SERVER_WAIT: Duration = Duration::from_secs(30);
 const GDB_INTERRUPT_WAIT: Duration = Duration::from_secs(3);
 const GDB_ANSWER_WAIT: Duration = Duration::from_secs(90);
 const PERF_MARGIN_MS: u64 = 2000;
-const GAME_MEMORY: u64 = 5 * 1024 * 1024 * 1024;
+const GAME_MEMORY: u64 = 21 * 256 * 1024 * 1024;
 const PULLED_NAND: [&str; 2] = ["user", "system/save"];
 const PUSH_NAND: &str = "set -e
 R=/to/system/Contents/registered
@@ -667,7 +667,8 @@ impl Eden {
 ///
 /// # Arguments
 ///
-/// * `readings` — `memory.current` and `memory.max` one after the other, as `cat` prints them; `max` means no limit.
+/// * `readings` — the memory the container holds apart from file pages (`anon` and `shmem` of `memory.stat`) and
+///   `memory.max`, one after the other; `max` means no limit.
 /// * `needed` — the bytes a game may take.
 ///
 /// # Returns
@@ -870,7 +871,7 @@ impl Eden {
             (false, false) => "new Eden",
         };
         let note = format!(
-            "before boot: memory {} (current, max); a game needs {GAME_MEMORY}; {choice}\n",
+            "before boot: memory {} (held, max); a game needs {GAME_MEMORY}; {choice}\n",
             readings.split_whitespace().collect::<Vec<_>>().join(", "),
         );
         let _ = fs::write(self.user_dir.join("log").join(SESSION_FILE), note);
@@ -993,9 +994,12 @@ impl Eden {
     }
 
     fn memory_readings(&self) -> String {
-        self.exec("cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max")
-            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
-            .unwrap_or_default()
+        self.exec(
+            "awk '$1 == \"anon\" || $1 == \"shmem\" { sum += $2 } END { print sum }' /sys/fs/cgroup/memory.stat; \
+             cat /sys/fs/cgroup/memory.max",
+        )
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .unwrap_or_default()
     }
 
     fn control_dir(&self) -> PathBuf {

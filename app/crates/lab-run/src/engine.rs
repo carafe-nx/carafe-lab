@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::thread;
 use std::time::{Instant, UNIX_EPOCH};
 
 use carafe_core::BuildRecord;
@@ -70,6 +71,7 @@ pub enum NspSource {
 }
 
 /// The other runtime an A/B run between runtimes compares the lab's with.
+#[derive(Clone)]
 pub struct Alternate<'a> {
     /// The packer that builds with it.
     pub packer: &'a dyn Packer,
@@ -95,6 +97,23 @@ struct Built {
     size_bytes: u64,
     reused: bool,
     nsp: PathBuf,
+}
+
+/// A game's NSP built ahead of its turn: the outcome, the events of the build in order and its log.
+struct Prebuilt {
+    built: Result<Built, String>,
+    events: Vec<Event>,
+    log: String,
+}
+
+/// What building an NSP takes, apart from the emulator, so the next game can be built while one is checked.
+struct Builder<'a> {
+    packer: &'a dyn Packer,
+    keys: &'a Path,
+    build_inputs: Vec<PathBuf>,
+    runtime_version: &'a str,
+    alternate: Option<Alternate<'a>>,
+    stop: CancelToken,
 }
 
 /// Returns the short name of the NSP folder of the run in `folder`, such as `31011410` for `2026-10-31_01-14-10`:
@@ -385,48 +404,64 @@ impl Engine<'_> {
             dir: run_dir.display().to_string(),
             games: total,
         });
-        for (index, game) in planned.into_iter().enumerate() {
-            if self.stop.is_cancelled() {
-                on_event(&Event::Stopped {
-                    left: total - index,
-                });
-                break;
-            }
-            on_event(&Event::GameStarted {
-                index: index + 1,
-                name: game.name.clone(),
-            });
-            let entry = self.one_game(&game, &run_dir, &nsp_dir, clock, &mut on_event);
-            on_event(&Event::GameFinished {
-                name: entry.name.clone(),
-                outcome: entry.outcome(),
-            });
-            let again = if self.retry_failed && !self.build_only {
-                detailed(&game, &entry)
-            } else {
-                None
-            };
-            report.games.push(entry);
-            report.seconds = clock.now().as_secs_f64();
-            write_report(&run_dir, &report, self.lang)?;
-            write_summary(&run_dir, &report, &names, false)?;
-            if let Some(again) = again.filter(|_| !self.stop.is_cancelled()) {
-                names.push(again.name.clone());
+        let builder = self.builder();
+        thread::scope(|scope| -> Result<(), String> {
+            let mut next = None;
+            for (index, game) in planned.iter().enumerate() {
+                if self.stop.is_cancelled() {
+                    on_event(&Event::Stopped {
+                        left: total - index,
+                    });
+                    break;
+                }
                 on_event(&Event::GameStarted {
                     index: index + 1,
-                    name: again.name.clone(),
+                    name: game.name.clone(),
                 });
-                let entry = self.one_game(&again, &run_dir, &nsp_dir, clock, &mut on_event);
+                let prebuilt = next
+                    .take()
+                    .and_then(|building: thread::ScopedJoinHandle<Prebuilt>| building.join().ok())
+                    .unwrap_or_else(|| builder.build(game, &nsp_dir));
+                if !self.build_only
+                    && let Some(following) = planned.get(index + 1)
+                {
+                    let (builder, nsp_dir) = (&builder, &nsp_dir);
+                    next = Some(scope.spawn(move || builder.build(following, nsp_dir)));
+                }
+                let entry = self.one_game(game, prebuilt, &run_dir, clock, &mut on_event);
                 on_event(&Event::GameFinished {
                     name: entry.name.clone(),
                     outcome: entry.outcome(),
                 });
+                let again = if self.retry_failed && !self.build_only {
+                    detailed(game, &entry)
+                } else {
+                    None
+                };
                 report.games.push(entry);
                 report.seconds = clock.now().as_secs_f64();
                 write_report(&run_dir, &report, self.lang)?;
                 write_summary(&run_dir, &report, &names, false)?;
+                if let Some(again) = again.filter(|_| !self.stop.is_cancelled()) {
+                    names.push(again.name.clone());
+                    on_event(&Event::GameStarted {
+                        index: index + 1,
+                        name: again.name.clone(),
+                    });
+                    let prebuilt = builder.build(&again, &nsp_dir);
+                    let entry = self.one_game(&again, prebuilt, &run_dir, clock, &mut on_event);
+                    on_event(&Event::GameFinished {
+                        name: entry.name.clone(),
+                        outcome: entry.outcome(),
+                    });
+                    report.games.push(entry);
+                    report.seconds = clock.now().as_secs_f64();
+                    write_report(&run_dir, &report, self.lang)?;
+                    write_summary(&run_dir, &report, &names, false)?;
+                }
             }
-        }
+            Ok(())
+        })?;
         if !self.build_only {
             self.emulator.finish();
         }
@@ -446,8 +481,8 @@ impl Engine<'_> {
     fn one_game(
         &mut self,
         game: &Planned,
+        prebuilt: Prebuilt,
         run_dir: &Path,
-        nsp_dir: &Path,
         clock: &dyn Clock,
         on_event: &mut dyn FnMut(&Event),
     ) -> GameReport {
@@ -475,14 +510,19 @@ impl Engine<'_> {
             log_excerpt: Vec::new(),
             failure: None,
         };
-        let built = self.build(game, nsp_dir, &game_dir, on_event);
+        for event in &prebuilt.events {
+            on_event(event);
+        }
+        if !prebuilt.log.is_empty() {
+            let _ = fs::write(game_dir.join(BUILD_LOG_FILE), &prebuilt.log);
+        }
         let Built {
             record,
             seconds,
             size_bytes,
             reused,
             nsp,
-        } = match built {
+        } = match prebuilt.built {
             Ok(built) => built,
             Err(error) => {
                 on_event(&Event::BuildFailed {
@@ -544,13 +584,35 @@ impl Engine<'_> {
         entry.failure = entry.failure_reason();
         entry
     }
+}
 
-    fn build(
+impl<'a> Engine<'a> {
+    fn builder(&self) -> Builder<'a> {
+        Builder {
+            packer: self.packer,
+            keys: self.keys,
+            build_inputs: self.build_inputs.clone(),
+            runtime_version: self.runtime_version,
+            alternate: self.alternate.clone(),
+            stop: self.stop.clone(),
+        }
+    }
+}
+
+impl Builder<'_> {
+    fn build(&self, game: &Planned, nsp_dir: &Path) -> Prebuilt {
+        let mut events = Vec::new();
+        let mut log = String::new();
+        let built = self.pack(game, nsp_dir, &mut events, &mut log);
+        Prebuilt { built, events, log }
+    }
+
+    fn pack(
         &self,
         game: &Planned,
         nsp_dir: &Path,
-        game_dir: &Path,
-        on_event: &mut dyn FnMut(&Event),
+        events: &mut Vec<Event>,
+        log: &mut String,
     ) -> Result<Built, String> {
         let previous = match &game.nsp {
             NspSource::Build | NspSource::Alternate => None,
@@ -614,18 +676,17 @@ impl Engine<'_> {
         };
         let started = Instant::now();
         let mut last_stage = None;
-        let mut log = String::new();
         let packed = packer.pack(
             &record,
             None,
             &target,
-            &CancelToken::new(),
+            &self.stop,
             &mut |update: BuildProgress| {
                 let at = started.elapsed().as_secs_f64();
                 let stage = format!("{:?}", update.stage);
                 if last_stage != Some(update.stage) {
                     last_stage = Some(update.stage);
-                    on_event(&Event::BuildStage {
+                    events.push(Event::BuildStage {
                         stage: stage.clone(),
                         at: Some(at),
                     });
@@ -638,7 +699,6 @@ impl Engine<'_> {
                 }
             },
         );
-        let _ = fs::write(game_dir.join(BUILD_LOG_FILE), &log);
         let stored = packed
             .map_err(|error| redact(&format!("{error} ({})", game.folder.display()), self.keys))?;
         if let Some(key) = key {
