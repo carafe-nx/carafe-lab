@@ -208,6 +208,11 @@ what else it does:
   resume without ending its wait early; then 300 rounds over nine such threads, `SetThreadContext` of a spinning and
   of a sleeping thread, 200 suspensions of a thread computing in SSE registers that must keep their values, and
   `TerminateThread` of four kinds of wait within a second (`suspend: … of 18 ok`);
+- `memory`: ordinary memory access as x86 code does it, twice each so that FEX's rewrite of a faulting access is run
+  too: loads and stores of 8 to 64 bits at every alignment, `rep cmps`/`scas`/`lods`/`movs`, unaligned SSE loads and
+  compares, operands in memory (`test`, `cmp`, `and`, `sub` with a scaled index), a pattern search over a buffer and
+  over the probe's own code found through its PE headers, `ucrtbase` number parsing and `GetPrivateProfile*`
+  (`memory: … ok`), for FEX's memory model settings such as TSO;
 - `syscalls`: the time of a system call, best of five rounds of 200 000 calls each, for `NtGetCurrentProcessorNumber`,
   `NtQuerySystemTime` and `NtQueryInformationThread` (`syscalls: … ns a call`);
 - `crash` and `abort`: after the device, write to a page with no access or call `abort()`, for Carafe's error screen.

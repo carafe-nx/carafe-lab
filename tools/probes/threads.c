@@ -1055,6 +1055,417 @@ static void syscall_costs(void)
                   PROBE_SYSCALL_CALLS);
 }
 
+#define PROBE_MEMORY_SIZE 256
+#define PROBE_MEMORY_SPAN 24
+#define PROBE_MEMORY_PASSES 2
+#define PROBE_MEMORY_REPORTS 8
+#define PROBE_SEARCH_SIZE (1024 * 1024)
+#define PROBE_NEEDLE_SIZE 12
+#define PROBE_NEEDLES 3
+
+static __attribute__((aligned(64))) unsigned char memory_bytes[PROBE_MEMORY_SIZE];
+static __attribute__((aligned(64))) unsigned char memory_copy[PROBE_MEMORY_SIZE];
+static unsigned int memory_failed;
+static unsigned int memory_checked;
+
+static unsigned char pattern_byte(unsigned int i)
+{
+    return (unsigned char)(i * 37 + 11);
+}
+
+static void memory_fill(unsigned char *bytes, unsigned int size)
+{
+    unsigned int i;
+
+    for (i = 0; i < size; i++)
+        bytes[i] = pattern_byte(i);
+}
+
+static unsigned long long pattern_value(unsigned int offset, unsigned int size)
+{
+    unsigned long long value = 0;
+    unsigned int i;
+
+    for (i = 0; i < size; i++)
+        value |= (unsigned long long)pattern_byte(offset + i) << (8 * i);
+    return value;
+}
+
+static void memory_result(const char *what, unsigned int offset, unsigned int pass, unsigned long long got,
+                          unsigned long long expected)
+{
+    memory_checked++;
+    if (got == expected) return;
+    if (memory_failed++ < PROBE_MEMORY_REPORTS)
+        probe_log("memory: FAILED, %s at offset %u, pass %u: got %#llx, expected %#llx", what, offset, pass, got,
+                  expected);
+}
+
+static void memory_loads(void)
+{
+    unsigned int pass, offset;
+
+    memory_fill(memory_bytes, PROBE_MEMORY_SIZE);
+    for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+        for (offset = 0; offset < PROBE_MEMORY_SPAN; offset++)
+        {
+            const unsigned char *at = memory_bytes + offset;
+
+            memory_result("8-bit load", offset, pass, *(volatile const unsigned char *)at, pattern_value(offset, 1));
+            memory_result("16-bit load", offset, pass, *(volatile const unsigned short *)at, pattern_value(offset, 2));
+            memory_result("32-bit load", offset, pass, *(volatile const unsigned int *)at, pattern_value(offset, 4));
+            memory_result("64-bit load", offset, pass, *(volatile const unsigned long long *)at,
+                          pattern_value(offset, 8));
+            memory_result("signed 8-bit load", offset, pass, (unsigned long long)(long long)*(volatile const signed char *)at,
+                          (unsigned long long)(long long)(signed char)pattern_value(offset, 1));
+            memory_result("signed 16-bit load", offset, pass, (unsigned long long)(long long)*(volatile const short *)at,
+                          (unsigned long long)(long long)(short)pattern_value(offset, 2));
+        }
+}
+
+static void memory_stores(void)
+{
+    static const unsigned long long values[] = { 0x8899aabbccddeeffull, 0x0123456789abcdefull };
+    unsigned int pass, offset, size, i;
+
+    for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+        for (offset = 0; offset < PROBE_MEMORY_SPAN; offset++)
+            for (size = 1; size <= 8; size *= 2)
+            {
+                unsigned long long value = values[pass], got = 0;
+                unsigned char *at = memory_bytes + offset;
+
+                memory_fill(memory_bytes, PROBE_MEMORY_SIZE);
+                if (size == 1) *(volatile unsigned char *)at = (unsigned char)value;
+                else if (size == 2) *(volatile unsigned short *)at = (unsigned short)value;
+                else if (size == 4) *(volatile unsigned int *)at = (unsigned int)value;
+                else *(volatile unsigned long long *)at = value;
+                for (i = 0; i < size; i++)
+                    got |= (unsigned long long)((volatile unsigned char *)at)[i] << (8 * i);
+                memory_result(size == 1 ? "8-bit store" : size == 2 ? "16-bit store" : size == 4 ? "32-bit store" :
+                              "64-bit store", offset, pass, got,
+                              size == 8 ? value : value & ((1ull << (8 * size)) - 1));
+                memory_result("bytes around a store", offset, pass,
+                              (unsigned long long)memory_bytes[offset + size] << 8 |
+                                  (offset ? memory_bytes[offset - 1] : pattern_byte(0)),
+                              (unsigned long long)pattern_byte(offset + size) << 8 |
+                                  (offset ? pattern_byte(offset - 1) : pattern_byte(0)));
+            }
+}
+
+static unsigned int repe_cmpsb(const void *a, const void *b, size_t count, size_t *left)
+{
+    unsigned char equal;
+
+    __asm__ volatile("cld\n\trepe cmpsb\n\tsete %0" : "=q"(equal), "+S"(a), "+D"(b), "+c"(count) : : "cc", "memory");
+    *left = count;
+    return equal;
+}
+
+static unsigned int repe_cmpsd(const void *a, const void *b, size_t count, size_t *left)
+{
+    unsigned char equal;
+
+    __asm__ volatile("cld\n\trepe cmpsl\n\tsete %0" : "=q"(equal), "+S"(a), "+D"(b), "+c"(count) : : "cc", "memory");
+    *left = count;
+    return equal;
+}
+
+static const unsigned char *repne_scasb(const unsigned char *at, size_t count, unsigned char value)
+{
+    __asm__ volatile("cld\n\trepne scasb" : "+D"(at), "+c"(count) : "a"(value) : "cc", "memory");
+    return at - 1;
+}
+
+static unsigned int lodsd_at(const void *at)
+{
+    unsigned int value;
+
+    __asm__ volatile("cld\n\tlodsl" : "=a"(value), "+S"(at) : : "memory");
+    return value;
+}
+
+static void rep_movsb(void *to, const void *from, size_t count)
+{
+    __asm__ volatile("cld\n\trep movsb" : "+D"(to), "+S"(from), "+c"(count) : : "memory");
+}
+
+static void rep_movsd(void *to, const void *from, size_t count)
+{
+    __asm__ volatile("cld\n\trep movsl" : "+D"(to), "+S"(from), "+c"(count) : : "memory");
+}
+
+static void memory_strings(void)
+{
+    unsigned int pass, offset;
+    size_t left;
+
+    for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+        for (offset = 0; offset < PROBE_MEMORY_SPAN; offset++)
+        {
+            unsigned int length = PROBE_MEMORY_SIZE / 2 - PROBE_MEMORY_SPAN;
+
+            memory_fill(memory_bytes, PROBE_MEMORY_SIZE);
+            memory_fill(memory_copy, PROBE_MEMORY_SIZE);
+            memory_result("repe cmpsb of equal bytes", offset, pass,
+                          repe_cmpsb(memory_bytes + offset, memory_copy + offset, length, &left) | (left << 8), 1);
+            memory_copy[offset + 5] ^= 0xff;
+            memory_result("repe cmpsb stops at a difference", offset, pass,
+                          repe_cmpsb(memory_bytes + offset, memory_copy + offset, length, &left) | (left << 8),
+                          (unsigned long long)(length - 6) << 8);
+            memory_fill(memory_copy, PROBE_MEMORY_SIZE);
+            memory_result("repe cmpsd of equal words", offset, pass,
+                          repe_cmpsd(memory_bytes + offset, memory_copy + offset, length / 4, &left) | (left << 8), 1);
+            memory_result("repne scasb finds a byte", offset, pass,
+                          (unsigned long long)(repne_scasb(memory_bytes + offset, length, pattern_byte(offset + 9)) -
+                                               memory_bytes),
+                          offset + 9);
+            memory_result("lodsd", offset, pass, lodsd_at(memory_bytes + offset), pattern_value(offset, 4));
+            memset(memory_copy, 0, PROBE_MEMORY_SIZE);
+            rep_movsb(memory_copy + (offset ^ 3), memory_bytes + offset, length);
+            memory_result("rep movsb", offset, pass,
+                          memcmp(memory_copy + (offset ^ 3), memory_bytes + offset, length) == 0, 1);
+            memset(memory_copy, 0, PROBE_MEMORY_SIZE);
+            rep_movsd(memory_copy + (offset ^ 1), memory_bytes + offset, length / 4);
+            memory_result("rep movsd", offset, pass,
+                          memcmp(memory_copy + (offset ^ 1), memory_bytes + offset, length / 4 * 4) == 0, 1);
+        }
+}
+
+__attribute__((target("sse2"))) static void memory_vectors(void)
+{
+    unsigned int pass, offset, i;
+    __attribute__((aligned(16))) unsigned char lane[16];
+
+    memory_fill(memory_bytes, PROBE_MEMORY_SIZE);
+    for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+        for (offset = 0; offset < PROBE_MEMORY_SPAN; offset++)
+        {
+            __m128i value = _mm_loadu_si128((const __m128i *)(memory_bytes + offset));
+            unsigned long long low = 0, high = 0;
+
+            _mm_store_si128((__m128i *)lane, value);
+            for (i = 0; i < 8; i++)
+            {
+                low |= (unsigned long long)lane[i] << (8 * i);
+                high |= (unsigned long long)lane[8 + i] << (8 * i);
+            }
+            memory_result("unaligned 16-byte load, low half", offset, pass, low, pattern_value(offset, 8));
+            memory_result("unaligned 16-byte load, high half", offset, pass, high, pattern_value(offset + 8, 8));
+            memory_result("byte compare mask", offset, pass,
+                          (unsigned int)_mm_movemask_epi8(_mm_cmpeq_epi8(value, _mm_set1_epi8((char)pattern_byte(offset + 3)))),
+                          1u << 3);
+        }
+}
+
+static void memory_search(void)
+{
+    static const unsigned int places[PROBE_NEEDLES] = { 4097, 300003, 1000001 };
+    unsigned char *haystack = VirtualAlloc(NULL, PROBE_SEARCH_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    unsigned char needle[PROBE_NEEDLE_SIZE];
+    unsigned int i, found_bytes = 0, found_memcmp = 0, found_memchr = 0;
+    const unsigned char *at, *end;
+
+    if (!haystack)
+    {
+        memory_result("search buffer", 0, 0, 0, 1);
+        return;
+    }
+    for (i = 0; i < PROBE_SEARCH_SIZE; i++)
+        haystack[i] = pattern_byte(i * 7);
+    for (i = 0; i < PROBE_NEEDLE_SIZE; i++)
+        needle[i] = (unsigned char)(0xe8 + i);
+    for (i = 0; i < PROBE_NEEDLES; i++)
+        memcpy(haystack + places[i], needle, PROBE_NEEDLE_SIZE);
+    end = haystack + PROBE_SEARCH_SIZE - PROBE_NEEDLE_SIZE;
+    for (at = haystack; at <= end; at++)
+    {
+        unsigned int k;
+
+        for (k = 0; k < PROBE_NEEDLE_SIZE && at[k] == needle[k]; k++)
+            ;
+        found_bytes += k == PROBE_NEEDLE_SIZE;
+        found_memcmp += !memcmp(at, needle, PROBE_NEEDLE_SIZE);
+    }
+    for (at = haystack; at <= end && (at = memchr(at, needle[0], end - at + 1)); at++)
+        found_memchr += !memcmp(at, needle, PROBE_NEEDLE_SIZE);
+    memory_result("pattern search byte by byte", 0, 0, found_bytes, PROBE_NEEDLES);
+    memory_result("pattern search with memcmp", 0, 0, found_memcmp, PROBE_NEEDLES);
+    memory_result("pattern search with memchr", 0, 0, found_memchr, PROBE_NEEDLES);
+    VirtualFree(haystack, 0, MEM_RELEASE);
+}
+
+#define PROBE_IMAGE_NEEDLE 16
+#define PROBE_IMAGE_WILDCARD 5
+#define PROBE_BAD_CHARACTERS 256
+
+static unsigned int image_search(const unsigned char *start, const unsigned char *end, const unsigned char *needle,
+                                 const unsigned char *mask, int length)
+{
+    int skip[PROBE_BAD_CHARACTERS];
+    unsigned int found = 0;
+    const unsigned char *at;
+    int i, first = -1;
+
+    for (i = 0; i < length; i++)
+        if (mask[i] != 0xff) first = i;
+    for (i = 0; i < PROBE_BAD_CHARACTERS; i++)
+        skip[i] = first;
+    for (i = 0; i < length; i++)
+        if (skip[needle[i]] < i) skip[needle[i]] = i;
+    for (at = start; at <= end - length;)
+    {
+        int k = length - 1, shift;
+
+        while (k >= 0 && (at[k] & mask[k]) == needle[k])
+            k--;
+        if (k < 0)
+        {
+            found++;
+            at++;
+            continue;
+        }
+        shift = k - skip[at[k]];
+        at += shift > 1 ? shift : 1;
+    }
+    return found;
+}
+
+static void memory_image(void)
+{
+    const unsigned char *base = (const unsigned char *)GetModuleHandleA(NULL);
+    const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)(base + ((const IMAGE_DOS_HEADER *)base)->e_lfanew);
+    const IMAGE_SECTION_HEADER *section = IMAGE_FIRST_SECTION(nt);
+    const unsigned char *code = (const unsigned char *)memory_search, *start = NULL, *end = NULL;
+    unsigned char needle[PROBE_IMAGE_NEEDLE], mask[PROBE_IMAGE_NEEDLE];
+    unsigned int i, executable = 0, plain = 0;
+
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++, section++)
+    {
+        if (!(section->Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        executable++;
+        if (code >= base + section->VirtualAddress && code < base + section->VirtualAddress + section->Misc.VirtualSize)
+        {
+            start = base + section->VirtualAddress;
+            end = start + section->Misc.VirtualSize;
+        }
+    }
+    memory_result("executable sections found in the image's headers", 0, 0, executable > 0 && start, 1);
+    if (!start) return;
+    for (i = 0; i < PROBE_IMAGE_NEEDLE; i++)
+    {
+        needle[i] = code[i];
+        mask[i] = 0xff;
+    }
+    needle[PROBE_IMAGE_WILDCARD] = 0;
+    mask[PROBE_IMAGE_WILDCARD] = 0;
+    for (i = 0; start + i + PROBE_IMAGE_NEEDLE <= end; i++)
+        plain += !memcmp(start + i, code, PROBE_IMAGE_NEEDLE);
+    memory_result("masked search of the image's own code finds what memcmp finds", 0, 0,
+                  image_search(start, end, needle, mask, PROBE_IMAGE_NEEDLE), plain);
+    memory_result("the image's own code is found", 0, 0, plain >= 1, 1);
+}
+
+static void memory_operands(void)
+{
+    __attribute__((aligned(16))) unsigned int table[PROBE_BAD_CHARACTERS];
+    unsigned int pass, i, tested = 0, compared = 0, anded = 0, subtracted = 0;
+
+    for (i = 0; i < PROBE_BAD_CHARACTERS; i++)
+        table[i] = i * 3;
+    memory_fill(memory_bytes, PROBE_MEMORY_SIZE);
+    for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+        for (i = 0; i < PROBE_MEMORY_SPAN; i++)
+        {
+            const unsigned char *at = memory_bytes + i;
+            unsigned char byte = pattern_byte(i), and_result = 0xff;
+            unsigned short word = (unsigned short)pattern_value(i, 2);
+            unsigned int value = 7, set, equal;
+            UINT_PTR index = pattern_byte(i);
+
+            __asm__ volatile("testl $0x20000000, (%1)\n\tsetne %b0" : "=q"(set) : "r"(at) : "cc", "memory");
+            tested += (set & 1) == !!(pattern_value(i, 4) & 0x20000000);
+            __asm__ volatile("cmpw (%1), %w2\n\tsete %b0" : "=q"(equal) : "r"(at), "r"(word) : "cc", "memory");
+            compared += equal & 1;
+            __asm__ volatile("andb (%1), %0" : "+q"(and_result) : "r"(at) : "cc", "memory");
+            anded += and_result == byte;
+            __asm__ volatile("cmpb %2, (%1)\n\tsete %b0" : "=q"(equal) : "r"(at), "q"(byte) : "cc", "memory");
+            compared += equal & 1;
+            __asm__ volatile("subl -0x400(%1,%2,4), %0" : "+r"(value) : "r"(table + 0x100), "r"(index) : "cc", "memory");
+            subtracted += value == (unsigned int)(7 - index * 3);
+        }
+    memory_result("test of memory with an immediate", 0, 0, tested, PROBE_MEMORY_PASSES * PROBE_MEMORY_SPAN);
+    memory_result("byte and word compares with memory", 0, 0, compared, 2 * PROBE_MEMORY_PASSES * PROBE_MEMORY_SPAN);
+    memory_result("and with a memory byte", 0, 0, anded, PROBE_MEMORY_PASSES * PROBE_MEMORY_SPAN);
+    memory_result("subtract with base, scaled index and negative displacement", 0, 0, subtracted,
+                  PROBE_MEMORY_PASSES * PROBE_MEMORY_SPAN);
+}
+
+typedef unsigned long (__cdecl *strtoul_fn)(const char *, char **, int);
+typedef int (__cdecl *isxdigit_fn)(int);
+typedef long (__cdecl *strtol_fn)(const char *, char **, int);
+
+#define PROBE_INI_NAME "probe-memory.ini"
+
+static void memory_runtime(void)
+{
+    HMODULE ucrt = LoadLibraryA("ucrtbase.dll");
+    strtoul_fn ucrt_strtoul = ucrt ? (strtoul_fn)(void *)GetProcAddress(ucrt, "strtoul") : NULL;
+    isxdigit_fn ucrt_isxdigit = ucrt ? (isxdigit_fn)(void *)GetProcAddress(ucrt, "isxdigit") : NULL;
+    strtol_fn ucrt_strtol = ucrt ? (strtol_fn)(void *)GetProcAddress(ucrt, "strtol") : NULL;
+    char path[MAX_PATH], text[64], *slash;
+    unsigned int pass, digits = 0, value = 0;
+    FILE *ini;
+
+    memory_result("ucrtbase loaded with strtoul, isxdigit and strtol", 0, 0,
+                  ucrt_strtoul && ucrt_isxdigit && ucrt_strtol, 1);
+    if (ucrt_strtoul && ucrt_isxdigit && ucrt_strtol)
+        for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+        {
+            const char *hex = "0123456789abcdefABCDEF";
+            unsigned int i;
+
+            memory_result("strtoul of a hex byte", 0, pass, ucrt_strtoul("8B", NULL, 16), 0x8b);
+            memory_result("strtoul of a hex word", 0, pass, ucrt_strtoul("0xDEADBEEF", NULL, 16), 0xdeadbeef);
+            for (i = digits = 0; hex[i]; i++)
+                digits += ucrt_isxdigit((unsigned char)hex[i]) != 0;
+            digits += ucrt_isxdigit('g') == 0 && ucrt_isxdigit('?') == 0;
+            memory_result("isxdigit", 0, pass, digits, 23);
+            value = (unsigned int)ucrt_strtol("-0x2A", NULL, 16);
+            memory_result("strtol of a negative hex number", 0, pass, value, (unsigned int)-0x2a);
+        }
+    GetModuleFileNameA(NULL, path, sizeof(path));
+    if ((slash = strrchr(path, '\\'))) strcpy(slash + 1, PROBE_INI_NAME);
+    if ((ini = fopen(path, "w")))
+    {
+        fputs("[MAIN]\nResX = 1280\nResY = 720\nFixHUD = 1\nPattern = 8B 0D ? ? ? ? 85 C9\n", ini);
+        fclose(ini);
+    }
+    for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+    {
+        memory_result("GetPrivateProfileInt", 0, pass, GetPrivateProfileIntA("MAIN", "ResX", 0, path), 1280);
+        memory_result("GetPrivateProfileInt of a second key", 0, pass, GetPrivateProfileIntA("MAIN", "FixHUD", 0, path),
+                      1);
+        GetPrivateProfileStringA("MAIN", "Pattern", "", text, sizeof(text), path);
+        memory_result("GetPrivateProfileString", 0, pass, !strcmp(text, "8B 0D ? ? ? ? 85 C9"), 1);
+    }
+}
+
+static void memory_checks(void)
+{
+    memory_failed = 0;
+    memory_checked = 0;
+    memory_loads();
+    memory_stores();
+    memory_strings();
+    memory_vectors();
+    memory_search();
+    memory_image();
+    memory_operands();
+    memory_runtime();
+    probe_log("memory: %u of %u ok", memory_checked - memory_failed, memory_checked);
+}
+
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command_line, int show)
 {
     HWND window;
@@ -1150,6 +1561,10 @@ device:
     else if (command_line && strstr(command_line, "syscalls"))
     {
         syscall_costs();
+    }
+    else if (command_line && strstr(command_line, "memory"))
+    {
+        memory_checks();
     }
     else if (command_line && strstr(command_line, "crash"))
     {
