@@ -31,6 +31,7 @@ if [ ! -d "$DIR/.git" ]; then
   git clone -q --no-checkout /main "$DIR"
 fi
 cd "$DIR"
+git fetch -q --tags /main '+refs/heads/*:refs/remotes/origin/*'
 git checkout -q --detach "$REV"
 local_url() { printf 'submodule.%s.url=/main/%s' "$1" "$1"; }
 for path in external/autorun external/nx-hbloader; do
