@@ -207,9 +207,15 @@ what else it does:
   sleeps) is suspended, gives registers on its own stack and in a known module, stays put and goes on waiting after
   resume without ending its wait early; then 300 rounds over nine such threads, `SetThreadContext` of a spinning and
   of a sleeping thread, 200 suspensions of a thread computing in SSE registers that must keep their values, and
-  `TerminateThread` of four kinds of wait within a second (`suspend: … of 18 ok`);
+  `TerminateThread` of four kinds of wait within a second (`suspend: … of 18 ok`); then, for the record, how soon a
+  terminated thread is signalled when the probe looks every millisecond (`terminate …, polled`) and how soon a
+  thread waiting for an event answers `SetEvent` (`wake event`);
+- `terminate`: the `TerminateThread` checks and the two measures of `suspend`, then a thread terminated in a
+  condition variable and one in an SRW lock, each followed by another thread that ends and 200 wakes of a thread
+  waiting on an address in the same queue of Wine's table of address waits (`terminate: … of 6 ok`), then 16 s
+  without a frame, so the stall report writes the runtime's diagnostic events of the terminations to the log;
 - `memory`: ordinary memory access as x86 code does it, twice each so that FEX's rewrite of a faulting access is run
-  too: loads and stores of 8 to 64 bits at every alignment, `rep cmps`/`scas`/`lods`/`movs`, unaligned SSE loads and
+  too: loads and stores of 8 to 64 bits at every alignment, stores of zero of 16 to 64 bits, `rep cmps`/`scas`/`lods`/`movs`, unaligned SSE loads and
   compares, operands in memory (`test`, `cmp`, `and`, `sub` with a scaled index), a pattern search over a buffer and
   over the probe's own code found through its PE headers, `ucrtbase` number parsing and `GetPrivateProfile*`
   (`memory: … ok`), for FEX's memory model settings such as TSO;

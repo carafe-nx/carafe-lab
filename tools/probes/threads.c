@@ -825,6 +825,14 @@ static BOOL set_context_check(enum wait_kind kind)
 
 #define PROBE_REGISTER_ROUNDS 200
 #define PROBE_REGISTER_GAP 1000
+#define PROBE_WAKE_ROUNDS 50
+#define PROBE_WAKE_PAUSE_MS 20
+#define PROBE_QUIET_MS 16000
+#define PROBE_QUEUE_SHIFT 4
+#define PROBE_QUEUE_COUNT 256
+#define PROBE_QUEUE_SPAN (PROBE_QUEUE_COUNT << PROBE_QUEUE_SHIFT)
+#define PROBE_QUEUE_ROUNDS 200
+#define PROBE_QUEUE_WAKE_MS 1000
 
 static volatile LONG vector_stop;
 static volatile LONG vector_bad;
@@ -918,11 +926,73 @@ static BOOL terminate_check(enum wait_kind kind)
     return ok;
 }
 
-static void suspend_checks(void)
+static void terminate_polled(enum wait_kind kind)
+{
+    struct waiter *w = waiter_start(kind);
+    DWORD start, returned, signalled;
+
+    if (!w->thread || !w->entered)
+    {
+        probe_log("terminate %s, polled: the thread did not start", wait_names[kind]);
+        return;
+    }
+    start = GetTickCount();
+    TerminateThread(w->thread, 9);
+    returned = GetTickCount() - start;
+    while (WaitForSingleObject(w->thread, 0) != WAIT_OBJECT_0 && GetTickCount() - start < 5000)
+        Sleep(1);
+    signalled = GetTickCount() - start;
+    probe_log("terminate %s, polled: TerminateThread returned in %lu ms, the thread was signalled in %lu ms",
+              wait_names[kind], returned, signalled);
+}
+
+struct wake_pair
+{
+    HANDLE ask, answer;
+};
+
+static DWORD WINAPI wake_answerer(void *param)
+{
+    struct wake_pair *pair = param;
+
+    while (WaitForSingleObject(pair->ask, INFINITE) == WAIT_OBJECT_0)
+        SetEvent(pair->answer);
+    return 0;
+}
+
+static void wake_latency(void)
+{
+    struct wake_pair pair = { CreateEventA(NULL, FALSE, FALSE, NULL), CreateEventA(NULL, FALSE, FALSE, NULL) };
+    LARGE_INTEGER frequency, start, end;
+    double worst = 0, total = 0, took;
+    HANDLE thread = CreateThread(NULL, 0, wake_answerer, &pair, 0, NULL);
+    unsigned int i;
+
+    QueryPerformanceFrequency(&frequency);
+    for (i = 0; i < PROBE_WAKE_ROUNDS; i++)
+    {
+        Sleep(PROBE_WAKE_PAUSE_MS);
+        QueryPerformanceCounter(&start);
+        SetEvent(pair.ask);
+        WaitForSingleObject(pair.answer, INFINITE);
+        QueryPerformanceCounter(&end);
+        took = (end.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart;
+        total += took;
+        if (took > worst) worst = took;
+    }
+    probe_log("wake event: a thread waiting for an event answered in %.2f ms on average, %.2f ms at worst",
+              total / PROBE_WAKE_ROUNDS, worst);
+    TerminateThread(thread, 0);
+    WaitForSingleObject(thread, 5000);
+    CloseHandle(thread);
+    CloseHandle(pair.ask);
+    CloseHandle(pair.answer);
+}
+
+static BOOL wait_imports(const char *mode)
 {
     HMODULE kernelbase = GetModuleHandleA("kernelbase.dll");
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    unsigned int kind, passed = 0, total = 0;
 
     wait_on_address = (wait_on_address_fn)(void *)GetProcAddress(kernelbase, "WaitOnAddress");
     wake_by_address_all = (wake_by_address_fn)(void *)GetProcAddress(kernelbase, "WakeByAddressAll");
@@ -933,9 +1003,130 @@ static void suspend_checks(void)
     if (!wait_on_address || !wake_by_address_all || !keyed_create || !keyed_wait || !keyed_release ||
         keyed_create(&keyed_event, EVENT_ALL_ACCESS, NULL, 0))
     {
-        probe_log("suspend: FAILED, WaitOnAddress or keyed events are missing");
-        return;
+        probe_log("%s: FAILED, WaitOnAddress or keyed events are missing", mode);
+        return FALSE;
     }
+    return TRUE;
+}
+
+struct queue_waiter
+{
+    volatile LONG *address;
+    volatile LONG waiting, woken;
+};
+
+static __attribute__((aligned(PROBE_QUEUE_SPAN))) volatile LONG queue_area[PROBE_QUEUE_SPAN / sizeof(LONG)];
+
+static DWORD WINAPI queue_wait(void *param)
+{
+    struct queue_waiter *q = param;
+    LONG seen = 0;
+
+    while (seen < PROBE_QUEUE_ROUNDS)
+    {
+        InterlockedExchange(&q->waiting, seen + 1);
+        while (*q->address == seen)
+            wait_on_address(q->address, &seen, sizeof(seen), INFINITE);
+        seen = *q->address;
+        InterlockedExchange(&q->woken, seen);
+    }
+    return 0;
+}
+
+static BOOL queue_rounds(struct queue_waiter *q, LONG *done)
+{
+    DWORD start;
+    LONG round;
+
+    for (round = 1; round <= PROBE_QUEUE_ROUNDS; round++)
+    {
+        for (start = GetTickCount(); q->waiting != round && GetTickCount() - start < PROBE_QUEUE_WAKE_MS;)
+            Sleep(0);
+        InterlockedExchange(q->address, round);
+        wake_by_address_all((void *)q->address);
+        for (start = GetTickCount(); q->woken != round && GetTickCount() - start < PROBE_QUEUE_WAKE_MS;)
+            Sleep(0);
+        *done = round;
+        if (q->woken != round)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static DWORD WINAPI queue_nothing(void *param)
+{
+    (void)param;
+    return 0;
+}
+
+static void queue_end_a_thread(void)
+{
+    HANDLE thread = CreateThread(NULL, PROBE_STACK, queue_nothing, NULL, 0, NULL);
+
+    if (!thread) return;
+    WaitForSingleObject(thread, 5000);
+    CloseHandle(thread);
+}
+
+static BOOL terminate_queue_check(enum wait_kind kind)
+{
+    struct waiter *w = waiter_start(kind);
+    const void *target = kind == WAIT_SRW ? (const void *)&w->srw : (const void *)&w->condition;
+    ULONG_PTR slot = ((ULONG_PTR)target >> PROBE_QUEUE_SHIFT) % PROBE_QUEUE_COUNT;
+    struct queue_waiter q = { (volatile LONG *)((char *)queue_area + (slot << PROBE_QUEUE_SHIFT)), 0, 0 };
+    HANDLE thread;
+    LONG done = 0;
+    BOOL ok;
+
+    if (!w->thread || !w->entered)
+    {
+        probe_log("terminate %s, then its wait queue: FAILED, the thread did not start", wait_names[kind]);
+        return FALSE;
+    }
+    TerminateThread(w->thread, 9);
+    WaitForSingleObject(w->thread, 5000);
+    queue_end_a_thread();
+    *q.address = 0;
+    probe_log("terminate %s, then its wait queue: the thread ended and then another one, waking %u times a thread "
+              "that waits on an address in the same queue", wait_names[kind], PROBE_QUEUE_ROUNDS);
+    thread = CreateThread(NULL, PROBE_STACK, queue_wait, &q, 0, NULL);
+    ok = thread && queue_rounds(&q, &done);
+    probe_log("terminate %s, then its wait queue: %s, %ld of %u wakes reached the other thread", wait_names[kind],
+              ok ? "ok" : "FAILED", (long)(ok ? done : done - 1), PROBE_QUEUE_ROUNDS);
+    if (thread)
+    {
+        if (!ok) TerminateThread(thread, 0);
+        WaitForSingleObject(thread, 5000);
+        CloseHandle(thread);
+    }
+    return ok;
+}
+
+static void terminate_checks(void)
+{
+    unsigned int passed = 0;
+
+    if (!wait_imports("terminate"))
+        return;
+    passed += terminate_check(WAIT_ADDRESS);
+    passed += terminate_check(WAIT_CONDITION);
+    passed += terminate_check(WAIT_EVENT);
+    passed += terminate_check(WAIT_SLEEP);
+    terminate_polled(WAIT_EVENT);
+    terminate_polled(WAIT_ADDRESS);
+    wake_latency();
+    passed += terminate_queue_check(WAIT_CONDITION);
+    passed += terminate_queue_check(WAIT_SRW);
+    probe_log("terminate: %u of 6 ok; quiet for %u s", passed, PROBE_QUIET_MS / 1000);
+    Sleep(PROBE_QUIET_MS);
+}
+
+static void suspend_checks(void)
+{
+    unsigned int kind, passed = 0, total = 0;
+
+    if (!wait_imports("suspend"))
+        return;
     for (kind = 0; kind < WAIT_KIND_COUNT; kind++, total++)
         passed += suspend_check((enum wait_kind)kind);
     passed += suspend_storm();
@@ -950,6 +1141,9 @@ static void suspend_checks(void)
     passed += terminate_check(WAIT_EVENT);
     passed += terminate_check(WAIT_SLEEP);
     total += 4;
+    terminate_polled(WAIT_EVENT);
+    terminate_polled(WAIT_ADDRESS);
+    wake_latency();
     probe_log("suspend: %u of %u ok", passed, total);
 }
 
@@ -1150,6 +1344,28 @@ static void memory_stores(void)
                                   (offset ? memory_bytes[offset - 1] : pattern_byte(0)),
                               (unsigned long long)pattern_byte(offset + size) << 8 |
                                   (offset ? pattern_byte(offset - 1) : pattern_byte(0)));
+            }
+}
+
+static void memory_zero_stores(void)
+{
+    unsigned int pass, offset, size, i;
+
+    for (pass = 0; pass < PROBE_MEMORY_PASSES; pass++)
+        for (offset = 0; offset < PROBE_MEMORY_SPAN; offset++)
+            for (size = 2; size <= 8; size *= 2)
+            {
+                unsigned long long got = 0;
+                unsigned char *at = memory_bytes + offset;
+
+                memory_fill(memory_bytes, PROBE_MEMORY_SIZE);
+                if (size == 2) *(volatile unsigned short *)at = 0;
+                else if (size == 4) *(volatile unsigned int *)at = 0;
+                else *(volatile unsigned long long *)at = 0;
+                for (i = 0; i < size; i++)
+                    got |= (unsigned long long)((volatile unsigned char *)at)[i] << (8 * i);
+                memory_result(size == 2 ? "16-bit store of zero" : size == 4 ? "32-bit store of zero" :
+                              "64-bit store of zero", offset, pass, got, 0);
             }
 }
 
@@ -1457,6 +1673,7 @@ static void memory_checks(void)
     memory_checked = 0;
     memory_loads();
     memory_stores();
+    memory_zero_stores();
     memory_strings();
     memory_vectors();
     memory_search();
@@ -1557,6 +1774,10 @@ device:
     else if (command_line && strstr(command_line, "suspend"))
     {
         suspend_checks();
+    }
+    else if (command_line && strstr(command_line, "terminate"))
+    {
+        terminate_checks();
     }
     else if (command_line && strstr(command_line, "syscalls"))
     {
