@@ -1,0 +1,37 @@
+Carafe Lab: under NCE an alignment fault goes to the process's exception handler as the console's CPU sends it,
+instead of Eden running the instruction itself. The Switch's Cortex-A57 faults on every unaligned load-acquire,
+store-release and exclusive access, and FEX, which turns x86 loads and stores into such instructions when TSO is
+on, rewrites the faulting instruction in its handler; the PC's CPU faults on a subset of them (an access across a
+16-byte boundary). Eden's interpreter read register 31 as the stack pointer rather than zero, so a store of zero
+(`stlr wzr`) wrote the host's stack pointer to guest memory, and FEX's own path was never run in the lab.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/arm/nce/arm_nce.cpp
++++ b/src/core/arm/nce/arm_nce.cpp
+@@ -9,7 +9,6 @@
+ 
+ #include "common/signal_chain.h"
+ #include "core/arm/nce/arm_nce.h"
+-#include "core/arm/nce/interpreter_visitor.h"
+ #include "core/arm/nce/patcher.h"
+ #include "core/core.h"
+ #include "core/memory.h"
+@@ -170,18 +169,6 @@
+ }
+ 
+ bool ArmNce::HandleGuestAlignmentFault(GuestContext* guest_ctx, void* raw_info, void* raw_context) {
+-    auto& host_ctx = static_cast<ucontext_t*>(raw_context)->uc_mcontext;
+-    auto* fpctx = GetFloatingPointState(host_ctx);
+-    auto& memory = guest_ctx->parent->m_running_thread->GetOwnerProcess()->GetMemory();
+-
+-    // Match and execute an instruction.
+-    auto next_pc = MatchAndExecuteOneInstruction(memory, &host_ctx, fpctx);
+-    if (next_pc) {
+-        host_ctx.pc = *next_pc;
+-        return true;
+-    }
+-
+-    // We couldn't handle the access.
+     return HandleFailedGuestFault(guest_ctx, raw_info, raw_context);
+ }
+ 

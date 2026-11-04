@@ -73,6 +73,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `bug` Under NCE an unaligned load-acquire or store-release faults to the process as on the console, instead of Eden running it and storing the stack pointer for zero (`0065`)
 - [x] `bug` A restart Carafe's loader asks for is no longer taken for the game's end (unit test; no restart came in a run since)
 - [x] `bug` A guest range wholly outside the host window no longer reaches mmap with a length of 0 (`0064`)
 - [x] `bug` A pixel format Eden's OpenGL has no format for is drawn as RGBA8 instead of ending Eden (`0063`)
