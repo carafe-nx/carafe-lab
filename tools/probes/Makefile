@@ -1,8 +1,9 @@
 OUT ?= $(CURDIR)/build
-PROBES := input gdi d3d9 d3d11 d3d12 gl screen threads registry files
+PROBES := input gamepad sockets gdi d3d9 d3d11 d3d12 gl screen threads registry files
 ARCHES := i686 x86_64
 
 LIBS_input := -ldinput -ldxguid
+LIBS_gamepad := -ldinput8 -ldxguid -lsetupapi -lhid -lcfgmgr32 -ladvapi32
 LIBS_gdi := -lgdi32
 LIBS_d3d9 := -ld3d9
 LIBS_d3d11 := -ld3d11 -ldxgi -ldxguid
@@ -12,6 +13,7 @@ LIBS_screen := -lddraw -ldxguid
 LIBS_threads := -ld3d9
 LIBS_registry := -ladvapi32
 LIBS_files :=
+LIBS_sockets := -lws2_32
 
 EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe)) \
 	$(OUT)/i686/probe-missing.exe

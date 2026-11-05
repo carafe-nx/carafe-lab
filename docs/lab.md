@@ -186,6 +186,24 @@ save data is still there, close it.
   pairwise set of graphics and system settings: every pair of values of any two settings appears at least once
   (25 runs instead of 746,496 combinations). `--random <n>` adds random combinations for a long run.
 
+The gamepad probe, `probe-gamepad.exe`, runs as a game of `lab.json` ("Gamepad probe", "Gamepad probe x64"). At its
+start it logs what a program finds of the controller: the Plug and Play keys of the HID gamepads, the HID and Wine
+XInput device interfaces through `CM_Get_Device_Interface_List` and SetupAPI with each device's attributes, product
+string and capabilities, the raw input devices, the DirectInput 8 game controllers, and the Windows.Gaming.Input
+gamepads and raw game controllers. Then every change of the state in XInput, DirectInput 8 and Windows.Gaming.Input
+is a line of `probe-gamepad.log` (in the Eden save, `drive_c/Games/<arch>/`), so a scenario that presses buttons
+shows each press in each API with its time. The overlay withholds the controller while the loading screen shows, so
+the presses go after the first frame; the probe waits for its messages with `MsgWaitForMultipleObjects`, which is
+how its window counts as shown.
+
+The sockets probe, `probe-sockets.exe`, runs as a game of `lab.json` ("Sockets probe"). It binds a non-blocking UDP
+socket to port 9989 with `SO_REUSEADDR` and `SO_BROADCAST`, as Unreal Engine 3 games do at start, reads it four times,
+asks `FIONREAD`, then sends a datagram to a closed port and reads again; each result is a line of
+`probe-sockets.log`. On Windows an empty socket answers `WSAEWOULDBLOCK` (10035). Eden had no `RecvMMsg` and
+`SendMMsg`, which libnx uses for `recvmsg` and `sendmsg`, so every read answered `WSAECONNRESET` (10054) and a game
+that reads until the socket is empty never went on; patch `0066` answers them. `Ioctl` is still not answered, so
+`FIONREAD` fails.
+
 The threads probe, `probe-threads.exe`, runs as a game of `lab.json` rather than through `probes`, because it needs
 its own scenario and arguments. It takes every thread it can at several points of its run and logs how many it got
 (`ceiling …` lines in `probe-threads.log`), then opens a Direct3D 9 device, holds every thread for 30 s and lets
