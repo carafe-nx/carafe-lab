@@ -1,0 +1,111 @@
+Carafe Lab: the control channel records frames: `record <folder> <count>` saves each of the next `count` pictures
+the renderer presents, in a row and at the screen's size, as `frame-0000.png` and on into the folder. Each picture
+is taken the way `screenshot` takes one, and the next is asked for before the last is written, so no presented frame
+is skipped. Eden answers `recording <count>`, or `error idle` when no software runs.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/yuzu/bootmanager.cpp
++++ b/src/yuzu/bootmanager.cpp
+@@ -4,7 +4,10 @@
+ #include <algorithm>
+ #include <array>
++#include <chrono>
+ #include <cmath>
+ #include <cstring>
++#include <memory>
+ #include <string>
++#include <thread>
+ #include <tuple>
+ #include <type_traits>
+@@ -997,6 +1001,37 @@ void GRenderWindow::CaptureScreenshot(const QString& screenshot_path) {
+         layout);
+ }
+
++void GRenderWindow::RecordFrames(const QString& folder, int count) {
++    const u32 height = Settings::IsDockedMode() ? Layout::ScreenDocked::Height
++                                                : Layout::ScreenUndocked::Height;
++    const u32 width = UISettings::CalculateWidth(height, Settings::values.aspect_ratio.GetValue());
++    recording_folder = folder;
++    recording_layout = Layout::DefaultFrameLayout(width, height);
++    recording_index = 0;
++    recording_left = count;
++    RecordNextFrame();
++}
++
++void GRenderWindow::RecordNextFrame() {
++    auto& renderer = system.Renderer();
++    while (renderer.IsScreenshotPending()) {
++        std::this_thread::sleep_for(std::chrono::microseconds(200));
++    }
++    auto image = std::make_shared<QImage>(QSize(recording_layout.width, recording_layout.height),
++                                          QImage::Format_RGB32);
++    renderer.RequestScreenshot(
++        image->bits(),
++        [this, image](bool invert_y) {
++            const int index = recording_index.fetch_add(1);
++            if (recording_left.fetch_sub(1) > 1) {
++                RecordNextFrame();
++            }
++            image->mirrored(false, invert_y)
++                .save(QStringLiteral("%1/frame-%2.png").arg(recording_folder).arg(index, 4, 10, QLatin1Char('0')));
++        },
++        recording_layout);
++}
++
+ bool GRenderWindow::IsLoadingComplete() const {
+     return first_frame;
+ }
+--- a/src/yuzu/bootmanager.h
++++ b/src/yuzu/bootmanager.h
+@@ -6,6 +6,7 @@
+
+ #pragma once
+
++#include <atomic>
+ #include <condition_variable>
+ #include <cstddef>
+ #include <memory>
+@@ -207,5 +208,7 @@ public:
+
+     void CaptureScreenshot(const QString& screenshot_path);
+
++    void RecordFrames(const QString& folder, int count);
++
+     /**
+      * Instructs the window to re-launch the application using the specified program_index.
+@@ -258,5 +261,12 @@ private:
+     /// Temporary storage of the screenshot taken
+     QImage screenshot_image;
+
++    void RecordNextFrame();
++
++    QString recording_folder;
++    Layout::FramebufferLayout recording_layout{};
++    std::atomic<int> recording_left{0};
++    std::atomic<int> recording_index{0};
++
+     QByteArray geometry;
+
+--- a/src/yuzu/main_window.cpp
++++ b/src/yuzu/main_window.cpp
+@@ -1974,6 +1974,20 @@ void MainWindow::OnControlTick() {
+         }
+         render_window->CaptureScreenshot(argument);
+         ControlReply(QStringLiteral("capturing %1").arg(argument));
++    } else if (verb == QStringLiteral("record")) {
++        const QStringList words = argument.split(QLatin1Char(' '), Qt::SkipEmptyParts);
++        bool count_read = false;
++        const int count = words.size() == 2 ? words.at(1).toInt(&count_read) : 0;
++        if (!emulation_running || render_window == nullptr) {
++            ControlReply(QStringLiteral("error idle"));
++            return;
++        }
++        if (!count_read || count <= 0) {
++            ControlReply(QStringLiteral("error record %1").arg(argument));
++            return;
++        }
++        render_window->RecordFrames(words.at(0), count);
++        ControlReply(QStringLiteral("recording %1").arg(count));
+     } else if (verb == QStringLiteral("press")) {
+         const QStringList words = argument.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+         bool hold_read = false;

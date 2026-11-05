@@ -35,6 +35,9 @@ Usage:
   carafe-lab tap <x> <y>           taps the running game's screen at a point of 1280×720, as a finger would
   carafe-lab screen <file.png>     saves the running game's screen, paused or not; --no-point keeps it out of
                                    the recorded pass, for pictures of play the replay cannot repeat
+  carafe-lab flicker <folder> [n]  records the next n frames the running game presents (150 by default) and
+                                   lists flicker: parts of the picture that change for up to 3 frames and come
+                                   back; keeps the frames around each one in <folder>, deletes the rest
   carafe-lab perf [--json]         the emulator's FPS and speed over the last 10 s
   carafe-lab logs [--json]         the running game's start-up stages and the errors and warnings of its logs
   carafe-lab nsp <file> [--json]   what a ready NSP was built from: runtime version, settings, game folder
@@ -137,6 +140,13 @@ pub enum Command {
     Screen {
         /// Where to save the picture.
         file: Option<PathBuf>,
+    },
+    /// Record every frame the running game presents and look for flicker.
+    Flicker {
+        /// Where to keep the frames around each flicker.
+        folder: Option<PathBuf>,
+        /// How many frames to record.
+        frames: Option<u32>,
     },
     /// Pause the running game.
     Pause,
@@ -281,6 +291,10 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
         Some("press") => Command::Press { buttons: None },
         Some("tap") => Command::Tap { x: None, y: None },
         Some("screen") => Command::Screen { file: None },
+        Some("flicker") => Command::Flicker {
+            folder: None,
+            frames: None,
+        },
         Some("pause") => Command::Pause,
         Some("resume") => Command::Resume,
         Some("record") => Command::Record { name: None },
@@ -468,6 +482,12 @@ pub fn parse(args: &[String]) -> Result<Args, ArgsError> {
                 Command::Screen { file } | Command::Nsp { file } if file.is_none() => {
                     *file = Some(PathBuf::from(other))
                 }
+                Command::Flicker { folder, .. } if folder.is_none() => {
+                    *folder = Some(PathBuf::from(other))
+                }
+                Command::Flicker { frames, .. } if frames.is_none() => {
+                    *frames = Some(number(other, other.to_owned(), "a whole number of frames")?)
+                }
                 _ => return Err(ArgsError::Option(other.to_owned())),
             },
         }
@@ -605,6 +625,14 @@ mod tests {
                 file: Some(PathBuf::from("shot.png"))
             }
         );
+        assert_eq!(
+            parse(&args("flicker out 90")).unwrap().command,
+            Command::Flicker {
+                folder: Some(PathBuf::from("out")),
+                frames: Some(90)
+            }
+        );
+        assert!(parse(&args("flicker out many")).is_err());
     }
 
     #[test]

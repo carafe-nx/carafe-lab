@@ -136,6 +136,72 @@ impl Thumbnail {
     }
 }
 
+/// Cells across a [`ColourGrid`].
+pub const GRID_WIDTH: usize = THUMB_WIDTH;
+/// Cells down a [`ColourGrid`].
+pub const GRID_HEIGHT: usize = THUMB_HEIGHT;
+
+/// A picture reduced to the mean colour of each of its 64×36 cells, red, green and blue.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColourGrid {
+    cells: Vec<[f64; 3]>,
+}
+
+impl ColourGrid {
+    /// Reads a PNG file into a grid of mean colours.
+    ///
+    /// # Errors
+    ///
+    /// [`PictureError`] if the PNG cannot be read.
+    pub fn from_png(png: &[u8]) -> Result<Self, PictureError> {
+        let image = decode(png)?;
+        let mut cells = vec![[0.0; 3]; GRID_WIDTH * GRID_HEIGHT];
+        let mut counts = vec![0u32; GRID_WIDTH * GRID_HEIGHT];
+        for y in 0..image.height {
+            let cy = y * GRID_HEIGHT / image.height;
+            for x in 0..image.width {
+                let cx = x * GRID_WIDTH / image.width;
+                let at = (y * image.width + x) * image.channels;
+                let cell = &mut cells[cy * GRID_WIDTH + cx];
+                for (channel, sum) in cell.iter_mut().enumerate() {
+                    let offset = if image.channels >= 3 { channel } else { 0 };
+                    *sum += f64::from(image.pixels[at + offset]);
+                }
+                counts[cy * GRID_WIDTH + cx] += 1;
+            }
+        }
+        for (cell, count) in cells.iter_mut().zip(counts) {
+            if count > 0 {
+                for sum in cell.iter_mut() {
+                    *sum /= f64::from(count);
+                }
+            }
+        }
+        Ok(Self { cells })
+    }
+
+    /// Creates a grid from its cells, row by row.
+    ///
+    /// # Panics
+    ///
+    /// When `cells` does not hold [`GRID_WIDTH`] × [`GRID_HEIGHT`] cells.
+    #[must_use]
+    pub fn from_cells(cells: Vec<[f64; 3]>) -> Self {
+        assert_eq!(cells.len(), GRID_WIDTH * GRID_HEIGHT);
+        Self { cells }
+    }
+
+    /// Returns the largest difference of one channel between cell `index` here and in `other`, 0…255.
+    #[must_use]
+    pub fn cell_difference(&self, other: &Self, index: usize) -> f64 {
+        self.cells[index]
+            .iter()
+            .zip(&other.cells[index])
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max)
+    }
+}
+
 /// Colours the graphics probes draw: red, green, blue and white quadrants, left to right, top to bottom.
 pub const PROBE_COLOURS: [[u8; 3]; 4] =
     [[217, 26, 26], [26, 191, 51], [38, 64, 230], [242, 242, 242]];

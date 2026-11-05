@@ -11,6 +11,7 @@ pub mod crash;
 pub mod diagnostics;
 pub mod emulator;
 pub mod firmware;
+pub mod flicker;
 pub mod frames;
 pub mod input_check;
 pub mod lang;

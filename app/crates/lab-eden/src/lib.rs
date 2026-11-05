@@ -46,6 +46,9 @@ const SCREEN_FILE: &str = "lab-screen.png";
 const FRAME_FILE: &str = "lab-frame.png";
 const GLIMPSE_FILE: &str = "lab-glimpse.jpg";
 const FRAME_WAIT: Duration = Duration::from_secs(5);
+const RECORDING_FOLDER: &str = "screenshots/recording";
+/// A recording ends early when no new frame came for this long.
+pub const RECORDING_IDLE: Duration = Duration::from_secs(10);
 const CONTAINER_END_FILE: &str = "container-end.log";
 const SESSION_FILE: &str = "session.log";
 const RESOURCES_FILE: &str = "resources.log";
@@ -970,6 +973,60 @@ impl Eden {
             "Eden wrote no picture in {} s",
             FRAME_WAIT.as_secs()
         )))
+    }
+
+    /// Records the next `count` frames the running game presents into the folder `recording` of Eden's user
+    /// folder, emptied first.
+    ///
+    /// # Returns
+    ///
+    /// The recorded frames in order; fewer than `count` when the game stopped presenting for
+    /// [`RECORDING_IDLE`].
+    ///
+    /// # Errors
+    ///
+    /// [`EmulatorError`] when Eden refuses to record or the folder cannot be written.
+    pub fn record_frames(&mut self, count: u32) -> Result<Vec<PathBuf>, EmulatorError> {
+        let seen = self.session.as_ref().map_or(0, |session| session.seen);
+        let folder = self.user_dir.join(RECORDING_FOLDER);
+        let _ = fs::remove_dir_all(&folder);
+        fs::create_dir_all(&folder).map_err(io)?;
+        self.send(&format!("record /work/user/{RECORDING_FOLDER} {count}"))?;
+        let replies = self.wait_for_reply(seen, FRAME_WAIT, |text| {
+            text.starts_with("recording") || text.starts_with("error")
+        })?;
+        if let Some(reply) = replies.iter().find(|reply| reply.text.starts_with("error")) {
+            return Err(EmulatorError::Control(format!(
+                "Eden recorded nothing: {}",
+                reply.text
+            )));
+        }
+        let frames = |folder: &Path| -> Vec<PathBuf> {
+            let mut files: Vec<PathBuf> = fs::read_dir(folder)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|extension| extension == "png"))
+                .collect();
+            files.sort();
+            files
+        };
+        let mut last_count = 0;
+        let mut last_change = Instant::now();
+        loop {
+            let found = frames(&folder);
+            if found.len() != last_count {
+                last_count = found.len();
+                last_change = Instant::now();
+            }
+            if found.len() >= count as usize || last_change.elapsed() > RECORDING_IDLE {
+                break;
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+        thread::sleep(Duration::from_secs(1));
+        Ok(frames(&folder))
     }
 
     fn frame_times_file(&self, title: TitleId) -> Option<PathBuf> {

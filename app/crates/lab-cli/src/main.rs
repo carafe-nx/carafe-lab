@@ -22,12 +22,13 @@ use lab_core::config::{self, Config, Game};
 use lab_core::console_changes::console_changes;
 use lab_core::diagnostics::Diagnostic;
 use lab_core::emulator::{EdenCpu, Gpu};
+use lab_core::flicker;
 use lab_core::lang::Lang;
 use lab_core::local::{self, LocalSettings};
 use lab_core::matrix;
 use lab_core::milestones::{Launch, Stage};
 use lab_core::perf;
-use lab_core::picture::Thumbnail;
+use lab_core::picture::{ColourGrid, GRID_HEIGHT, GRID_WIDTH, Thumbnail};
 use lab_core::probes::{self, ProbeRun};
 use lab_core::problems;
 use lab_core::recording;
@@ -52,6 +53,8 @@ const DESKTOP: &str = "app/crates/carafe-desktop";
 const RUNTIME_SYMBOLS: &str = "resources/runtime/symbols/wine-nx-runtime.elf";
 const QUEUE_POLL: Duration = Duration::from_secs(2);
 const PERF_WINDOW_MS: u64 = 10_000;
+const FLICKER_FRAMES: u32 = 150;
+const FLICKERS_KEPT: usize = 20;
 const LOG_PROBLEMS_SHOWN: usize = 15;
 const KEPT_IMAGES: &str = "carafe-lab-eden-kept";
 const REFERENCES_DIR: &str = "references";
@@ -266,6 +269,11 @@ fn start(args: Args) -> Result<ExitCode, String> {
         Command::Screen { file } => {
             let file = file.ok_or("screen needs a file to save the picture to")?;
             lab.screen(&config, &file)
+        }
+        Command::Flicker { folder, frames } => {
+            let folder =
+                folder.ok_or("flicker needs a folder to keep the frames around each flicker in")?;
+            lab.flicker(&config, &folder, frames.unwrap_or(FLICKER_FRAMES))
         }
         Command::Pause => lab.set_paused(&config, true),
         Command::Resume => lab.set_paused(&config, false),
@@ -1398,6 +1406,56 @@ impl Lab {
             );
         }
         println!("{}", file.display());
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn flicker(mut self, config: &Config, folder: &Path, count: u32) -> Result<ExitCode, String> {
+        self.require_running(config)?;
+        self.eden.join_running();
+        let recorded = self
+            .eden
+            .record_frames(count)
+            .map_err(|error| error.to_string())?;
+        let grids = recorded
+            .iter()
+            .map(|file| {
+                let bytes =
+                    fs::read(file).map_err(|error| format!("{}: {error}", file.display()))?;
+                ColourGrid::from_png(&bytes).map_err(|error| format!("{}: {error}", file.display()))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let found = flicker::find(&grids);
+        fs::create_dir_all(folder).map_err(|error| format!("{}: {error}", folder.display()))?;
+        let mut kept = std::collections::BTreeSet::new();
+        for flicker in found.iter().take(FLICKERS_KEPT) {
+            kept.extend(flicker.first - 1..=flicker.first + flicker.frames);
+        }
+        for &index in &kept {
+            let source = &recorded[index];
+            let target = folder.join(source.file_name().unwrap_or_default());
+            fs::copy(source, &target).map_err(|error| format!("{}: {error}", target.display()))?;
+        }
+        if let Some(recording) = recorded.first().and_then(|file| file.parent()) {
+            let _ = fs::remove_dir_all(recording);
+        }
+        let (cell_width, cell_height) = (1280 / GRID_WIDTH, 720 / GRID_HEIGHT);
+        println!(
+            "recorded {} frames, {} flickers",
+            recorded.len(),
+            found.len()
+        );
+        for flicker in &found {
+            println!(
+                "frame-{:04}: {} frames, {} cells at {},{}-{},{}",
+                flicker.first,
+                flicker.frames,
+                flicker.cells,
+                flicker.area[0] * cell_width,
+                flicker.area[1] * cell_height,
+                (flicker.area[2] + 1) * cell_width,
+                (flicker.area[3] + 1) * cell_height
+            );
+        }
         Ok(ExitCode::SUCCESS)
     }
 

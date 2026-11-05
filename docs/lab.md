@@ -204,6 +204,12 @@ asks `FIONREAD`, then sends a datagram to a closed port and reads again; each re
 that reads until the socket is empty never went on; patch `0066` answers them. `Ioctl` is still not answered, so
 `FIONREAD` fails.
 
+The textures probe, `probe-textures.exe`, runs as a game of `lab.json` ("Textures probe"). It draws an 8×8 texture of
+four coloured quadrants in each of ten Direct3D 9 formats (A8R8G8B8, X8R8G8B8, A8B8G8R8, R5G6B5, X1R5G5B5, A1R5G5B5,
+A4R4G4B4, DXT1, DXT3, DXT5), once from the managed pool and once from the default pool, reads the picture back and
+logs each cell's colours. A format that comes out black or with red and blue swapped shows which copy or view of
+Eden's OpenGL renderer loses it (patches `0069` and `0070`).
+
 The threads probe, `probe-threads.exe`, runs as a game of `lab.json` rather than through `probes`, because it needs
 its own scenario and arguments. It takes every thread it can at several points of its run and logs how many it got
 (`ceiling …` lines in `probe-threads.log`), then opens a Direct3D 9 device, holds every thread for 30 s and lets
@@ -423,6 +429,11 @@ For Claude and for quick looks, one call each:
   so a replay does not take a loading screen for the next one that differs from it by a line of text;
 - during a game's loading, let it load without live commands: a picture or a pause while Need for Speed Underground
   2 loads a race crashed Eden in 3 passes of 3;
+- `flicker <folder> [n]` records the next `n` frames the running game presents (150 by default; Eden saves each
+  presented frame, `patches/eden/0073`) and lists flicker: cells of a 64×36 grid of the picture that change for up
+  to 3 frames and come back, while the rest stays still. It keeps the frames around the first 20 flickers in
+  `<folder>` and deletes the rest. Recording slows the game down, and a moving camera reads as flicker, so record
+  a still scene;
 - `perf` prints the median and worst-tenth FPS and the speed over the last 10 seconds; `--json` prints the readings.
 - `logs` prints how far the running game got (loading screen, first frame, stalls) and the error and warning lines of
   Eden's log since its boot, the overlay's and the runtime's, grouped; `--json` prints the milestones and every group.
