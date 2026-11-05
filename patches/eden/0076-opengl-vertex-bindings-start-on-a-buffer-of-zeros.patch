@@ -1,0 +1,66 @@
+Carafe Lab: Eden's OpenGL renderer binds a small buffer of zeros to every vertex binding before it binds the
+first vertex buffers, so an active attribute whose stream was never set reads zeros from a buffer, as on the
+console. Eden draws with the default vertex array object of a compatibility context, where an enabled attribute
+on a binding with no buffer is a client-memory array: Mesa then mapped the index buffer on every indexed draw to
+find the vertex range, which waits for the GPU to finish all its work (Hitman 2: Silent Assassin, NVK's shaders
+read 16 attributes while DXVK sets 4 streams, ran at a third of its speed once buffer uploads stopped being lost).
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.cpp
+@@ -231,11 +231,26 @@
+     }
+ }
+ 
++void BufferCacheRuntime::BindZeroVertexBuffers() {
++    if (zero_vertex_buffers_bound || has_unified_vertex_buffers) {
++        return;
++    }
++    zero_vertex_buffers_bound = true;
++    static constexpr GLsizeiptr ZERO_VERTEX_BUFFER_SIZE = 0x8000;
++    const std::vector<u8> zeros(ZERO_VERTEX_BUFFER_SIZE);
++    zero_vertex_buffer.Create();
++    glNamedBufferStorage(zero_vertex_buffer.handle, ZERO_VERTEX_BUFFER_SIZE, zeros.data(), 0);
++    for (u32 index = 0; index < (std::min)(max_attributes, 32U); ++index) {
++        glBindVertexBuffer(index, zero_vertex_buffer.handle, 0, 0);
++    }
++}
++
+ void BufferCacheRuntime::BindVertexBuffer(u32 index, Buffer& buffer, u32 offset, u32 size,
+                                           u32 stride) {
+     if (index >= max_attributes) {
+         return;
+     }
++    BindZeroVertexBuffers();
+     if (has_unified_vertex_buffers) {
+         buffer.MakeResident(GL_READ_ONLY);
+         glBindVertexBuffer(index, 0, 0, static_cast<GLsizei>(stride));
+@@ -248,6 +263,7 @@
+ }
+ 
+ void BufferCacheRuntime::BindVertexBuffers(VideoCommon::HostBindings<Buffer>& bindings) {
++    BindZeroVertexBuffers();
+     // TODO: Should HostBindings provide the correct runtime types to avoid these transforms?
+     std::array<GLuint, 32> buffer_handles;
+     std::array<GLsizei, 32> buffer_strides;
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.h
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.h
+@@ -103,6 +103,8 @@
+ 
+     void BindVertexBuffers(VideoCommon::HostBindings<Buffer>& bindings);
+ 
++    void BindZeroVertexBuffers();
++
+     void BindUniformBuffer(size_t stage, u32 binding_index, Buffer& buffer, u32 offset, u32 size);
+ 
+     void BindComputeUniformBuffer(u32 binding_index, Buffer& buffer, u32 offset, u32 size);
+@@ -224,6 +226,9 @@
+ 
+     u32 max_attributes = 0;
+ 
++    OGLBuffer zero_vertex_buffer;
++    bool zero_vertex_buffers_bound = false;
++
+     std::array<GLuint, 5> graphics_base_uniform_bindings{};
+     std::array<GLuint, 5> graphics_base_storage_bindings{};
+     GLuint* texture_handles = nullptr;
