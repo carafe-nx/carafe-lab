@@ -1,0 +1,54 @@
+Carafe Lab: a global memory access at a pointer loaded from memory plus a computed offset is still tracked to the
+storage buffer that pointer names. NVK reads a UBO it indexes dynamically through the descriptor's address plus the
+offset, and the 64-bit add puts the carry into the high word: the high word is the pointer's high word plus a
+carry, not the pointer's high word itself. The tracking now finds the pointer's words through such sums (one add
+for the low word, two for the high word), still requiring both to be the two words of one loaded pointer. Before,
+the access fell back to a search that went through the load and took the descriptor set's address for the
+buffer, so the shader read descriptor memory for its constants (Direct3D 9 vertex shaders that index constants
+with a0: Hitman 2: Silent Assassin's skinned characters were not drawn).
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp
++++ b/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp
+@@ -398,22 +398,30 @@
+     return inst;
+ }
+ 
++const IR::Inst* PointerWordInSum(const IR::Value& value, int depth) {
++    if (const IR::Inst* const word{PointerWord(value)}) {
++        return word;
++    }
++    if (depth == 0 || value.IsImmediate()) {
++        return nullptr;
++    }
++    const IR::Inst* const add{value.InstRecursive()};
++    if (add->GetOpcode() != IR::Opcode::IAdd32) {
++        return nullptr;
++    }
++    if (const IR::Inst* const word{PointerWordInSum(add->Arg(0), depth - 1)}) {
++        return word;
++    }
++    return PointerWordInSum(add->Arg(1), depth - 1);
++}
++
+ std::optional<IndirectInfo> TrackIndirect(IR::Inst& inst) {
+     const std::optional<LowAddrInfo> low_addr{TrackLowAddress(&inst)};
+     if (!low_addr) {
+         return std::nullopt;
+     }
+-    const IR::Inst* low_word{PointerWord(low_addr->value)};
+-    if (!low_word && !low_addr->value.IsImmediate()) {
+-        const IR::Inst* const add{low_addr->value.InstRecursive()};
+-        if (add->GetOpcode() == IR::Opcode::IAdd32) {
+-            low_word = PointerWord(add->Arg(0));
+-            if (!low_word) {
+-                low_word = PointerWord(add->Arg(1));
+-            }
+-        }
+-    }
+-    const IR::Inst* const high_word{PointerWord(low_addr->high)};
++    const IR::Inst* const low_word{PointerWordInSum(low_addr->value, 1)};
++    const IR::Inst* const high_word{PointerWordInSum(low_addr->high, 2)};
+     if (!low_word || !high_word) {
+         return std::nullopt;
+     }
