@@ -77,6 +77,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `bug` Hitman 2's agent 47 is drawn again: a vertex shader that indexes its constants with `a0` keeps reading them from the constant buffer when the GPU adds the index to the buffer's address with a carry into its high word (`0078`; the shaders probe)
 - [x] `bug` Hitman 2's walls and floor no longer vanish for single frames: an NCE fault no longer uncaches by force a page the GPU thread cached again meanwhile, and it tells the caches about whole pages (`0072`, `0075`)
 - [x] `bug` Vertex streams a game never set read zeros from a buffer, so Mesa stops waiting for the GPU on every indexed draw (`0076`; Hitman 2's shed 5 → 20 FPS)
 - [x] `bug` OpenGL images keep the mip levels of their largest side, not of their width (`0077`)
