@@ -1,0 +1,16 @@
+Carafe Lab: d3d12 offers GL_EXT_shader_image_load_formatted when the GPU loads every format from a typed UAV, which is
+the condition it already requires for shader images. A DXIL typed load takes its format from the view, so a load with
+no format in the shader needs nothing more. Without the extension, Eden's OpenGL renderer could not compile guest
+compute shaders that load images with no format (NVK's), and their dispatches ran no shader at all.
+MIT, as the file it changes.
+
+--- a/src/gallium/drivers/d3d12/d3d12_screen.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_screen.cpp
+@@ -346,6 +346,7 @@
+    caps->query_timestamp = true;
+    caps->vertex_element_instance_divisor = true;
+    caps->image_store_formatted = true;
++   caps->image_load_formatted = screen->support_shader_images;
+    caps->glsl_tess_levels_as_inputs = true;
+
+    caps->max_stream_output_buffers = D3D12_SO_BUFFER_SLOT_COUNT;

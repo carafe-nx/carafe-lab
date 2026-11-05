@@ -1,0 +1,19 @@
+Carafe Lab: Eden's OpenGL renderer limits an image's mip levels by its largest side (depth too for a 3D image),
+not by its width alone. A texture taller than wide, or a 3D texture deeper than wide, lost its smallest levels:
+uploads to them were dropped and views of them failed (glTextureView: new minlevel 8 > numlevels 8, then
+glTextureParameteriv and glBindImageTextures on the failed views).
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/renderer_opengl/gl_texture_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_texture_cache.cpp
+@@ -753,7 +753,9 @@
+         gl_format = tuple.format;
+         gl_type = tuple.type;
+     }
+-    const int max_host_mip_levels = std::bit_width(info.size.width);
++    const u32 largest_side = (std::max)(
++        {info.size.width, info.size.height, info.type == ImageType::e3D ? info.size.depth : 1U});
++    const int max_host_mip_levels = std::bit_width(largest_side);
+     gl_num_levels = (std::min)(info.resources.levels, max_host_mip_levels);
+     texture = MakeImage(info, gl_internal_format, gl_num_levels);
+     current_texture = texture.handle;

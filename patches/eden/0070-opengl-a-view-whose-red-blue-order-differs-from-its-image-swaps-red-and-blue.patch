@@ -1,0 +1,35 @@
+Carafe Lab: an OpenGL image view whose format orders red and blue the other way than its image's format exchanges red
+and blue in its swizzle. OpenGL has no BGR view formats, so glTextureView of an A8B8G8R8 image as B8G8R8A8 read the
+image's bytes in their stored order, where the Vulkan renderer's view format reorders them: Hitman 2: Silent
+Assassin's menu pictures and scenery came out blue where they are red.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/renderer_opengl/gl_texture_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_texture_cache.cpp
+@@ -195,6 +195,17 @@
+     return dst_format == src_format || (!IsPackedFormat(dst_format) && !IsPackedFormat(src_format));
+ }
+
++[[nodiscard]] u8 SwapRedBlue(u8 source) {
++    switch (static_cast<SwizzleSource>(source)) {
++    case SwizzleSource::R:
++        return static_cast<u8>(SwizzleSource::B);
++    case SwizzleSource::B:
++        return static_cast<u8>(SwizzleSource::R);
++    default:
++        return source;
++    }
++}
++
+ [[nodiscard]] constexpr SwizzleSource ConvertGreenRed(SwizzleSource value) {
+     switch (value) {
+     case SwizzleSource::G:
+@@ -1166,5 +1177,8 @@
+                          swizzle[2] == static_cast<u8>(SwizzleSource::R);
+     }
++    if (!is_render_target && IsPixelFormatBGR(info.format) != IsPixelFormatBGR(image.info.format)) {
++        std::ranges::transform(swizzle, swizzle.begin(), SwapRedBlue);
++    }
+     switch (info.type) {
+     case ImageViewType::e1DArray:
+         flat_range.extent.layers = 1;

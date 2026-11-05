@@ -1,0 +1,59 @@
+Carafe Lab: the OpenGL renderer copies an image through the format conversion pass, which reads the source's bytes and
+writes them in the destination's format, when glCopyImageSubData cannot copy it right:
+- to or from GL_RGB565, GL_RGB5_A1 or GL_RGBA4 of another internal format. These packed formats belong to no view
+  class, so glCopyImageSubData refused the copy with GL_INVALID_OPERATION ("internalFormat mismatch") and the
+  destination kept nothing: Direct3D textures in X1R5G5B5, A1R5G5B5 and A4R4G4B4 were drawn black;
+- between a BGR and a non-BGR format. OpenGL stores a BGR image in RGB order, so a raw copy into the A8B8G8R8 image
+  NVK samples with a blue, green, red swizzle exchanged red and blue. The texture cache already converted such copies,
+  but joining overlapping images copied them directly (Hitman 2: Silent Assassin's blue menu and scenery).
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/renderer_opengl/gl_texture_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_texture_cache.cpp
+@@ -180,6 +180,21 @@
+     return false;
+ }
+
++[[nodiscard]] bool IsPackedFormat(GLenum internal_format) {
++    switch (internal_format) {
++    case GL_RGB565:
++    case GL_RGB5_A1:
++    case GL_RGBA4:
++        return true;
++    default:
++        return false;
++    }
++}
++
++[[nodiscard]] bool CanCopyImageData(GLenum dst_format, GLenum src_format) {
++    return dst_format == src_format || (!IsPackedFormat(dst_format) && !IsPackedFormat(src_format));
++}
++
+ [[nodiscard]] constexpr SwizzleSource ConvertGreenRed(SwizzleSource value) {
+     switch (value) {
+     case SwizzleSource::G:
+@@ -577,6 +592,11 @@
+
+ void TextureCacheRuntime::CopyImage(Image& dst_image, Image& src_image,
+                                     std::span<const ImageCopy> copies) {
++    if (!CanCopyImageData(dst_image.GlInternalFormat(), src_image.GlInternalFormat()) ||
++        IsPixelFormatBGR(dst_image.info.format) != IsPixelFormatBGR(src_image.info.format)) {
++        format_conversion_pass.ConvertImage(dst_image, src_image, copies);
++        return;
++    }
+     const GLuint dst_name = dst_image.Handle();
+     const GLuint src_name = src_image.Handle();
+     const GLenum dst_target = ImageTarget(dst_image.info);
+--- a/src/video_core/renderer_opengl/gl_texture_cache.h
++++ b/src/video_core/renderer_opengl/gl_texture_cache.h
+@@ -221,6 +221,10 @@
+         return gl_type;
+     }
+
++    GLenum GlInternalFormat() const noexcept {
++        return gl_internal_format;
++    }
++
+     bool IsRescaled() const;
+
+     bool ScaleUp(bool ignore = false);

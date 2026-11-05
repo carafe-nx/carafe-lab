@@ -1,0 +1,17 @@
+Carafe Lab: the OpenGL renderer configures a compute dispatch with the buffer and texture cache locks held, as the
+Vulkan renderer does. Without them a dispatch synchronized buffers while a guest thread under NCE reported its write
+to the same pages: the upload cleared the CPU-modified bits the write had just set and protected the page again, the
+access faulted once more, and the guest's data never reached the GPU (Hitman 2: Silent Assassin's broken geometry,
+holes and stale menu pictures).
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ b/src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -403,6 +403,7 @@ void RasterizerOpenGL::DispatchCompute() {
+     if (pipeline->UsesLocalMemory()) {
+         program_manager.LocalMemoryWarmup();
+     }
++    std::scoped_lock lock{texture_cache.mutex, buffer_cache.mutex};
+     pipeline->SetEngine(kepler_compute, gpu_memory);
+     pipeline->Configure();
+     const auto& qmd{kepler_compute->launch_description};

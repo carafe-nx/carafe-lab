@@ -1,0 +1,14 @@
+Carafe Lab: the OpenGL renderer clears a buffer with its 32-bit value given as GL_RED_INTEGER, as GL_R32UI requires.
+Mesa refuses GL_RED with an integer internal format ("integer vs non-integer"), so every guest buffer fill was dropped
+and the buffer kept what it held before.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.cpp
+@@ -212,5 +212,5 @@
+
+ void BufferCacheRuntime::ClearBuffer(Buffer& dest_buffer, u32 offset, size_t size, u32 value) {
+     glClearNamedBufferSubData(dest_buffer.Handle(), GL_R32UI, static_cast<GLintptr>(offset),
+-                              static_cast<GLsizeiptr>(size), GL_RED, GL_UNSIGNED_INT, &value);
++                              static_cast<GLsizeiptr>(size), GL_RED_INTEGER, GL_UNSIGNED_INT, &value);
+ }
