@@ -30,6 +30,9 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` The Run screen keeps the last game's picture and stages while the next game's NSP is built
 - [ ] `bug` A stopped run leaves its NSP build folder in `nspDir`
 - [ ] `bug` After a game crashed the session, the next game's device save can fail to be created: Carafe's files are not mounted
+- [ ] `bug` Recording frames slows a game to ~5 FPS (a synchronous read-back and a PNG per frame); Eden ended once with SIGSEGV mid-recording ("D3D12: Removing Device"), no stack
+- [ ] `bug` Hitman 2 once lost its Vulkan device while frames were recorded (DXVK: `VK_ERROR_DEVICE_LOST`; Eden's GPU thread gave no timing report for over 10 s before it; every Eden core idle after it); NVK's Horizon backend gives up when a fence's report stays unseen for 10 s
+- [ ] `research` Hitman 2 in the shed: about one frame in 1,500 while recording, the whole scene is drawn from another viewpoint (the third-person camera behind a wall), with the same draws as the frames around it, so the game placed its camera there; whether frame-time spikes cause it and whether the console shows it
 
 ### Research and later ideas (not the app)
 
@@ -73,6 +76,14 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` lab-core's and lab-run's input check tests (5) still expect the controller mapped by position; Carafe maps by label since v0.4.0
 
 ## Done
+
+- [x] `bug` Hitman 2's walls and floor no longer vanish for single frames: an NCE fault no longer uncaches by force a page the GPU thread cached again meanwhile, and it tells the caches about whole pages (`0072`, `0075`)
+- [x] `bug` Vertex streams a game never set read zeros from a buffer, so Mesa stops waiting for the GPU on every indexed draw (`0076`; Hitman 2's shed 5 → 20 FPS)
+- [x] `bug` OpenGL images keep the mip levels of their largest side, not of their width (`0077`)
+- [x] `bug` 16-bit textures and copies between BGR and RGB images are no longer black or red-blue swapped (`0069`, `0070`), compute dispatches hold the cache locks (`0068`), buffer clears pass integers (`0071`)
+- [x] `bug` Guest compute shaders that load images with no format compile on d3d12 (Mesa `0005`)
+- [x] `feature` `flicker` records every presented frame of a running game and lists parts that change for a few frames (`0073`)
+- [x] `feature` A textures probe draws ten Direct3D 9 formats from both pools
 
 - [x] `bug` Datagram reads and writes no longer fail with `WSAECONNRESET`: Eden answers `RecvMMsg` and `SendMMsg` (`0066`); Dishonored gets past its start
 - [x] `bug` Under NCE an unaligned load-acquire or store-release faults to the process as on the console, instead of Eden running it and storing the stack pointer for zero (`0065`)
