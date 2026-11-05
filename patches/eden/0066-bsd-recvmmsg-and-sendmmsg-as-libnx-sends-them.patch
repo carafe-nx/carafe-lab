@@ -1,0 +1,367 @@
+Carafe Lab: bsd:u answers RecvMMsg and SendMMsg, which libnx uses for recvmsg and sendmsg; Eden left
+them unimplemented, so every datagram read failed and a game polling a UDP socket until it is empty
+never saw WSAEWOULDBLOCK. The messages are read and written in the layout libnx serialises them in.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/hle/service/sockets/bsd.h
++++ b/src/core/hle/service/sockets/bsd.h
+@@ -126,6 +126,31 @@
+         Errno bsd_errno{};
+     };
+ 
++    struct RecvMMsgWork {
++        void Execute(BSD* bsd);
++        void Response(HLERequestContext& ctx);
++
++        s32 fd;
++        u32 vlen;
++        u32 flags;
++        std::vector<u8> buffer;
++        std::vector<u8> reply;
++        s32 ret{};
++        Errno bsd_errno{};
++    };
++
++    struct SendMMsgWork {
++        void Execute(BSD* bsd);
++        void Response(HLERequestContext& ctx);
++
++        s32 fd;
++        u32 vlen;
++        u32 flags;
++        std::vector<u8> buffer;
++        s32 ret{};
++        Errno bsd_errno{};
++    };
++
+     void RegisterClient(HLERequestContext& ctx);
+     void StartMonitoring(HLERequestContext& ctx);
+     void Socket(HLERequestContext& ctx);
+@@ -145,6 +170,8 @@
+     void RecvFrom(HLERequestContext& ctx);
+     void Send(HLERequestContext& ctx);
+     void SendTo(HLERequestContext& ctx);
++    void RecvMMsg(HLERequestContext& ctx);
++    void SendMMsg(HLERequestContext& ctx);
+     void Write(HLERequestContext& ctx);
+     void Read(HLERequestContext& ctx);
+     void Close(HLERequestContext& ctx);
+--- a/src/core/hle/service/sockets/bsd.cpp
++++ b/src/core/hle/service/sockets/bsd.cpp
+@@ -4,8 +4,11 @@
+ // SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
++#include <algorithm>
+ #include <array>
++#include <cstring>
+ #include <memory>
++#include <optional>
+ #include <utility>
+ #include <vector>
+ 
+@@ -54,6 +57,121 @@
+     std::memcpy(buffer.data(), &t, (std::min)(sizeof(T), buffer.size()));
+ }
+ 
++constexpr u8 MMSG_VERSION = 8;
++constexpr std::size_t SOCKADDR_IN_SIZE = 16;
++
++struct MMsgIov {
++    std::size_t offset;
++    std::size_t size;
++};
++
++struct MMsgEntry {
++    std::size_t name_offset;
++    u32 name_len;
++    std::vector<MMsgIov> iovs;
++    std::size_t length_offset;
++};
++
++class MMsgReader {
++public:
++    explicit MMsgReader(std::span<const u8> buffer_) : buffer{buffer_} {}
++
++    bool Read32(u32& value) {
++        if (buffer.size() - at < sizeof(value)) {
++            return false;
++        }
++        std::memcpy(&value, buffer.data() + at, sizeof(value));
++        at += sizeof(value);
++        return true;
++    }
++
++    bool Read64(u64& value) {
++        if (buffer.size() - at < sizeof(value)) {
++            return false;
++        }
++        std::memcpy(&value, buffer.data() + at, sizeof(value));
++        at += sizeof(value);
++        return true;
++    }
++
++    bool Skip(u64 size, std::size_t& offset) {
++        if (buffer.size() - at < size) {
++            return false;
++        }
++        offset = at;
++        at += static_cast<std::size_t>(size);
++        return true;
++    }
++
++    std::size_t At() const {
++        return at;
++    }
++
++private:
++    std::span<const u8> buffer;
++    std::size_t at{1};
++};
++
++std::optional<std::vector<MMsgEntry>> ParseMMsg(std::span<const u8> buffer, u32 vlen) {
++    if (buffer.empty()) {
++        return std::nullopt;
++    }
++    MMsgReader reader{buffer};
++    std::vector<MMsgEntry> entries;
++    for (u32 i = 0; i < vlen; ++i) {
++        MMsgEntry entry{};
++        u32 iov_count{};
++        u32 control_len{};
++        u32 flags{};
++        u32 length{};
++        std::size_t control_offset{};
++        if (!reader.Read32(entry.name_len) || !reader.Skip(entry.name_len, entry.name_offset) ||
++            !reader.Read32(iov_count)) {
++            return std::nullopt;
++        }
++        for (u32 j = 0; j < iov_count; ++j) {
++            u64 size{};
++            MMsgIov iov{};
++            if (!reader.Read64(size) || !reader.Skip(size, iov.offset)) {
++                return std::nullopt;
++            }
++            iov.size = static_cast<std::size_t>(size);
++            entry.iovs.push_back(iov);
++        }
++        if (!reader.Read32(control_len) || !reader.Skip(control_len, control_offset) ||
++            !reader.Read32(flags)) {
++            return std::nullopt;
++        }
++        entry.length_offset = reader.At();
++        if (!reader.Read32(length)) {
++            return std::nullopt;
++        }
++        entries.push_back(std::move(entry));
++    }
++    return entries;
++}
++
++void Append32(std::vector<u8>& out, u32 value) {
++    const auto* bytes = reinterpret_cast<const u8*>(&value);
++    out.insert(out.end(), bytes, bytes + sizeof(value));
++}
++
++void Append64(std::vector<u8>& out, u64 value) {
++    const auto* bytes = reinterpret_cast<const u8*>(&value);
++    out.insert(out.end(), bytes, bytes + sizeof(value));
++}
++
++void AppendEmptyEntry(std::vector<u8>& out, const MMsgEntry& entry) {
++    Append32(out, 0);
++    Append32(out, static_cast<u32>(entry.iovs.size()));
++    for (std::size_t i = 0; i < entry.iovs.size(); ++i) {
++        Append64(out, 0);
++    }
++    Append32(out, 0);
++    Append32(out, 0);
++    Append32(out, 0);
++}
++
+ } // Anonymous namespace
+ 
+ void BSD::PollWork::Execute(BSD* bsd) {
+@@ -150,6 +268,118 @@
+     rb.PushEnum(bsd_errno);
+ }
+ 
++void BSD::RecvMMsgWork::Execute(BSD* bsd) {
++    const auto entries = ParseMMsg(buffer, vlen);
++    if (!entries) {
++        ret = -1;
++        bsd_errno = Errno::INVAL;
++        return;
++    }
++    reply.assign(1, MMSG_VERSION);
++    s32 received = 0;
++    bool drained = false;
++    for (const MMsgEntry& entry : *entries) {
++        if (drained) {
++            AppendEmptyEntry(reply, entry);
++            continue;
++        }
++        std::size_t total = 0;
++        for (const MMsgIov& iov : entry.iovs) {
++            total += iov.size;
++        }
++        std::vector<u8> message(total);
++        std::vector<u8> addr((std::max)(static_cast<std::size_t>(entry.name_len), SOCKADDR_IN_SIZE));
++        const u32 message_flags = received == 0 ? flags : (flags | Network::FLAG_MSG_DONTWAIT);
++        const auto [got, error] = bsd->RecvFromImpl(fd, message_flags, message, addr);
++        if (got < 0) {
++            if (received == 0) {
++                ret = -1;
++                bsd_errno = error;
++                return;
++            }
++            drained = true;
++            AppendEmptyEntry(reply, entry);
++            continue;
++        }
++        const u32 name_len =
++            static_cast<u32>((std::min)(addr.size(), (std::min)(static_cast<std::size_t>(entry.name_len),
++                                                                SOCKADDR_IN_SIZE)));
++        Append32(reply, name_len);
++        reply.insert(reply.end(), addr.begin(), addr.begin() + name_len);
++        Append32(reply, static_cast<u32>(entry.iovs.size()));
++        std::size_t from = 0;
++        for (const MMsgIov& iov : entry.iovs) {
++            const std::size_t part = (std::min)(iov.size, static_cast<std::size_t>(got) - from);
++            Append64(reply, part);
++            reply.insert(reply.end(), message.begin() + from, message.begin() + from + part);
++            from += part;
++        }
++        Append32(reply, 0);
++        Append32(reply, 0);
++        Append32(reply, static_cast<u32>(got));
++        ++received;
++    }
++    ret = received;
++    bsd_errno = Errno::SUCCESS;
++}
++
++void BSD::RecvMMsgWork::Response(HLERequestContext& ctx) {
++    if (ret >= 0) {
++        ctx.WriteBuffer(reply);
++    }
++
++    IPC::ResponseBuilder rb{ctx, 4};
++    rb.Push(ResultSuccess);
++    rb.Push<s32>(ret);
++    rb.PushEnum(bsd_errno);
++}
++
++void BSD::SendMMsgWork::Execute(BSD* bsd) {
++    const auto entries = ParseMMsg(buffer, vlen);
++    if (!entries) {
++        ret = -1;
++        bsd_errno = Errno::INVAL;
++        return;
++    }
++    s32 sent = 0;
++    for (const MMsgEntry& entry : *entries) {
++        std::vector<u8> message;
++        for (const MMsgIov& iov : entry.iovs) {
++            message.insert(message.end(), buffer.begin() + iov.offset,
++                           buffer.begin() + iov.offset + iov.size);
++        }
++        std::span<const u8> addr;
++        if (entry.name_len >= SOCKADDR_IN_SIZE) {
++            addr = std::span<const u8>(buffer).subspan(entry.name_offset, entry.name_len);
++        }
++        const auto [put, error] = bsd->SendToImpl(fd, flags, message, addr);
++        if (put < 0) {
++            if (sent == 0) {
++                ret = -1;
++                bsd_errno = error;
++                return;
++            }
++            break;
++        }
++        const u32 length = static_cast<u32>(put);
++        std::memcpy(buffer.data() + entry.length_offset, &length, sizeof(length));
++        ++sent;
++    }
++    ret = sent;
++    bsd_errno = Errno::SUCCESS;
++}
++
++void BSD::SendMMsgWork::Response(HLERequestContext& ctx) {
++    if (ret >= 0) {
++        ctx.WriteBuffer(buffer);
++    }
++
++    IPC::ResponseBuilder rb{ctx, 4};
++    rb.Push(ResultSuccess);
++    rb.Push<s32>(ret);
++    rb.PushEnum(bsd_errno);
++}
++
+ void BSD::RegisterClient(HLERequestContext& ctx) {
+     LOG_WARNING(Service, "(STUBBED) called");
+ 
+@@ -413,6 +643,52 @@
+                      });
+ }
+ 
++void BSD::RecvMMsg(HLERequestContext& ctx) {
++    IPC::RequestParser rp{ctx};
++    const s32 fd = rp.Pop<s32>();
++    const u32 vlen = rp.Pop<u32>();
++    const u32 flags = rp.Pop<u32>();
++
++    std::vector<u8> buffer;
++    if (!ctx.BufferDescriptorB().empty()) {
++        const auto& descriptor = ctx.BufferDescriptorB()[0];
++        buffer.resize(descriptor.Size());
++        ctx.GetMemory().ReadBlock(descriptor.Address(), buffer.data(), buffer.size());
++    }
++
++    LOG_DEBUG(Service, "called. fd={} vlen={} flags=0x{:x} len={}", fd, vlen, flags, buffer.size());
++
++    ExecuteWork(ctx, RecvMMsgWork{
++                         .fd = fd,
++                         .vlen = vlen,
++                         .flags = flags,
++                         .buffer = std::move(buffer),
++                     });
++}
++
++void BSD::SendMMsg(HLERequestContext& ctx) {
++    IPC::RequestParser rp{ctx};
++    const s32 fd = rp.Pop<s32>();
++    const u32 vlen = rp.Pop<u32>();
++    const u32 flags = rp.Pop<u32>();
++
++    std::vector<u8> buffer;
++    if (!ctx.BufferDescriptorB().empty()) {
++        const auto& descriptor = ctx.BufferDescriptorB()[0];
++        buffer.resize(descriptor.Size());
++        ctx.GetMemory().ReadBlock(descriptor.Address(), buffer.data(), buffer.size());
++    }
++
++    LOG_DEBUG(Service, "called. fd={} vlen={} flags=0x{:x} len={}", fd, vlen, flags, buffer.size());
++
++    ExecuteWork(ctx, SendMMsgWork{
++                         .fd = fd,
++                         .vlen = vlen,
++                         .flags = flags,
++                         .buffer = std::move(buffer),
++                     });
++}
++
+ void BSD::Write(HLERequestContext& ctx) {
+     IPC::RequestParser rp{ctx};
+     const s32 fd = rp.Pop<s32>();
+@@ -1022,8 +1298,8 @@
+         {26, &BSD::Close, "Close"},
+         {27, &BSD::DuplicateSocket, "DuplicateSocket"},
+         {28, nullptr, "GetResourceStatistics"},
+-        {29, nullptr, "RecvMMsg"}, //3.0.0+
+-        {30, nullptr, "SendMMsg"}, //3.0.0+
++        {29, &BSD::RecvMMsg, "RecvMMsg"}, //3.0.0+
++        {30, &BSD::SendMMsg, "SendMMsg"}, //3.0.0+
+         {31, &BSD::EventFd, "EventFd"}, //7.0.0+
+         {32, nullptr, "RegisterResourceStatisticsName"}, //7.0.0+
+         {33, nullptr, "RegisterClientShared"}, //10.0.0+

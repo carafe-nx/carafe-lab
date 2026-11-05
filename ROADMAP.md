@@ -44,6 +44,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ### Emulator and games (not the app)
 
+- [ ] `bug` Eden's `bsd:u` has no `Ioctl`: `FIONREAD` on a socket fails with `WSAECONNRESET` (sockets probe)
 - [ ] `bug` 64-bit games never start: the runtime refuses Eden's 39-bit address space (`0x8000000-0x4000000000`)
 - [ ] `bug` With the `stacks` diagnostic a Box64 game crashes Eden (SIGSEGV) seconds after launch
 - [ ] `bug` The input check still passes on OpenTTD: its title jumps between `first-frame` and `after-a` in every run
@@ -73,6 +74,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 
 ## Done
 
+- [x] `bug` Datagram reads and writes no longer fail with `WSAECONNRESET`: Eden answers `RecvMMsg` and `SendMMsg` (`0066`); Dishonored gets past its start
 - [x] `bug` Under NCE an unaligned load-acquire or store-release faults to the process as on the console, instead of Eden running it and storing the stack pointer for zero (`0065`)
 - [x] `bug` A restart Carafe's loader asks for is no longer taken for the game's end (unit test; no restart came in a run since)
 - [x] `bug` A guest range wholly outside the host window no longer reaches mmap with a length of 0 (`0064`)
