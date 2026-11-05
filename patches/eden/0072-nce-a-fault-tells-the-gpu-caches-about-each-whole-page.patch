@@ -1,0 +1,31 @@
+Carafe Lab: an NCE access that faults on a GPU-cached page tells the GPU caches about each whole page it touches, not
+only the bytes it accessed. The host protects whole pages, so a cache that tracks other bytes of the page kept it
+protected: the shader cache keeps a page while any shader on it lives, and a guest writing a new shader beside an old
+one faulted again until the page was uncached by force, after which the cache never learned of later writes and could
+run stale code. Each cache now lets go of the page in its own way, and the forced uncaching is left for pages no cache
+tracks at all.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -1050,12 +1050,16 @@ bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size, bool write
+     if (rasterizer) {
+         VideoCommon::GpuTiming::Scope fault{write ? VideoCommon::GpuTiming::Counter::NceGpuWrite
+                                                   : VideoCommon::GpuTiming::Counter::NceGpuRead};
+-        if (!write) {
+-            impl->HandleRasterizerDownload(GetInteger(vaddr), size, true);
+-        }
+-        impl->InvalidateGPUMemory(ptr, size);
+         const u64 first = GetInteger(vaddr) & ~YUZU_PAGEMASK;
+         const u64 last = (GetInteger(vaddr) + (std::max)(size, size_t{1}) - 1) & ~YUZU_PAGEMASK;
++        for (u64 page = first; page <= last; page += YUZU_PAGESIZE) {
++            if (!write) {
++                impl->HandleRasterizerDownload(page, YUZU_PAGESIZE, true);
++            }
++            if (u8* const page_ptr = GetPointerSilent(Common::ProcessAddress(page)); page_ptr != nullptr) {
++                impl->InvalidateGPUMemory(page_ptr, YUZU_PAGESIZE);
++            }
++        }
+         for (u64 page = first; page <= last; page += YUZU_PAGESIZE) {
+             if (impl->current_page_table->entries[page >> YUZU_PAGEBITS].ptr.Type() !=
+                 Common::PageType::RasterizerCachedMemory) {

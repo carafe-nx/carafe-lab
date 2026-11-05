@@ -1,0 +1,68 @@
+Carafe Lab: an NCE fault uncaches a GPU-cached page by force only when none of its device pages is counted as
+cached, and checks this under the lock the GPU caches take to count a page. Between asking the caches to let go and
+looking at the page, the GPU thread often cached it again for a buffer it was uploading from the same page (DXVK's
+rings put the next write beside the data in use). Uncaching it then left the cache counting a page the host no
+longer protected, so it never learned of later CPU writes and the GPU drew from stale vertices and constants
+(Hitman 2: Silent Assassin's walls vanished for single frames, stretched shards appeared). A page the caches hold
+again stays protected; the access faults again and asks them once more.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -1065,9 +1065,18 @@
+                 Common::PageType::RasterizerCachedMemory) {
+                 continue;
+             }
+-            LOG_WARNING(HW_Memory, "NCE {} fault on GPU-cached page {:#x} that no cache let go: uncached",
+-                        write ? "write" : "read", page);
+-            impl->RasterizerMarkRegionCached(page, YUZU_PAGESIZE, false);
++            std::vector<DAddr> device_pages;
++            if (u8* const page_ptr = GetPointerSilent(Common::ProcessAddress(page)); page_ptr != nullptr) {
++                Common::ScratchBuffer<u32> buffer;
++                impl->system.Host1x().MemoryManager().ApplyOpOnPointer(
++                    page_ptr, buffer, [&](DAddr address) { device_pages.push_back(address & ~DEVICE_PAGEMASK); });
++            }
++            const bool uncached = impl->system.Host1x().MemoryManager().RunIfPagesUncounted(
++                device_pages, [&] { impl->RasterizerMarkRegionCached(page, YUZU_PAGESIZE, false); });
++            if (uncached) {
++                LOG_WARNING(HW_Memory, "NCE {} fault on GPU-cached page {:#x} that no cache let go: uncached",
++                            write ? "write" : "read", page);
++            }
+         }
+     }
+ 
+--- a/src/core/device_memory_manager.h
++++ b/src/core/device_memory_manager.h
+@@ -6,6 +6,7 @@
+ 
+ #pragma once
+ 
++#include <algorithm>
+ #include <array>
+ #include <atomic>
+ #include <bit>
+@@ -126,6 +127,24 @@
+     // New batch API to update multiple ranges with a single lock acquisition.
+     void UpdatePagesCachedBatch(std::span<const std::pair<DAddr, size_t>> ranges, s32 delta);
+ 
++    template <typename Func>
++    bool RunIfPagesUncounted(std::span<const DAddr> pages, Func&& operation) {
++        if (pages.empty()) {
++            operation();
++            return true;
++        }
++        const auto [lowest, highest] = std::ranges::minmax(pages);
++        Common::ScopedRangeLock lk(counter_guard, lowest, static_cast<size_t>(highest - lowest) + page_size);
++        for (const DAddr page_addr : pages) {
++            const size_t page = page_addr >> page_bits;
++            if (cached_pages->at(page >> subentries_shift).Count(page).load(std::memory_order_acquire) != 0) {
++                return false;
++            }
++        }
++        operation();
++        return true;
++    }
++
+ private:
+     struct TranslationEntry {
+         DAddr guest_page{};
