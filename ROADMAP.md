@@ -22,7 +22,7 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `research` Need for Speed Carbon in a detailed retry: Eden shows black while the game reports 27 FPS
 - [ ] `bug` In an A/B run the B variant never starts ("the loader or the runtime did not start"), while the same runtime runs alone with `--runtime`
 - [ ] `bug` In a report with two games, the second game's steps fall into the narrow left column
-- [ ] `bug` The shaders probe reads its picture back as zeros, background included; the timeline shows the quads
+- [ ] `bug` Direct3D 9 read-back (`GetRenderTargetData`) gives zeros in Eden: the textures and shaders probes read black, background included
 - [ ] `bug` Eden crashed (SIGSEGV) once while OpenTTD's second launch mounted the overlay
 - [ ] `feature` Reuse an Eden by the memory the game took on its last run, not by one figure for every game
 - [ ] `bug` Cat Mail Co's menu text is dots on the GPU and missing on llvmpipe and lavapipe: Eden's shared GPU emulation, not the driver
