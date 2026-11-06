@@ -214,7 +214,8 @@ The shaders probe, `probe-shaders.exe`, runs as a game of `lab.json` ("Shaders p
 three vs_1_1 vertex shaders: one reads its matrix from `c4` directly, one through `a0` set from a constant, one through
 `a0` set from a D3DCOLOR vertex attribute, as skinned models do, with the matrix at `c8` to `c92`. Every quad shows when
 Eden reads such constants right; a missing quad names the shader and the constant that went wrong (patch `0078`). The
-picture on the timeline is the evidence: its read-back of the colours is not yet right.
+picture on the timeline and the screenshots are the evidence: its read-back of the colours gives zeros in Eden, as the
+textures probe's does.
 
 The threads probe, `probe-threads.exe`, runs as a game of `lab.json` rather than through `probes`, because it needs
 its own scenario and arguments. It takes every thread it can at several points of its run and logs how many it got
