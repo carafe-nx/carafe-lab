@@ -12,13 +12,14 @@ LIBS_d3d11 := -ld3d11 -ldxgi -ldxguid
 LIBS_d3d12 := -ld3d12 -ldxgi -ldxguid
 LIBS_gl := -lopengl32 -lgdi32
 LIBS_screen := -lddraw -ldxguid
+LIBS_ddraw := -lddraw
 LIBS_threads := -ld3d9
 LIBS_registry := -ladvapi32
 LIBS_files :=
 LIBS_sockets := -lws2_32
 
 EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe)) \
-	$(OUT)/i686/probe-missing.exe
+	$(OUT)/i686/probe-missing.exe $(OUT)/i686/probe-ddraw.exe
 
 .PHONY: all clean
 

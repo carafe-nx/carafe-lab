@@ -186,6 +186,19 @@ save data is still there, close it.
   pairwise set of graphics and system settings: every pair of values of any two settings appears at least once
   (25 runs instead of 746,496 combinations). `--random <n>` adds random combinations for a long run.
 
+The 32-bit DirectDraw publication probe, `probe-ddraw.exe`, runs as an ordinary game entry in `lab.json`.
+It creates a fullscreen primary surface, copies a nonuniform picture into it once, then waits for messages
+without requesting another redraw. It records API results in `C:\ddraw-input-idle.log`. This catches a
+presentation path that needs another application frame before showing its last image.
+Copy `tools/probes/references/ddraw-once.png` into the work folder's `references/` directory and
+`tools/probes/scenarios/ddraw-once.json` into its `scenarios/` directory. Run that game with
+`--scenario scenarios/ddraw-once.json --no-retry --video full`. The scenario checks the visible picture
+after the first-frame milestone; a milestone or successful API result alone does not pass the check.
+The probe defaults to 32-bit pixels; `--rgb565` selects its 16-bit control mode.
+The `--no-publication` diagnostic control clears the publication-event environment value before loading
+DirectDraw. Comparing that mode with the ordinary mode keeps the executable and runtime identical while
+testing whether the notification changes startup presentation.
+
 The gamepad probe, `probe-gamepad.exe`, runs as a game of `lab.json` ("Gamepad probe", "Gamepad probe x64"). At its
 start it logs what a program finds of the controller: the Plug and Play keys of the HID gamepads, the HID and Wine
 XInput device interfaces through `CM_Get_Device_Interface_List` and SetupAPI with each device's attributes, product

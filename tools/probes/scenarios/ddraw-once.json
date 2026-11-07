@@ -1,0 +1,14 @@
+{
+  "steps": [
+    { "step": "launch" },
+    { "step": "waitFor", "milestone": "firstFrame", "timeout": 120 },
+    { "step": "wait", "seconds": 5 },
+    {
+      "step": "expectScreen",
+      "name": "published-picture",
+      "reference": "ddraw-once.png",
+      "tolerance": 1
+    },
+    { "step": "close", "timeout": 20 }
+  ]
+}
