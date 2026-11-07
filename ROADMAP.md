@@ -12,7 +12,6 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 ## Planned
 
 - [ ] **`feature` Live passes: a card per game, a paused player, the pass written down as the game's scenario**
-- [ ] `bug` HoMM IV's main menu does not answer: black after the intro until an input, then a picture one input behind, clicks do nothing; with and without NCE. Wine loads its own ddraw (wined3d), not the game's Verok `DDRAW.dll`: the wrapper has no `CompanyName`, so Wine's load-order heuristic picks the builtin. Console behaviour to ask
 - [ ] `research` Dead Space under NCE: with `0060` the opening cut-scene shows stretched untextured triangles at 2–4 fps and one page faults hundreds of times; without `0060` it hung before that scene, so whether `0060` causes the triangles is unknown; intro video has stale lines, ponytail stretches
 - [ ] `bug` Eden crashes (SIGSEGV) when live commands reach it while Need for Speed Underground 2 loads a race
 - [ ] `bug` After a crashed session the next launch can hang before its first frame, with thousands of threads started
@@ -78,6 +77,8 @@ bugs, which are not the app. Open items are in priority order; bold ones are in 
 - [ ] `bug` lab-core's and lab-run's input check tests (5) still expect the controller mapped by position; Carafe maps by label since v0.4.0
 
 ## Done
+
+- [x] `bug` HoMM IV's system DirectDraw live pass and final-image presentation, including movement, next day and save/load on the clean runtime and corrected Mesa
 
 - [x] `bug` Hitman 2's agent 47 is drawn again: a vertex shader that indexes its constants with `a0` keeps reading them from the constant buffer when the GPU adds the index to the buffer's address with a carry into its high word (`0078`; the shaders probe)
 - [x] `bug` Hitman 2's walls and floor no longer vanish for single frames: an NCE fault no longer uncaches by force a page the GPU thread cached again meanwhile, and it tells the caches about whole pages (`0072`, `0075`)

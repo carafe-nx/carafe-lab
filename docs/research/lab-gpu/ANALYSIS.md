@@ -86,6 +86,10 @@ guest, the GPU thread, Mesa's thread and the Adreno work on different frames at 
 
 ## Measured
 
+Mesa `0004` was removed by [decision 10](../../decisions/0010-software-window-presentation-shows-the-current-image.md):
+its final queued image is not displayed until another presentation occurs. The measurements below are historical;
+their continuous-rendering throughput does not establish correct output for an input-idle application.
+
 Patch `0056` logs a `[GPU timing]` line every 10 s. NFSU2's race start (`sarek-soak`) under NCE, per 10 s:
 
 | | Before | Mesa `0003` | Mesa `0003` + `0004` |
