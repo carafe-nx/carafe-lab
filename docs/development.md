@@ -1,8 +1,8 @@
 # Carafe Lab
 
 Carafe Lab tests Carafe without a console: it packs games with Carafe's crates and runtime, runs them in the Eden
-emulator in Docker and reports what happened. The plan is [decision 3](docs/decisions/0003-carafe-lab.md); how to set it
-up is [docs/lab.md](docs/lab.md).
+emulator in Docker and reports what happened. The plan is [decision 3](decisions/0003-carafe-lab.md); how to set it
+up is [docs/lab.md](lab.md).
 
 ## Layout
 
