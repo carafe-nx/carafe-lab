@@ -1,0 +1,102 @@
+Carafe Lab: unregister texture images from their owning address space.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/texture_cache/image_base.h
++++ b/src/video_core/texture_cache/image_base.h
+@@ -93,7 +93,7 @@
+     u64 scale_tick = 0;
+     bool has_scaled = false;
+ 
+-    size_t channel = 0;
++    size_t address_space_id = 0;
+ 
+     ImageFlagBits flags = ImageFlagBits::CpuModified;
+ 
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -2254,6 +2254,10 @@
+     ImageBase& image = slot_images[image_id];
+     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
+                "Trying to register an already registered image");
++    image.address_space_id = current_address_space;
++    const auto storage_id = getStorageID(image.address_space_id);
++    ASSERT(storage_id);
++    auto& gpu_page_table = gpu_page_table_storage[*storage_id * 2];
+     image.flags |= ImageFlagBits::Registered;
+     u64 tentative_size = (std::max)(image.guest_size_bytes, image.unswizzled_size_bytes);
+     if ((IsPixelFormatASTC(image.info.format) &&
+@@ -2264,8 +2268,8 @@
+     total_used_memory += Common::AlignUp(tentative_size, 1024);
+     image.lru_index = lru_cache.Insert(image_id, frame_tick);
+ 
+-    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [this, image_id](u64 page) {
+-        (*channel_state->gpu_page_table)[page].push_back(image_id);
++    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [&gpu_page_table, image_id](u64 page) {
++        gpu_page_table[page].push_back(image_id);
+     });
+     if (False(image.flags & ImageFlagBits::Sparse)) {
+         auto map_id =
+@@ -2284,8 +2288,9 @@
+             sparse_maps.push_back(map_id);
+         });
+     sparse_views.emplace(image_id, std::move(sparse_maps));
+-    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [this, image_id](u64 page) {
+-        (*channel_state->sparse_page_table)[page].push_back(image_id);
++    auto& sparse_page_table = gpu_page_table_storage[*storage_id * 2 + 1];
++    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [&sparse_page_table, image_id](u64 page) {
++        sparse_page_table[page].push_back(image_id);
+     });
+ }
+ 
+@@ -2294,6 +2299,9 @@
+     Image& image = slot_images[image_id];
+     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
+                "Trying to unregister an already registered image");
++    const auto storage_id = getStorageID(image.address_space_id);
++    ASSERT(storage_id);
++    auto& gpu_page_table = gpu_page_table_storage[*storage_id * 2];
+     image.flags &= ~ImageFlagBits::Registered;
+     image.flags &= ~ImageFlagBits::BadOverlap;
+     lru_cache.Free(image.lru_index);
+@@ -2313,8 +2321,8 @@
+             }
+             image_ids.erase(vector_it);
+         };
+-    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [this, &clear_page_table](u64 page) {
+-        clear_page_table(page, (*channel_state->gpu_page_table));
++    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [&gpu_page_table, &clear_page_table](u64 page) {
++        clear_page_table(page, gpu_page_table);
+     });
+     if (False(image.flags & ImageFlagBits::Sparse)) {
+         const auto map_id = image.map_view_id;
+@@ -2336,8 +2344,9 @@
+         slot_map_views.erase(map_id);
+         return;
+     }
+-    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [this, &clear_page_table](u64 page) {
+-        clear_page_table(page, (*channel_state->sparse_page_table));
++    auto& sparse_page_table = gpu_page_table_storage[*storage_id * 2 + 1];
++    ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [&sparse_page_table, &clear_page_table](u64 page) {
++        clear_page_table(page, sparse_page_table);
+     });
+     auto it = sparse_views.find(image_id);
+     ASSERT(it != sparse_views.end());
+@@ -2452,11 +2461,13 @@
+     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered), "Image was not unregistered");
+ 
+     // Mark render targets as dirty
+-    auto& dirty = maxwell3d->dirty.flags;
+-    dirty[Dirty::RenderTargets] = true;
+-    dirty[Dirty::ZetaBuffer] = true;
+-    for (size_t rt = 0; rt < NUM_RT; ++rt) {
+-        dirty[Dirty::ColorBuffer0 + rt] = true;
++    if (maxwell3d) {
++        auto& dirty = maxwell3d->dirty.flags;
++        dirty[Dirty::RenderTargets] = true;
++        dirty[Dirty::ZetaBuffer] = true;
++        for (size_t rt = 0; rt < NUM_RT; ++rt) {
++            dirty[Dirty::ColorBuffer0 + rt] = true;
++        }
+     }
+     const std::span<const ImageViewId> image_view_ids = image.image_view_ids;
+     for (const ImageViewId image_view_id : image_view_ids) {

@@ -1,0 +1,84 @@
+Carafe Lab: bound every storage buffer binding to its mapped device range.
+Explicit descriptors and the cbuf 0 size heuristic now share the layout and device-continuity
+checks. The existing 8 MiB limit remains for unknown sizes; explicit NVN sizes can exceed it
+when the mapping supports them. No size-only test can distinguish a valid NVN descriptor
+from an NVK root-table word with the same bits. Zero sizes return the null binding before
+alignment; the aligned prefix must also be contiguous, and binding sizes cannot wrap u32.
+GPL-3.0-or-later, as the file it changes.
+
+diff --git a/src/video_core/buffer_cache/buffer_cache.h b/src/video_core/buffer_cache/buffer_cache.h
+index 485d589..b919f6e 100644
+--- a/src/video_core/buffer_cache/buffer_cache.h
++++ b/src/video_core/buffer_cache/buffer_cache.h
+@@ -1921,9 +1921,14 @@ Binding BufferCache<P>::StorageBufferBinding(GPUVAddr ssbo_addr, u32 cbuf_index,
+         return NULL_BINDING;
+     }
+ 
++    const std::optional<DAddr> device_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
++    if (!device_addr) {
++        return NULL_BINDING;
++    }
++
+     // xbzk: New size logic. Fixes MCI.
+     // If ever the * comment below prove wrong, the 'if' block may be removed.
+-    const auto size = [&]() {
++    const auto requested_size = [&]() {
+         if (descriptor) {
+             const u32 descriptor_size = gpu_memory->Read<u32>(ssbo_addr + 8);
+             if (descriptor_size != 0) {
+@@ -1938,35 +1943,48 @@ Binding BufferCache<P>::StorageBufferBinding(GPUVAddr ssbo_addr, u32 cbuf_index,
+             // Hardware-based detection: GPU addresses have non-zero upper bits
+             if (upper_32 == 0) {
+                 // This is a size field, not a GPU address
+-                return static_cast<u32>(next_qword);  // Return lower_32
++                return static_cast<u32>(next_qword);
+             }
+         }
+         // Fall through: either not NVN cbuf (Doom Eternal & +), or NVN but ssbo_addr+8 is a GPU address (MCI)
+-        const u32 memory_layout_size = static_cast<u32>(gpu_memory->GetMemoryLayoutSize(gpu_addr));
++        const size_t memory_layout_size = gpu_memory->GetMemoryLayoutSize(gpu_addr);
+         // Cap at 8MB to prevent allocator overflow from misinterpreted addresses
+-        const u32 capped_size = (std::min)(memory_layout_size, static_cast<u32>(8_MiB));
+-        return static_cast<u32>(gpu_memory->MaxContinuousRange(gpu_addr, capped_size));
++        return static_cast<u32>((std::min)(memory_layout_size, static_cast<size_t>(8_MiB)));
+     }();
+ 
++    const size_t layout_size = gpu_memory->GetMemoryLayoutSize(gpu_addr);
++    const size_t bounded_size = (std::min)(layout_size, static_cast<size_t>(requested_size));
++    const u32 size = static_cast<u32>(gpu_memory->MaxContinuousRange(gpu_addr, bounded_size));
++    if (size == 0) {
++        return NULL_BINDING;
++    }
++
+     // Alignment only applies to the offset of the buffer
+     const u32 alignment = runtime.GetStorageBufferAlignment();
+     const GPUVAddr aligned_gpu_addr = Common::AlignDown(gpu_addr, alignment);
+-    const u32 aligned_size = static_cast<u32>(gpu_addr - aligned_gpu_addr) + size;
++    const size_t aligned_size = static_cast<size_t>(gpu_addr - aligned_gpu_addr) + size;
++    const size_t continuous_size = gpu_memory->MaxContinuousRange(aligned_gpu_addr, aligned_size);
++    if (continuous_size != aligned_size) {
++        return NULL_BINDING;
++    }
+ 
+     const std::optional<DAddr> aligned_device_addr = gpu_memory->GpuToCpuAddress(aligned_gpu_addr);
+     if (!aligned_device_addr || size == 0) {
+         LOG_DEBUG(HW_GPU, "Failed to find storage buffer for cbuf index {}", cbuf_index);
+         return NULL_BINDING;
+     }
+-    const std::optional<DAddr> device_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
+     ASSERT_MSG(device_addr, "Unaligned storage buffer address not found for cbuf index {}",
+                cbuf_index);
+     // The end address used for size calculation does not need to be aligned
+     const DAddr cpu_end = Common::AlignUp(*device_addr + size, Core::DEVICE_PAGESIZE);
++    const size_t binding_size = is_written ? aligned_size : cpu_end - *aligned_device_addr;
++    if (binding_size > (std::numeric_limits<u32>::max)()) {
++        return NULL_BINDING;
++    }
+ 
+     const Binding binding{
+         .device_addr = *aligned_device_addr,
+-        .size = is_written ? aligned_size : static_cast<u32>(cpu_end - *aligned_device_addr),
++        .size = static_cast<u32>(binding_size),
+         .buffer_id = BufferId{},
+     };
+     return binding;

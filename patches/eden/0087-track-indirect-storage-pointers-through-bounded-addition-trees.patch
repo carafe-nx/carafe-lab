@@ -1,0 +1,257 @@
+Carafe Lab: track indirect storage pointers through deeper addition trees.
+Search both words through at most 128 additive nodes instead of one low-word add and
+two high-word adds. Match words from the same loaded pointer and reject conflicting
+descriptor pairs. Nested constant IAdd64 offsets are accumulated with signed bounds;
+descriptor offsets use wide arithmetic. Masks, shifts, Phi and Select are not treated
+as transparent pointer operations. Their provenance requires additional proof.
+Direct pointers require adjacent constant cbuf words with matching indices and alignment.
+Computed offsets require the high word to add the exact carry of the low-word addition.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp
++++ b/src/shader_recompiler/ir_opt/global_memory_to_storage_buffer_pass.cpp
+@@ -2,6 +2,8 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include <optional>
++#include <limits>
++#include <vector>
+ 
+ #include <boost/container/flat_set.hpp>
+ #include <boost/container/small_vector.hpp>
+@@ -298,7 +300,11 @@ std::optional<LowAddrInfo> TrackLowAddress(IR::Inst* inst) {
+     // This address is expected to either be a PackUint2x32, a IAdd64, or a CompositeConstructU32x2
+     IR::Inst* addr_inst{addr.InstRecursive()};
+     s32 imm_offset{0};
+-    if (addr_inst->GetOpcode() == IR::Opcode::IAdd64) {
++    size_t remaining_adds = 32;
++    while (addr_inst->GetOpcode() == IR::Opcode::IAdd64) {
++        if (remaining_adds-- == 0) {
++            return std::nullopt;
++        }
+         // If it's an IAdd64, get the immediate offset it is applying and grab the address
+         // instruction. This expects for the instruction to be canonicalized having the address on
+         // the first argument and the immediate offset on the second one.
+@@ -306,7 +312,17 @@ std::optional<LowAddrInfo> TrackLowAddress(IR::Inst* inst) {
+         if (!imm_offset_value.IsImmediate()) {
+             return std::nullopt;
+         }
+-        imm_offset = static_cast<s32>(static_cast<s64>(imm_offset_value.U64()));
++        const s64 next_offset = static_cast<s64>(imm_offset_value.U64());
++        if (next_offset < (std::numeric_limits<s32>::min)() ||
++            next_offset > (std::numeric_limits<s32>::max)()) {
++            return std::nullopt;
++        }
++        const s64 total_offset = static_cast<s64>(imm_offset) + next_offset;
++        if (total_offset < (std::numeric_limits<s32>::min)() ||
++            total_offset > (std::numeric_limits<s32>::max)()) {
++            return std::nullopt;
++        }
++        imm_offset = static_cast<s32>(total_offset);
+         const IR::U64 iadd_addr{addr_inst->Arg(0)};
+         if (iadd_addr.IsImmediate()) {
+             return std::nullopt;
+@@ -371,6 +387,68 @@ std::optional<StorageBufferAddr> Track(const IR::Value& value, const Bias* bias)
+     return BreadthFirstSearch(value, pred);
+ }
+ 
++std::optional<StorageBufferAddr> TrackDirectWords(const IR::Value& low_value, const IR::Value& high_value) {
++    if (low_value.IsImmediate() || high_value.IsImmediate()) {
++        return std::nullopt;
++    }
++    const IR::Inst* const low = low_value.InstRecursive();
++    const IR::Inst* const high = high_value.InstRecursive();
++    if (low->GetOpcode() != IR::Opcode::GetCbufU32 || high->GetOpcode() != IR::Opcode::GetCbufU32) {
++        return std::nullopt;
++    }
++    if (!low->Arg(0).IsImmediate() || !low->Arg(1).IsImmediate() ||
++        !high->Arg(0).IsImmediate() || !high->Arg(1).IsImmediate()) {
++        return std::nullopt;
++    }
++    const u32 index = low->Arg(0).U32();
++    const u32 offset = low->Arg(1).U32();
++    if (index != high->Arg(0).U32() || !Common::IsAligned(offset, 8U) ||
++        offset > (std::numeric_limits<u32>::max)() - 4 || high->Arg(1).U32() != offset + 4) {
++        return std::nullopt;
++    }
++    return StorageBufferAddr{.index = index, .offset = offset};
++}
++
++bool IsCarryOf(const IR::Value& value, const IR::Inst* addition) {
++    if (value.IsImmediate()) {
++        return false;
++    }
++    const IR::Inst* const select = value.InstRecursive();
++    if (select->GetOpcode() != IR::Opcode::SelectU32 || select->Arg(0).IsImmediate() ||
++        !select->Arg(1).IsImmediate() || !select->Arg(2).IsImmediate() ||
++        select->Arg(1).U32() != 1 || select->Arg(2).U32() != 0) {
++        return false;
++    }
++    const IR::Inst* const carry = select->Arg(0).InstRecursive();
++    return carry->GetOpcode() == IR::Opcode::GetCarryFromOp && !carry->Arg(0).IsImmediate() &&
++           carry->Arg(0).InstRecursive() == addition;
++}
++
++std::optional<StorageBufferAddr> TrackDirect(const LowAddrInfo& address) {
++    if (const auto direct = TrackDirectWords(address.value, address.high)) {
++        return direct;
++    }
++    if (address.value.IsImmediate() || address.high.IsImmediate()) {
++        return std::nullopt;
++    }
++    const IR::Inst* const low = address.value.InstRecursive();
++    const IR::Inst* const high = address.high.InstRecursive();
++    if (low->GetOpcode() != IR::Opcode::IAdd32 || high->GetOpcode() != IR::Opcode::IAdd32) {
++        return std::nullopt;
++    }
++    for (size_t high_word = 0; high_word < 2; ++high_word) {
++        if (!IsCarryOf(high->Arg(1 - high_word), low)) {
++            continue;
++        }
++        for (size_t low_word = 0; low_word < 2; ++low_word) {
++            if (const auto direct = TrackDirectWords(low->Arg(low_word), high->Arg(high_word))) {
++                return direct;
++            }
++        }
++    }
++    return std::nullopt;
++}
++
+ bool IsGlobalPointerLoad(IR::Opcode opcode) {
+     return opcode == IR::Opcode::LoadGlobal64 || opcode == IR::Opcode::LoadGlobal128;
+ }
+@@ -398,21 +476,27 @@ const IR::Inst* PointerWord(const IR::Value& value) {
+     return inst;
+ }
+ 
+-const IR::Inst* PointerWordInSum(const IR::Value& value, int depth) {
+-    if (const IR::Inst* const word{PointerWord(value)}) {
+-        return word;
+-    }
+-    if (depth == 0 || value.IsImmediate()) {
+-        return nullptr;
+-    }
+-    const IR::Inst* const add{value.InstRecursive()};
+-    if (add->GetOpcode() != IR::Opcode::IAdd32) {
+-        return nullptr;
+-    }
+-    if (const IR::Inst* const word{PointerWordInSum(add->Arg(0), depth - 1)}) {
+-        return word;
++std::optional<std::vector<const IR::Inst*>> PointerWordsInSum(const IR::Value& value) {
++    std::vector<IR::Value> pending{value};
++    std::vector<const IR::Inst*> words;
++    size_t remaining_nodes = 128;
++    while (!pending.empty()) {
++        if (remaining_nodes-- == 0) {
++            return std::nullopt;
++        }
++        const IR::Value current = pending.back();
++        pending.pop_back();
++        if (const IR::Inst* const word{PointerWord(current)}) {
++            words.push_back(word);
++        } else if (!current.IsImmediate()) {
++            const IR::Inst* const node{current.InstRecursive()};
++            if (node->GetOpcode() == IR::Opcode::IAdd32) {
++                pending.push_back(node->Arg(0));
++                pending.push_back(node->Arg(1));
++            }
++        }
+     }
+-    return PointerWordInSum(add->Arg(1), depth - 1);
++    return words;
+ }
+ 
+ std::optional<IndirectInfo> TrackIndirect(IR::Inst& inst) {
+@@ -420,38 +504,51 @@ std::optional<IndirectInfo> TrackIndirect(IR::Inst& inst) {
+     if (!low_addr) {
+         return std::nullopt;
+     }
+-    const IR::Inst* const low_word{PointerWordInSum(low_addr->value, 1)};
+-    const IR::Inst* const high_word{PointerWordInSum(low_addr->high, 2)};
+-    if (!low_word || !high_word) {
+-        return std::nullopt;
+-    }
+-    const u32 element{low_word->Arg(1).U32()};
+-    if (low_word->Arg(0).InstRecursive() != high_word->Arg(0).InstRecursive() ||
+-        high_word->Arg(1).U32() != element + 1 || (element % 2) != 0) {
+-        return std::nullopt;
+-    }
+-    IR::Inst* const load{low_word->Arg(0).InstRecursive()};
+-    const std::optional<LowAddrInfo> load_addr{TrackLowAddress(load)};
+-    if (!load_addr) {
++    const auto low_words = PointerWordsInSum(low_addr->value);
++    const auto high_words = PointerWordsInSum(low_addr->high);
++    if (!low_words || !high_words) {
+         return std::nullopt;
+     }
+-    const std::optional<StorageBufferAddr> base{Track(load_addr->value, nullptr)};
+-    if (!base) {
+-        return std::nullopt;
+-    }
+-    const s32 descriptor_offset{load_addr->imm_offset + static_cast<s32>(element * 4)};
+-    if (descriptor_offset < 0) {
+-        return std::nullopt;
++    std::optional<IndirectInfo> result;
++    for (const IR::Inst* const low_word : *low_words) {
++        const u32 element{low_word->Arg(1).U32()};
++        for (const IR::Inst* const high_word : *high_words) {
++            if (low_word->Arg(0).InstRecursive() != high_word->Arg(0).InstRecursive() ||
++                high_word->Arg(1).U32() != element + 1 || (element % 2) != 0) {
++                continue;
++            }
++            IR::Inst* const load{low_word->Arg(0).InstRecursive()};
++            const std::optional<LowAddrInfo> load_addr{TrackLowAddress(load)};
++            if (!load_addr) {
++                continue;
++            }
++            const std::optional<StorageBufferAddr> base{Track(load_addr->value, nullptr)};
++            if (!base) {
++                continue;
++            }
++            const s64 descriptor_offset = static_cast<s64>(load_addr->imm_offset) + element * 4;
++            if (descriptor_offset < 0 || descriptor_offset > (std::numeric_limits<u32>::max)()) {
++                continue;
++            }
++            const StorageBufferAddr buffer{
++                .index = base->index,
++                .offset = base->offset,
++                .indirect = true,
++                .indirect_offset = static_cast<u32>(descriptor_offset),
++            };
++            if (result) {
++                const IR::Inst* const previous_load = result->pointer_low.InstRecursive()->Arg(0).InstRecursive();
++                if (result->storage_buffer != buffer || previous_load != load) {
++                    return std::nullopt;
++                }
++            }
++            result = IndirectInfo{
++                .storage_buffer = buffer,
++                .pointer_low = IR::Value{const_cast<IR::Inst*>(low_word)},
++            };
++        }
+     }
+-    return IndirectInfo{
+-        .storage_buffer{
+-            .index = base->index,
+-            .offset = base->offset,
+-            .indirect = true,
+-            .indirect_offset = static_cast<u32>(descriptor_offset),
+-        },
+-        .pointer_low = IR::Value{const_cast<IR::Inst*>(low_word)},
+-    };
++    return result;
+ }
+ 
+ /// Collects the storage buffer used by a global memory instruction and the instruction itself
+@@ -472,7 +569,10 @@ void CollectStorageBuffers(IR::Block& block, IR::Inst& inst, StorageInfo& info)
+     }
+     // First try to find storage buffers in the NVN address
+     const IR::U32 low_addr{low_addr_info->value};
+-    std::optional<StorageBufferAddr> storage_buffer{Track(low_addr, &nvn_bias)};
++    std::optional<StorageBufferAddr> storage_buffer{TrackDirect(*low_addr_info)};
++    if (!storage_buffer) {
++        storage_buffer = Track(low_addr, &nvn_bias);
++    }
+     if (!storage_buffer) {
+         if (const std::optional<IndirectInfo> indirect{TrackIndirect(inst)}) {
+             LOG_WARNING(Shader,

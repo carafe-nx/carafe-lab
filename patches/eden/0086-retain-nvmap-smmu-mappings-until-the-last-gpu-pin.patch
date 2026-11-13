@@ -1,0 +1,303 @@
+Carafe Lab: retain nvmap SMMU mappings while GPU mappings still pin their handles.
+Guest handle release preserves the pin count and handle lookup until the last GPU unpin.
+The CPU unlock result from patch 0018 stays independent of the GPU pin lifetime. Sparse
+Remap intervals share pin owners across splits and release replaced or freed intervals
+only after their GMMU mappings change. Address-space destruction releases its remaining
+mappings. GPU devices retain the address-space owner until they close. Session teardown
+retires user references and marks handles closed before destroying the heap mapper; late
+unpins cannot access that mapper or a replacement session. Existing SMMU
+Unmap invalidates renderer caches before unmapping and Free reuse.
+GPL-3.0-or-later, as the files it changes.
+
+diff --git a/src/core/hle/service/nvdrv/core/nvmap.cpp b/src/core/hle/service/nvdrv/core/nvmap.cpp
+index 0d0283b..2c1f611 100644
+--- a/src/core/hle/service/nvdrv/core/nvmap.cpp
++++ b/src/core/hle/service/nvdrv/core/nvmap.cpp
+@@ -107,15 +107,18 @@ void NvMap::UnmapHandle(Handle& handle_description) {
+         return;
+     }
+     const VAddr vaddress = handle_description.address;
+-    auto* session = core.GetSession(handle_description.session_id);
+-    session->mapper->Unmap(vaddress, map_size);
++    if (!handle_description.session_closed) {
++        auto* session = core.GetSession(handle_description.session_id);
++        session->mapper->Unmap(vaddress, map_size);
++    }
+     handle_description.d_address = 0;
+     handle_description.in_heap = false;
+ }
+ 
+ bool NvMap::TryRemoveHandle(const Handle& handle_description) {
+     // No dupes left, we can remove from handle map
+-    if (handle_description.dupes == 0 && handle_description.internal_dupes == 0) {
++    if (handle_description.dupes == 0 && handle_description.internal_dupes == 0 &&
++        handle_description.pins == 0) {
+         std::scoped_lock lock(handles_lock);
+ 
+         auto it{handles.find(handle_description.id)};
+@@ -167,6 +170,9 @@ DAddr NvMap::PinHandle(NvMap::Handle::Id handle, bool low_area_pin) {
+     }
+ 
+     std::scoped_lock lock(handle_description->mutex);
++    if (handle_description->session_closed) {
++        return 0;
++    }
+     const auto map_low_area = [&] {
+         if (handle_description->pin_virt_address == 0) {
+             u32 address = host1x.Allocator().Allocate(u32(handle_description->aligned_size));
+@@ -251,6 +257,12 @@ void NvMap::UnpinHandle(Handle::Id handle) {
+     } else if (!handle_description->pins) {
+         std::scoped_lock queueLock(unmap_queue_lock);
+ 
++        if (handle_description->dupes == 0) {
++            UnmapHandle(*handle_description);
++            TryRemoveHandle(*handle_description);
++            return;
++        }
++
+         // Add to the unmap queue allowing this handle's memory to be freed if needed
+         unmap_queue.push_back(handle_description);
+         handle_description->unmap_queue_entry = std::prev(unmap_queue.end());
+@@ -288,12 +300,10 @@ std::optional<NvMap::FreeInfo> NvMap::FreeHandle(Handle::Id handle, bool interna
+                 LOG_WARNING(Service_NVDRV, "User duplicate count imbalance detected!");
+             } else if (handle_description->dupes == 0) {
+                 // Force unmap the handle
+-                if (handle_description->d_address) {
++                if (handle_description->d_address && handle_description->pins == 0) {
+                     std::scoped_lock queueLock(unmap_queue_lock);
+                     UnmapHandle(*handle_description);
+                 }
+-
+-                handle_description->pins = 0;
+             }
+         }
+ 
+@@ -336,13 +346,17 @@ void NvMap::UnmapAllHandles(NvCore::SessionId session_id) {
+     }();
+ 
+     for (auto& [id, handle] : handles_copy) {
+-        {
+-            std::scoped_lock lk{handle->mutex};
+-            if (handle->session_id.id != session_id.id || handle->dupes <= 0) {
+-                continue;
+-            }
++        std::scoped_lock lk{handle->mutex};
++        if (handle->session_id.id != session_id.id) {
++            continue;
++        }
++        handle->session_closed = true;
++        handle->dupes = 0;
++        std::scoped_lock queue_lock{unmap_queue_lock};
++        if (handle->pins == 0 && handle->d_address) {
++            UnmapHandle(*handle);
+         }
+-        FreeHandle(id, false);
++        TryRemoveHandle(*handle);
+     }
+ }
+ 
+diff --git a/src/core/hle/service/nvdrv/core/nvmap.h b/src/core/hle/service/nvdrv/core/nvmap.h
+index 17b9ccd..bab9f8c 100644
+--- a/src/core/hle/service/nvdrv/core/nvmap.h
++++ b/src/core/hle/service/nvdrv/core/nvmap.h
+@@ -75,6 +75,7 @@ public:
+         u8 kind{};        //!< Used for memory compression
+         bool allocated{}; //!< If the handle has been allocated with `Alloc`
+         bool in_heap{};
++        bool session_closed{};
+         NvCore::SessionId session_id{};
+ 
+         DAddr d_address{}; //!< The memory location in the device's AS that this handle corresponds
+diff --git a/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp b/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp
+index b5452e0..09a549e 100644
+--- a/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp
++++ b/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.cpp
+@@ -32,7 +32,18 @@ nvhost_as_gpu::nvhost_as_gpu(Core::System& system_, Module& module_, NvCore::Con
+     : nvdevice{system_}, module{module_}, container{core}, nvmap{core.GetNvMapFile()}, vm{},
+       gmmu{} {}
+ 
+-nvhost_as_gpu::~nvhost_as_gpu() = default;
++nvhost_as_gpu::~nvhost_as_gpu() {
++    for (const auto& [offset, allocation] : allocation_map) {
++        gmmu->Unmap(offset, allocation.size);
++    }
++    remapped_handles.Unmap(0, (std::numeric_limits<GPUVAddr>::max)());
++    for (const auto& [offset, mapping] : mapping_map) {
++        if (!mapping.fixed) {
++            gmmu->Unmap(offset, mapping.size);
++        }
++        nvmap.UnpinHandle(mapping.handle);
++    }
++}
+ 
+ NvResult nvhost_as_gpu::Ioctl1(DeviceFD fd, Ioctl command, std::span<const u8> input,
+                                std::span<u8> output) {
+@@ -211,7 +222,6 @@ bool nvhost_as_gpu::FreeMappingLocked(u64 offset) noexcept {
+             u64 aligned_size{Common::AlignUp(mapping.size, page_size)};
+             allocator.Free(u32(mapping.offset >> page_size_bits), u32(aligned_size >> page_size_bits));
+         }
+-        nvmap.UnpinHandle(mapping.handle);
+         // Sparse mappings shouldn't be fully unmapped, just returned to their sparse state
+         // Only FreeSpace can unmap them fully
+         if (mapping.sparse_alloc) {
+@@ -219,6 +229,8 @@ bool nvhost_as_gpu::FreeMappingLocked(u64 offset) noexcept {
+         } else {
+             gmmu->Unmap(offset, mapping.size);
+         }
++        remapped_handles.Unmap(offset, offset + mapping.size);
++        nvmap.UnpinHandle(mapping.handle);
+         mapping_map.erase(offset);
+         return true;
+     }
+@@ -244,6 +256,8 @@ NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
+         if (allocation.sparse)
+             gmmu->Unmap(params.offset, allocation.size);
+ 
++        remapped_handles.Unmap(params.offset, params.offset + allocation.size);
++
+         auto& allocator{params.page_size == VM::YUZU_PAGESIZE ? *vm.small_page_allocator : *vm.big_page_allocator};
+         u32 page_size_bits{params.page_size == VM::YUZU_PAGESIZE ? VM::PAGE_SIZE_BITS : vm.big_page_size_bits};
+ 
+@@ -257,6 +271,7 @@ NvResult nvhost_as_gpu::FreeSpace(IoctlFreeSpace& params) {
+ NvResult nvhost_as_gpu::Remap(std::span<IoctlRemapEntry> entries) {
+     LOG_DEBUG(Service_NVDRV, "called, num_entries={:#X}", entries.size());
+ 
++    std::scoped_lock lock(mutex);
+     if (!vm.initialised) {
+         return NvResult::BadValue;
+     }
+@@ -267,8 +282,13 @@ NvResult nvhost_as_gpu::Remap(std::span<IoctlRemapEntry> entries) {
+ 
+         auto alloc{allocation_map.upper_bound(virtual_address)};
+ 
+-        if (alloc-- == allocation_map.begin() ||
+-            (virtual_address - alloc->first) + size > alloc->second.size) {
++        if (alloc == allocation_map.begin()) {
++            LOG_WARNING(Service_NVDRV, "Cannot remap into an unallocated region!");
++            return NvResult::BadValue;
++        }
++        --alloc;
++
++        if ((virtual_address - alloc->first) + size > alloc->second.size) {
+             LOG_WARNING(Service_NVDRV, "Cannot remap into an unallocated region!");
+             return NvResult::BadValue;
+         }
+@@ -280,20 +300,35 @@ NvResult nvhost_as_gpu::Remap(std::span<IoctlRemapEntry> entries) {
+         }
+ 
+         const bool use_big_pages = alloc->second.big_pages;
++        if (size == 0) {
++            continue;
++        }
+         if (!entry.handle) {
++            gmmu->Unmap(virtual_address, size);
+             gmmu->MapSparse(virtual_address, size, use_big_pages);
++            remapped_handles.Unmap(virtual_address, virtual_address + size);
+         } else {
+             auto handle{nvmap.GetHandle(entry.handle)};
+             if (!handle) {
+                 return NvResult::BadValue;
+             }
+ 
+-            DAddr base = nvmap.PinHandle(entry.handle, false);
++            auto pinned = std::make_shared<RemapHandle>(nvmap, entry.handle);
++            if (pinned->address == 0) {
++                return NvResult::InsufficientMemory;
++            }
++            const u64 handle_offset = static_cast<u64>(entry.handle_offset_big_pages)
++                                      << vm.big_page_size_bits;
++            if (handle_offset > handle->aligned_size || size > handle->aligned_size - handle_offset) {
++                return NvResult::BadValue;
++            }
+             DAddr device_address{static_cast<DAddr>(
+-                base + (static_cast<u64>(entry.handle_offset_big_pages) << vm.big_page_size_bits))};
++                pinned->address + handle_offset)};
+ 
++            gmmu->Unmap(virtual_address, size);
+             gmmu->Map(virtual_address, device_address, size,
+                       static_cast<Tegra::PTEKind>(entry.kind), use_big_pages);
++            remapped_handles.Map(virtual_address, virtual_address + size, std::move(pinned));
+         }
+     }
+ 
+@@ -410,6 +445,7 @@ NvResult nvhost_as_gpu::UnmapBuffer(IoctlUnmapBuffer& params) {
+             gmmu->Unmap(params.offset, mapping.size);
+         }
+ 
++        remapped_handles.Unmap(params.offset, params.offset + mapping.size);
+         nvmap.UnpinHandle(mapping.handle);
+         mapping_map.erase(params.offset);
+         map_buffer_offsets.erase(params.offset);
+@@ -422,6 +458,7 @@ NvResult nvhost_as_gpu::BindChannel(IoctlBindChannel& params) {
+ 
+     auto gpu_channel_device = module.GetDevice<nvhost_gpu>(params.fd);
+     gpu_channel_device->channel_state->memory_manager = gmmu;
++    gpu_channel_device->address_space_owner = shared_from_this();
+     return NvResult::Success;
+ }
+ 
+diff --git a/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h b/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h
+index 44892ee..0f3c12d 100644
+--- a/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h
++++ b/src/core/hle/service/nvdrv/devices/nvhost_as_gpu.h
+@@ -9,6 +9,7 @@
+ 
+ #include <bit>
+ #include <list>
++#include <limits>
+ #include <map>
+ #include <memory>
+ #include <mutex>
+@@ -19,6 +20,7 @@
+ #include "common/address_space.h"
+ #include "common/common_funcs.h"
+ #include "common/common_types.h"
++#include "common/range_map.h"
+ #include "common/scratch_buffer.h"
+ #include "common/swap.h"
+ #include "core/hle/service/nvdrv/core/nvmap.h"
+@@ -47,7 +49,7 @@ enum class MappingFlags : u32 {
+ };
+ DECLARE_ENUM_FLAG_OPERATORS(MappingFlags);
+ 
+-class nvhost_as_gpu final : public nvdevice {
++class nvhost_as_gpu final : public nvdevice, public std::enable_shared_from_this<nvhost_as_gpu> {
+ public:
+     explicit nvhost_as_gpu(Core::System& system_, Module& module, NvCore::Container& core);
+     ~nvhost_as_gpu() override;
+@@ -164,6 +166,23 @@ private:
+     NvCore::Container& container;
+     NvCore::NvMap& nvmap;
+ 
++    struct RemapHandle {
++        NvCore::NvMap& nvmap;
++        NvCore::NvMap::Handle::Id handle;
++        DAddr address;
++
++        RemapHandle(NvCore::NvMap& nvmap_, NvCore::NvMap::Handle::Id handle_)
++            : nvmap{nvmap_}, handle{handle_}, address{nvmap.PinHandle(handle, false)} {}
++
++        ~RemapHandle() {
++            if (address != 0) {
++                nvmap.UnpinHandle(handle);
++            }
++        }
++    };
++
++    Common::RangeMap<GPUVAddr, std::shared_ptr<RemapHandle>> remapped_handles{nullptr};
++
+     struct Mapping {
+         DAddr ptr;
+         u64 offset;
+diff --git a/src/core/hle/service/nvdrv/devices/nvhost_gpu.h b/src/core/hle/service/nvdrv/devices/nvhost_gpu.h
+index c29231d..4bde690 100644
+--- a/src/core/hle/service/nvdrv/devices/nvhost_gpu.h
++++ b/src/core/hle/service/nvdrv/devices/nvhost_gpu.h
+@@ -210,6 +210,7 @@ private:
+     NvCore::SyncpointManager& syncpoint_manager;
+     NvCore::NvMap& nvmap;
+     std::shared_ptr<Tegra::Control::ChannelState> channel_state;
++    std::shared_ptr<nvhost_as_gpu> address_space_owner;
+     ankerl::unordered_dense::map<DeviceFD, NvCore::SessionId> sessions;
+     u32 channel_syncpoint;
+     std::mutex channel_mutex;
