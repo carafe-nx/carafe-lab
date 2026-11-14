@@ -65,13 +65,13 @@ fn library(lab: &Lab) -> Result<PathBuf, String> {
     if folder.join("core").join("rfb.js").is_file() {
         return Ok(folder);
     }
-    let image = config
-        .eden_image
-        .unwrap_or_else(|| lab_eden::IMAGE.to_owned());
+    let image = lab_eden::IMAGE.to_owned();
     let partial = config.work.join("novnc.part");
     let _ = fs::remove_dir_all(&partial);
     fs::create_dir_all(&partial).map_err(|error| error.to_string())?;
-    let container = docker(&["create", &image])?.trim().to_owned();
+    let container = docker(&["create", "--pull", "never", &image])?
+        .trim()
+        .to_owned();
     let copied = FOLDERS.iter().try_for_each(|name| {
         let from = format!("{container}:{IN_IMAGE}/{name}");
         let to = partial.join(name);

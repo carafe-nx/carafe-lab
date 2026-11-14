@@ -182,6 +182,29 @@ fn stopped_beyond_restarts(replies: &[Reply], loader_log: &str) -> bool {
     by_itself > restarts
 }
 
+#[doc = "Returns the immutable ID of a locally available Docker image."]
+#[doc = ""]
+#[doc = "# Errors"]
+#[doc = "Returns an error when Docker cannot inspect the image or its ID is invalid."]
+pub fn image_id(image: &str) -> Result<String, EmulatorError> {
+    let output = docker(&["image", "inspect", "--format", "{{.Id}}", image])?;
+    parse_image_id(&String::from_utf8_lossy(&output.stdout)).ok_or_else(|| {
+        EmulatorError::Control(format!("Docker returned no valid image ID for {image}"))
+    })
+}
+
+fn parse_image_id(text: &str) -> Option<String> {
+    let id = text.trim();
+    let hash = id.strip_prefix("sha256:")?;
+    (hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| id.to_ascii_lowercase())
+}
+
+fn image_matches(expected: &str, inspected: Option<&str>) -> bool {
+    parse_image_id(expected)
+        .is_some_and(|expected| inspected.and_then(parse_image_id).as_ref() == Some(&expected))
+}
+
 fn paused_in(replies: &[Reply]) -> bool {
     replies
         .iter()
@@ -293,6 +316,16 @@ impl Eden {
         self
     }
 
+    #[doc = "Pins this emulator to its locally available immutable image ID and returns that ID."]
+    #[doc = ""]
+    #[doc = "# Errors"]
+    #[doc = "Returns an error when the selected image cannot be inspected locally."]
+    pub fn pin_image(&mut self) -> Result<String, EmulatorError> {
+        let id = image_id(&self.image)?;
+        self.image.clone_from(&id);
+        Ok(id)
+    }
+
     /// Returns the emulator with `settings` written over the lab's `qt-config.ini`.
     ///
     /// Each key is `Section/key`, such as `Renderer/gpu_accuracy`.
@@ -387,6 +420,8 @@ impl Eden {
     pub fn version(&self) -> Result<String, EmulatorError> {
         let output = docker(&[
             "run",
+            "--pull",
+            "never",
             "--rm",
             "--entrypoint",
             "cat",
@@ -402,7 +437,12 @@ impl Eden {
     ///
     /// [`EmulatorError::Control`] if Docker or the image is missing.
     pub fn gpu_info(&self) -> Result<String, EmulatorError> {
-        let mut args = vec!["run".to_owned(), "--rm".to_owned()];
+        let mut args = vec![
+            "run".to_owned(),
+            "--pull".to_owned(),
+            "never".to_owned(),
+            "--rm".to_owned(),
+        ];
         args.extend(self.gpu_args());
         args.push(self.image.clone());
         args.push("gpu-info".to_owned());
@@ -505,6 +545,8 @@ impl Eden {
         let archive = self.pack_nand()?;
         let mut args = vec![
             "run".to_owned(),
+            "--pull".to_owned(),
+            "never".to_owned(),
             "--rm".to_owned(),
             "-v".to_owned(),
             format!("{}:/from.tar:ro", archive.display()),
@@ -867,7 +909,15 @@ impl Eden {
         } else {
             String::new()
         };
-        let roomy = alive && !self.fresh && room_left(&readings, GAME_MEMORY);
+        let inspected_image = if alive {
+            docker(&["inspect", "--format", "{{.Image}}", CONTAINER])
+                .ok()
+                .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            None
+        };
+        let same_image = image_matches(&self.image, inspected_image.as_deref());
+        let roomy = same_image && !self.fresh && room_left(&readings, GAME_MEMORY);
         let choice = match (roomy, self.fresh) {
             (true, _) => "same Eden",
             (false, true) => "new Eden: clean start",
@@ -1145,6 +1195,8 @@ impl Eden {
     fn container_args(&self, dir: &Path) -> Vec<String> {
         let mut args = vec![
             "run".to_owned(),
+            "--pull".to_owned(),
+            "never".to_owned(),
             "-d".to_owned(),
             "--name".to_owned(),
             CONTAINER.to_owned(),
@@ -1881,6 +1933,42 @@ fn docker_owned(args: &[String]) -> Result<Output, EmulatorError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_one_immutable_image_id_is_accepted() {
+        let hash = "a".repeat(64);
+        let id = format!("sha256:{hash}");
+        assert_eq!(parse_image_id(&format!("{id}\n")), Some(id.clone()));
+        for invalid in [
+            "".to_owned(),
+            "carafe-lab-eden".to_owned(),
+            "291365ba7536\n291365ba7536".to_owned(),
+            format!("{id}\n{id}"),
+            format!("sha256:{}", "g".repeat(64)),
+        ] {
+            assert_eq!(parse_image_id(&invalid), None);
+        }
+    }
+
+    #[test]
+    fn image_reuse_requires_the_same_known_immutable_id() {
+        let before = format!("sha256:{}", "a".repeat(64));
+        let rebuilt = format!("sha256:{}", "b".repeat(64));
+        assert!(image_matches(&before, Some(&format!("{before}\n"))));
+        assert!(!image_matches(&rebuilt, Some(&before)));
+        assert!(!image_matches(&before, None));
+        assert!(!image_matches(&before, Some("")));
+        assert!(!image_matches("carafe-lab-eden", Some(&before)));
+    }
+
+    #[test]
+    fn pinned_images_are_used_for_container_creation() {
+        let id = format!("sha256:{}", "a".repeat(64));
+        let eden = Eden::new("user", "test.keys", Gpu::Wsl, EdenCpu::Nce).with_image(&id);
+        let args = eden.container_args(Path::new("library"));
+        assert_eq!(args.last(), Some(&id));
+        assert!(args.windows(2).any(|pair| pair == ["--pull", "never"]));
+    }
 
     #[test]
     fn every_button_has_its_own_key() {

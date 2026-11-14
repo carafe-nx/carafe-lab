@@ -40,8 +40,7 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
 7. Optional in `lab.json`: `emulatorCpu` (`nce`, the default, runs the guest's code natively; `dynarmic` translates
    it, slower but in the console's proportions; [decision 8](decisions/0008-nce-is-the-default.md)), `nspDir` — the
    folder runs build their NSPs in, `nsp` in the work folder by default; a short one, such as `D:\\lab-nsp`, keeps a
-   game's longest file path within the 259 bytes hacBrewPack reads — `edenImage` —
-   another Eden image, such as one built with diagnostic patches — and `edenSettings`, settings written over Eden's
+   game's longest file path within the 259 bytes hacBrewPack reads — and `edenSettings`, settings written over Eden's
    `qt-config.ini`:
    `{ "Renderer/gpu_accuracy": "0", "Renderer/debug": "true" }`. `Renderer/debug` makes Eden log the compile and
    link errors of its OpenGL shaders, which it keeps quiet otherwise.
@@ -56,6 +55,14 @@ hacBrewPack come from that checkout's `app/crates/carafe-desktop/` (`resources/c
    and the choice. `--clean`, or the Plans screen's "Clean start", gives every launch of one run a new Eden, still
    driven through the control channel. `false` starts a container for every launch the old way, closing games through
    `SIGUSR1` and pressing through `xdotool`.
+
+Ordinary runs and the window's readiness checks always use the locally built `carafe-lab-eden` image. The legacy
+`edenImage` field is accepted but ignored and removed when settings are saved. Each run resolves the image to one
+immutable ID after acquiring the emulator queue; launch, retained image and report refer to that same build.
+Rebuilding the canonical tag affects the next run, not a run already in progress. Explicit `--like` replays still
+require their retained historical image. Missing images are errors, not a reason to fall back or download another.
+Opening the window checks readiness; it does not build or start Eden. See
+[decision 16](decisions/0016-one-current-eden-image-for-ordinary-runs.md).
 
 From `app/`: `npm run dev` opens the window — the library, sets to run, the run going on, past runs and what the
 emulator needs to start. `cargo run --release -p lab-cli -- run [set]` runs the enabled games of `lab.json` or the

@@ -73,7 +73,8 @@ struct RawConfig {
     gpu: Option<String>,
     emulator_cpu: Option<String>,
     carafe: Option<PathBuf>,
-    eden_image: Option<String>,
+    #[serde(rename = "edenImage")]
+    _legacy_eden_image: Option<String>,
     one_eden: Option<bool>,
     #[serde(default)]
     eden_settings: BTreeMap<String, String>,
@@ -114,6 +115,22 @@ enum RawScenario {
     Steps(Scenario),
 }
 
+fn updated_config(
+    mut value: Value,
+    read: impl Fn(&str) -> Result<String, String>,
+) -> Result<String, ConfigError> {
+    if let Some(root) = value.as_object_mut() {
+        root.remove("edenImage");
+    }
+    let updated = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&value)
+            .map_err(|error| ConfigError::Format(error.to_string()))?
+    );
+    Config::parse_with(&updated, read)?;
+    Ok(updated)
+}
+
 fn enabled_by_default() -> bool {
     true
 }
@@ -132,8 +149,6 @@ pub struct Config {
     pub emulator_cpu: EdenCpu,
     /// The Carafe checkout the lab packs with; `None` means the `external/carafe` submodule.
     pub carafe: Option<PathBuf>,
-    /// The emulator's Docker image; `None` means the image `compose.yaml` builds.
-    pub eden_image: Option<String>,
     /// One emulator serves the whole run instead of one for every launch; `true` unless `lab.json` says otherwise.
     pub one_eden: bool,
     /// Settings written over the emulator's `qt-config.ini`, keyed `Section/key`.
@@ -357,7 +372,6 @@ impl Config {
             gpu,
             emulator_cpu,
             carafe: raw.carafe,
-            eden_image: raw.eden_image,
             one_eden: raw.one_eden.unwrap_or(true),
             eden_settings: raw.eden_settings,
             lang,
@@ -617,13 +631,7 @@ pub fn add_game(
         Value::String(folder.display().to_string()),
     );
     games.push(Value::Object(game));
-    let updated = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&value)
-            .map_err(|error| ConfigError::Format(error.to_string()))?
-    );
-    Config::parse_with(&updated, read)?;
-    Ok(updated)
+    updated_config(value, read)
 }
 
 /// Returns the text of `lab.json` with the game `name` reading its scenario from `file`; everything else keeps its
@@ -653,13 +661,7 @@ pub fn set_scenario_file(
         .and_then(Value::as_object_mut)
         .ok_or_else(|| ConfigError::UnknownGame(name.to_owned()))?;
     game.insert("scenario".to_owned(), Value::String(file.to_owned()));
-    let updated = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&value)
-            .map_err(|error| ConfigError::Format(error.to_string()))?
-    );
-    Config::parse_with(&updated, read)?;
-    Ok(updated)
+    updated_config(value, read)
 }
 
 /// Returns the text of `lab.json` with the game `name`'s tags and notes replaced; empty ones are removed, everything
@@ -705,13 +707,7 @@ pub fn set_game_notes(
     } else {
         game.insert("notes".to_owned(), Value::String(notes.trim().to_owned()));
     }
-    let updated = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&value)
-            .map_err(|error| ConfigError::Format(error.to_string()))?
-    );
-    Config::parse_with(&updated, read)?;
-    Ok(updated)
+    updated_config(value, read)
 }
 
 /// Returns the text of `lab.json` with the work folder replaced by `folder`; everything else keeps its order.
@@ -733,13 +729,7 @@ pub fn set_work(
             "work".to_owned(),
             Value::String(folder.display().to_string()),
         );
-    let updated = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&value)
-            .map_err(|error| ConfigError::Format(error.to_string()))?
-    );
-    Config::parse_with(&updated, read)?;
-    Ok(updated)
+    updated_config(value, read)
 }
 
 /// Returns the scenario file a game named `name` gets when its scenario is first saved on its own:
@@ -1020,12 +1010,50 @@ mod tests {
     }
 
     #[test]
-    fn eden_image_and_settings_are_read_and_checked() {
+    fn legacy_images_cannot_change_effective_configuration() {
+        let plain = Config::parse(r#"{"work":"x","lang":"en","oneEden":false}"#).unwrap();
+        for legacy in [
+            "null",
+            r#""carafe-lab-eden-memory""#,
+            r#""custom:diagnostic""#,
+        ] {
+            let text =
+                format!(r#"{{"work":"x","lang":"en","oneEden":false,"edenImage":{legacy}}}"#);
+            assert_eq!(Config::parse(&text).unwrap(), plain);
+        }
+        assert!(Config::parse(r#"{"work":"x","unknownImage":"diagnostic"}"#).is_err());
+    }
+
+    #[test]
+    fn saving_configuration_retires_only_the_legacy_image() {
+        let text = r#"{"work":"x","edenImage":"old","lang":"en","oneEden":false,
+            "edenSettings":{"Renderer/debug":"true"},
+            "games":[{"name":"Game","folder":"game","notes":"kept"}]}"#;
+        let outputs = [
+            add_game(text, "Other", Path::new("other"), |_| unreachable!()).unwrap(),
+            set_scenario_file(text, "Game", "game.json", |_| {
+                Ok(r#"{"steps":[{"step":"launch"}]}"#.to_owned())
+            })
+            .unwrap(),
+            set_game_notes(text, "Game", &[], "changed", |_| unreachable!()).unwrap(),
+            set_work(text, Path::new("new"), |_| unreachable!()).unwrap(),
+        ];
+        for output in outputs {
+            let value: Value = serde_json::from_str(&output).unwrap();
+            assert!(value.get("edenImage").is_none());
+            assert_eq!(value["lang"], "en");
+            assert_eq!(value["oneEden"], false);
+            assert_eq!(value["edenSettings"]["Renderer/debug"], "true");
+            assert_eq!(value["games"][0]["folder"], "game");
+        }
+    }
+
+    #[test]
+    fn eden_settings_are_read_and_checked() {
         let config = Config::parse(
             r#"{"work": "x", "edenImage": "carafe-eden:diag", "edenSettings": {"Renderer/gpu_accuracy": "0"}}"#,
         )
         .unwrap();
-        assert_eq!(config.eden_image.as_deref(), Some("carafe-eden:diag"));
         assert_eq!(
             config
                 .eden_settings
@@ -1034,7 +1062,6 @@ mod tests {
             Some("0")
         );
         let plain = Config::parse(r#"{"work": "x"}"#).unwrap();
-        assert_eq!(plain.eden_image, None);
         assert!(plain.eden_settings.is_empty());
         assert!(plain.one_eden);
         let per_launch = Config::parse(r#"{"work": "x", "oneEden": false}"#).unwrap();

@@ -195,13 +195,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
     .with_symbols(
         (args.runtime.is_none() && like.is_none()).then(|| desktop.join(RUNTIME_SYMBOLS)),
     );
-    let image = match &like {
-        Some(kept) => kept.image.clone(),
-        None => config
-            .eden_image
-            .clone()
-            .unwrap_or_else(|| lab_eden::IMAGE.to_owned()),
-    };
+    let image = run_image(like.as_ref());
     eden = eden.with_image(image.clone());
     let mut args = args;
     if let Some(kept) = &like {
@@ -954,7 +948,7 @@ fn kept_parts(config: &Config, dir: &str) -> Result<KeptParts, String> {
         .eden_image
         .ok_or_else(|| format!("{dir} does not say which Eden image it ran"))?;
     let image = kept_image(&id);
-    if image_id(&image).is_none() {
+    if lab_eden::image_id(&image).is_err() {
         return Err(format!(
             "{dir} ran Eden image {id}, which was not kept; only runs from now on keep theirs"
         ));
@@ -966,14 +960,14 @@ fn kept_parts(config: &Config, dir: &str) -> Result<KeptParts, String> {
     })
 }
 
-fn image_id(image: &str) -> Option<String> {
-    let output = std::process::Command::new("docker")
-        .args(["image", "ls", "--quiet", image])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())?;
-    let id = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    (!id.is_empty()).then_some(id)
+fn run_image(kept: Option<&KeptParts>) -> String {
+    kept.map_or_else(|| lab_eden::IMAGE.to_owned(), |kept| kept.image.clone())
+}
+
+fn image_stamp(image: &str) -> Option<String> {
+    let hash = image.strip_prefix("sha256:")?;
+    (hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| hash[..12].to_owned())
 }
 
 impl Lab {
@@ -1516,6 +1510,9 @@ impl Lab {
                 }
             }
         };
+        if !self.args.build_only {
+            self.image = self.eden.pin_image().map_err(|error| error.to_string())?;
+        }
         let started_at = now();
         let clock = RealClock(Instant::now());
         let emulator_label = if self.args.build_only {
@@ -1537,7 +1534,7 @@ impl Lab {
             eden_image: if self.args.build_only {
                 None
             } else {
-                image_id(&self.image)
+                image_stamp(&self.image)
             },
         };
         keep_parts(&self.work, &self.runtime, &self.image, &stamp);
@@ -1834,4 +1831,36 @@ fn settings_label(settings: &AutorunSettings) -> String {
         InputMode::KeyboardMouse => "keyboard",
     };
     format!("{} {mode}", matrix::describe(settings))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_runs_use_the_canonical_image_and_exact_replays_keep_theirs() {
+        assert_eq!(run_image(None), lab_eden::IMAGE);
+        let kept = KeptParts {
+            runtime: PathBuf::from("runtime.bin"),
+            image: kept_image("291365ba7536"),
+            games: vec!["Game".to_owned()],
+        };
+        assert_eq!(run_image(Some(&kept)), kept.image);
+        assert_ne!(run_image(Some(&kept)), run_image(None));
+    }
+
+    #[test]
+    fn image_stamps_come_from_one_immutable_id() {
+        let id = format!("sha256:{}", "abcdef01".repeat(8));
+        assert_eq!(image_stamp(&id).as_deref(), Some("abcdef01abcd"));
+        let tag = kept_image(&image_stamp(&id).unwrap());
+        assert_eq!(tag, "carafe-lab-eden-kept:abcdef01abcd");
+        for invalid in [
+            "carafe-lab-eden",
+            "291365ba7536\n291365ba7536",
+            "sha256:invalid",
+        ] {
+            assert_eq!(image_stamp(invalid), None);
+        }
+    }
 }

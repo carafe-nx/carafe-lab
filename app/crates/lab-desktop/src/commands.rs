@@ -1008,10 +1008,7 @@ fn status(lab: &Lab) -> LabStatus {
         }
     };
     let carafe = config.carafe_checkout(lab.repository());
-    let image = config
-        .eden_image
-        .clone()
-        .unwrap_or_else(|| lab_eden::IMAGE.to_owned());
+    let image = lab_eden::IMAGE.to_owned();
     LabStatus {
         config: config_path,
         problem: None,
