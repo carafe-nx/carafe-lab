@@ -32,7 +32,8 @@ up is [docs/lab.md](lab.md).
 ## Building
 
 - From `app/`: `npm run dev` opens the window (it builds `carafe-lab` first); `npm run check` runs formatting, clippy,
-  Rust tests and the TypeScript check; `npm run cdp -- screenshot <file>` captures the window in development.
+  Rust tests, the TypeScript check and window outcome tests; `npm run cdp -- screenshot <file>` captures the window
+  in development.
 - Run Cargo tests from `app/` so Cargo loads `app/.cargo/config.toml` and exports TypeScript types to
   `ui/src/shared/api/bindings/`. Running Cargo from the parent directory with `--manifest-path` can instead leave
   duplicate generated files under individual crates. Only the UI bindings are versioned.
