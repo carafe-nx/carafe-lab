@@ -26,6 +26,8 @@ use crate::versions;
 pub const CONFIG_FILE: &str = "lab.json";
 /// The text of a new `lab.json`: the work folder `build/work` next to it and no games.
 pub const DEFAULT_TEXT: &str = "{\n  \"work\": \"build/work\"\n}\n";
+/// Default budget for retained Lab log captures, in MiB.
+pub const DEFAULT_LOG_ARCHIVE_MB: u32 = 512;
 
 /// An error in `lab.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -75,6 +77,7 @@ struct RawConfig {
     carafe: Option<PathBuf>,
     #[serde(rename = "edenImage")]
     _legacy_eden_image: Option<String>,
+    log_archive_mb: Option<u32>,
     one_eden: Option<bool>,
     #[serde(default)]
     eden_settings: BTreeMap<String, String>,
@@ -149,6 +152,8 @@ pub struct Config {
     pub emulator_cpu: EdenCpu,
     /// The Carafe checkout the lab packs with; `None` means the `external/carafe` submodule.
     pub carafe: Option<PathBuf>,
+    /// Aggregate budget for retained Lab log captures, in MiB.
+    pub log_archive_mb: u32,
     /// One emulator serves the whole run instead of one for every launch; `true` unless `lab.json` says otherwise.
     pub one_eden: bool,
     /// Settings written over the emulator's `qt-config.ini`, keyed `Section/key`.
@@ -284,6 +289,10 @@ impl Config {
                 ));
             }
         }
+        let log_archive_mb = raw.log_archive_mb.unwrap_or(DEFAULT_LOG_ARCHIVE_MB);
+        if log_archive_mb == 0 {
+            return Err(ConfigError::Value("logArchiveMb", "positive"));
+        }
         let lang = match raw.lang.as_deref() {
             None => Lang::Ru,
             Some(text) => Lang::parse(text).ok_or(ConfigError::Value("lang", "ru or en"))?,
@@ -372,6 +381,7 @@ impl Config {
             gpu,
             emulator_cpu,
             carafe: raw.carafe,
+            log_archive_mb,
             one_eden: raw.one_eden.unwrap_or(true),
             eden_settings: raw.eden_settings,
             lang,
@@ -821,6 +831,15 @@ mod tests {
         assert!(config.games.is_empty());
         assert_eq!(config.work, PathBuf::from("build/work"));
         assert_eq!(config.gpu, Gpu::Wsl);
+    }
+
+    #[test]
+    fn retained_log_budget_has_a_default_and_accepts_an_override() {
+        let default = Config::parse(DEFAULT_TEXT).unwrap();
+        assert_eq!(default.log_archive_mb, 512);
+        let configured = Config::parse(r#"{"work":"build/work","logArchiveMb":32}"#).unwrap();
+        assert_eq!(configured.log_archive_mb, 32);
+        assert!(Config::parse(r#"{"work":"build/work","logArchiveMb":0}"#).is_err());
     }
 
     #[test]

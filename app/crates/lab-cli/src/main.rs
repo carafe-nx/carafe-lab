@@ -187,6 +187,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         config.emulator_cpu,
     )
     .with_settings(config.eden_settings.clone())
+    .with_log_archive(config.work.join("runs"), config.log_archive_mb)
     .with_one_eden(config.one_eden)
     .with_fresh_eden(args.clean)
     .with_video(args.video)
@@ -560,29 +561,24 @@ fn nsp_root(config: &Config) -> PathBuf {
         .unwrap_or_else(|| config.work.join(NSP_DIR))
 }
 
-fn tidy_plan(work: &Path, nsp: &Path) -> tidy::TidyPlan {
+fn tidy_plan(work: &Path) -> tidy::TidyPlan {
     let runs = work.join("runs");
     let runtimes = work.join("runtimes");
     let dumps = std::env::temp_dir().join("wsl-crashes");
+    let active = Queue::new(work.join("queue"))
+        .state(unix_now())
+        .holder
+        .and_then(|entry| entry.run_dir);
     let places = tidy::Places {
         runs: &runs,
-        nsp,
+        active_run: active
+            .as_deref()
+            .and_then(|dir| Path::new(dir).file_name())
+            .and_then(|name| name.to_str()),
         runtimes: &runtimes,
         dumps: Some(&dumps),
     };
     tidy::plan(places, tidy::KEPT_WHOLE)
-}
-
-fn tidy_after_run(work: &Path, nsp: &Path) {
-    let _ = tidy::apply(&tidy_plan(work, nsp));
-    remove_images(&unused_images(work));
-    let containers = stopped_containers();
-    if !containers.is_empty() {
-        let _ = std::process::Command::new("docker")
-            .arg("rm")
-            .args(&containers)
-            .output();
-    }
 }
 
 fn unused_images(work: &Path) -> Vec<String> {
@@ -616,7 +612,7 @@ fn remove_images(images: &[String]) {
 }
 
 fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, String> {
-    let plan = tidy_plan(&config.work, &nsp_root(config));
+    let plan = tidy_plan(&config.work);
     if json && !apply {
         print_json(&plan)?;
         return Ok(ExitCode::SUCCESS);
@@ -635,7 +631,7 @@ fn tidy_runs(config: &Config, apply: bool, json: bool) -> Result<ExitCode, Strin
         mib(plan.remove_bytes)
     );
     println!(
-        "remove {} NSPs of runs that are over, unused runtimes and Eden crash dumps ({:.1} MB), {} kept Eden images \
+        "remove {} old console NSPs, unused runtimes and Eden crash dumps ({:.1} MB), {} kept Eden images \
          no newest run used and {} stopped lab containers",
         plan.stale.len(),
         mib(plan.stale_bytes),
@@ -1600,7 +1596,6 @@ impl Lab {
             &mut on_event,
         )?;
         drop(holding);
-        tidy_after_run(&self.work, &self.nsp_root);
         let [_, _, _, failed] = report.counts();
         Ok(if failed == 0 {
             ExitCode::SUCCESS

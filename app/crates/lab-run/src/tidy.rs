@@ -5,20 +5,17 @@
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use serde::Serialize;
 
-use crate::engine::nsp_folder;
 use crate::history::{self, RunSummary};
 use crate::run::{Outcome, PROBLEMS_FILE, TIMELINE_DIR};
 
 /// How many of the newest runs keep everything as it is.
 pub const KEPT_WHOLE: usize = 10;
 
-const GOING_AT_MOST: Duration = Duration::from_secs(24 * 60 * 60);
 const RELEASE_PREFIXES: [&str; 2] = ["commit-", "release-"];
 
 const KEPT_FILES: [&str; 3] = [PROBLEMS_FILE, "session.log", "container-end.log"];
@@ -38,7 +35,7 @@ pub struct TidyPlan {
     pub compress_bytes: u64,
     /// Bytes the files to remove take.
     pub remove_bytes: u64,
-    /// What runs that are over left in the NSP folder, NSPs older runs built for the console, runtimes none of the
+    /// NSPs older runs built for the console, runtimes none of the
     /// newest runs packed with and Eden's crash dumps, to remove; a folder goes with everything in it.
     pub stale: Vec<PathBuf>,
     /// Bytes the stale files take.
@@ -50,8 +47,8 @@ pub struct TidyPlan {
 pub struct Places<'a> {
     /// The runs folder.
     pub runs: &'a Path,
-    /// The folder of built NSPs.
-    pub nsp: &'a Path,
+    /// The run currently holding the emulator, if any.
+    pub active_run: Option<&'a str>,
     /// The folder of runtimes kept for running a run again as it was.
     pub runtimes: &'a Path,
     /// The folder WSL writes crash dumps to; `None` leaves dumps alone.
@@ -67,22 +64,21 @@ pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
         runs: list.len(),
         ..TidyPlan::default()
     };
-    let going: Vec<String> = list
-        .iter()
-        .filter(|run| !run.finished)
-        .map(|run| nsp_folder(&run.dir))
-        .collect();
-    let mut stale = left_nsps(places.nsp, &going);
     let packed: Vec<&str> = list
         .iter()
-        .take(keep)
+        .enumerate()
+        .filter(|(index, run)| *index < keep || places.active_run == Some(run.dir.as_str()))
+        .map(|(_, run)| run)
         .filter_map(|run| run.stamp.runtime_hash.as_deref())
         .collect();
-    stale.extend(unused_runtimes(places.runtimes, &packed));
+    let mut stale = unused_runtimes(places.runtimes, &packed);
     if let Some(dumps) = places.dumps {
         stale.extend(eden_dumps(dumps));
     }
     for run in list.iter().skip(keep) {
+        if places.active_run == Some(run.dir.as_str()) {
+            continue;
+        }
         for game in run.games.iter().filter(|game| !game.dir.is_empty()) {
             let for_console = runs
                 .join(&run.dir)
@@ -96,6 +92,9 @@ pub fn plan(places: Places<'_>, keep: usize) -> TidyPlan {
     plan.stale_bytes = stale.iter().map(|path| size(path)).sum();
     plan.stale = stale;
     for run in list.iter().skip(keep) {
+        if places.active_run == Some(run.dir.as_str()) {
+            continue;
+        }
         let failed = !run.finished || run.games.iter().any(|game| game.outcome == Outcome::Fail);
         for file in raw_files(&runs.join(&run.dir), run) {
             let size = fs::metadata(&file).map_or(0, |metadata| metadata.len());
@@ -153,26 +152,6 @@ pub fn apply(plan: &TidyPlan) -> io::Result<u64> {
         }
     }
     Ok(freed)
-}
-
-fn left_nsps(nsp: &Path, going: &[String]) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(nsp) else {
-        return Vec::new();
-    };
-    let mut left: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let fresh = entry
-                .metadata()
-                .and_then(|metadata| metadata.modified())
-                .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age < GOING_AT_MOST));
-            !(going.contains(&name) && fresh)
-        })
-        .map(|entry| entry.path())
-        .collect();
-    left.sort();
-    left
 }
 
 fn unused_runtimes(runtimes: &Path, packed: &[&str]) -> Vec<PathBuf> {
@@ -258,17 +237,44 @@ fn raw_files(run_dir: &Path, run: &RunSummary) -> Vec<PathBuf> {
             }
         }
     }
+    if let (Ok(root), Ok(entries)) = (run_dir.canonicalize(), fs::read_dir(run_dir)) {
+        for game in entries.filter_map(Result::ok) {
+            let before = game.path().join("before-launch-1");
+            if fs::symlink_metadata(&before).is_ok_and(|metadata| metadata.is_dir())
+                && before.canonicalize().is_ok_and(|resolved| {
+                    resolved
+                        .parent()
+                        .and_then(Path::parent)
+                        .is_some_and(|parent| parent == root)
+                })
+            {
+                collect_raw(&before, &mut files);
+            }
+        }
+    }
     files.sort();
     files
 }
 
 fn collect_raw(dir: &Path, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
+    let (Ok(root), Ok(entries)) = (dir.canonicalize(), fs::read_dir(dir)) else {
         return;
     };
-    for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
-        if path.is_dir() {
-            collect_raw(&path, files);
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            if path
+                .canonicalize()
+                .is_ok_and(|resolved| resolved.parent().is_some_and(|parent| parent == root))
+            {
+                collect_raw(&path, files);
+            }
+            continue;
+        }
+        if !kind.is_file() {
             continue;
         }
         let name = path
@@ -321,6 +327,12 @@ mod tests {
             r#"{"started":"x","seconds":1,"emulator":"e","runtimeVersion":"r","finished":false,"planned":["G"],
             "games":[],"stamp":{"runtimeHash":"aaaaaaaaaaaa"}}"#,
         );
+        let before = runs
+            .join("2026-01-04_00-00-00")
+            .join("G")
+            .join("before-launch-1")
+            .join("eden_log.txt");
+        write(&before, &"previous launch\n".repeat(200));
         let nsp = runs.join("nsp");
         let runtimes = runs.join("runtimes");
         let dumps = runs.join("dumps");
@@ -339,7 +351,7 @@ mod tests {
         let plan = plan(
             Places {
                 runs: &runs,
-                nsp: &nsp,
+                active_run: None,
                 runtimes: &runtimes,
                 dumps: Some(&dumps),
             },
@@ -349,10 +361,34 @@ mod tests {
         assert_eq!(plan.compress.len(), 1);
         assert_eq!(plan.remove.len(), 2);
         assert!(plan.compress[0].ends_with("eden_log.txt"));
-        assert_eq!(plan.stale.len(), 5);
+        assert_eq!(plan.stale.len(), 2);
+        assert!(
+            super::plan(
+                Places {
+                    runs: &runs,
+                    active_run: None,
+                    runtimes: &runtimes,
+                    dumps: Some(&dumps),
+                },
+                0,
+            )
+            .compress
+            .contains(&before)
+        );
+        let active = super::plan(
+            Places {
+                runs: &runs,
+                active_run: Some("2026-01-04_00-00-00"),
+                runtimes: &runtimes,
+                dumps: Some(&dumps),
+            },
+            0,
+        );
+        assert!(!active.compress.contains(&before));
+        assert!(!active.stale.contains(&runtimes.join("aaaaaaaaaaaa.bin")));
         apply(&plan).unwrap();
         assert!(nsp.join("04000000").join("t.nsp").exists());
-        assert!(!nsp.join("03000000").exists() && !nsp.join("0100aaaa.nsp").exists());
+        assert!(nsp.join("03000000").exists() && nsp.join("0100aaaa.nsp").exists());
         assert!(
             runtimes.join("aaaaaaaaaaaa.bin").exists()
                 && !runtimes.join("bbbbbbbbbbbb.bin").exists()

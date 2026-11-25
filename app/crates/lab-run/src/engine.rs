@@ -125,12 +125,150 @@ pub fn nsp_folder(folder: &str) -> String {
     digits[skip..].to_owned()
 }
 
-struct Scratch(PathBuf);
+const SCRATCH_PREFIX: &str = "lab-run-";
+const SCRATCH_LEASE: &str = ".lab-run-lease";
+const SCRATCH_OWNER: &str = ".lab-run-managed";
+const PENDING_MARKER_PREFIX: &str = ".lab-pending-";
+const LAUNCH_MARKER: &str = ".lab-pending-launch";
+const SCRATCH_PAYLOAD: &str = "nsp";
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+struct Scratch {
+    dir: PathBuf,
+    _lease: File,
+}
+
+impl Scratch {
+    fn start(root: &Path, folder: &str) -> std::io::Result<Self> {
+        fs::create_dir_all(root)?;
+        let prefix = format!(
+            "{SCRATCH_PREFIX}{}-{}",
+            nsp_folder(folder),
+            std::process::id()
+        );
+        for attempt in 0.. {
+            let dir = root.join(format!("{prefix}-{attempt}"));
+            match fs::create_dir(&dir) {
+                Ok(()) => {
+                    let lease = OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(dir.join(SCRATCH_LEASE))?;
+                    lease.lock()?;
+                    fs::create_dir(dir.join(SCRATCH_PAYLOAD))?;
+                    File::create(dir.join(SCRATCH_OWNER))?;
+                    return Ok(Self { dir, _lease: lease });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!()
     }
+
+    fn collect(root: &Path, protected: &[PathBuf]) {
+        let Ok(entries) = fs::read_dir(root) else {
+            return;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if !entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(SCRATCH_PREFIX)
+                || !entry
+                    .file_type()
+                    .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
+                || !plain_directory(&path)
+                || !path.join(SCRATCH_OWNER).is_file()
+            {
+                continue;
+            }
+            if !path
+                .canonicalize()
+                .is_ok_and(|resolved| !protected.iter().any(|input| input.starts_with(&resolved)))
+            {
+                continue;
+            }
+            if let Ok(lease) = OpenOptions::new()
+                .write(true)
+                .open(path.join(SCRATCH_LEASE))
+                && lease.try_lock().is_ok()
+                && no_pending_work(&path)
+            {
+                let _ = Self::remove(&path);
+            }
+        }
+    }
+
+    fn remove(path: &Path) -> std::io::Result<()> {
+        match fs::remove_dir_all(path.join(SCRATCH_PAYLOAD)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        fs::remove_dir_all(path)
+    }
+}
+
+fn plain_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const REPARSE_POINT: u32 = 0x400;
+            metadata.is_dir() && metadata.file_attributes() & REPARSE_POINT == 0
+        }
+        #[cfg(not(windows))]
+        {
+            metadata.is_dir()
+        }
+    })
+}
+
+fn no_pending_work(dir: &Path) -> bool {
+    fs::read_dir(dir).is_ok_and(|mut entries| {
+        entries.all(|entry| {
+            entry.is_ok_and(|item| {
+                !item
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(PENDING_MARKER_PREFIX)
+            })
+        })
+    })
+}
+
+fn start_build_marker(dir: &Path) -> std::io::Result<PathBuf> {
+    for attempt in 0.. {
+        let marker = dir.join(format!("{PENDING_MARKER_PREFIX}{attempt}"));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&marker)
+        {
+            Ok(_) => return Ok(marker),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!()
+}
+
+fn keep_console_nsp(source: &Path, destination: &Path) -> std::io::Result<()> {
+    if fs::hard_link(source, destination).is_ok() {
+        return Ok(());
+    }
+    let mut input = File::open(source)?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    let result = std::io::copy(&mut input, &mut output).map(|_| ());
+    drop(output);
+    if result.is_err() {
+        let _ = fs::remove_file(destination);
+    }
+    result
 }
 
 /// What the run is doing, for the window, the terminal and `--json`.
@@ -374,10 +512,20 @@ impl Engine<'_> {
         on_event: &mut dyn FnMut(&Event),
     ) -> Result<RunReport, String> {
         let run_dir = self.work.join("runs").join(folder);
-        let nsp_dir = self.nsp_root.join(nsp_folder(folder));
         fs::create_dir_all(&run_dir).map_err(|error| format!("{}: {error}", run_dir.display()))?;
-        fs::create_dir_all(&nsp_dir).map_err(|error| format!("{}: {error}", nsp_dir.display()))?;
-        let _built = Scratch(nsp_dir.clone());
+        let inputs: std::io::Result<Vec<_>> = planned
+            .iter()
+            .filter_map(|game| match &game.nsp {
+                NspSource::Ready(ready) => Some(ready.path.canonicalize()),
+                _ => None,
+            })
+            .collect();
+        if !self.build_only
+            && self.emulator.nsp_mount_released()
+            && let Ok(inputs) = &inputs
+        {
+            Scratch::collect(&self.nsp_root, inputs);
+        }
         let _ = fs::remove_file(self.work.join("queue").join(HOLD_FILE));
         let mut report = RunReport {
             started: started.to_owned(),
@@ -400,12 +548,14 @@ impl Engine<'_> {
             on_event(event);
         };
         write_summary(&run_dir, &report, &names, false)?;
+        let scratch = Scratch::start(&self.nsp_root, folder)
+            .map_err(|error| format!("{}: {error}", self.nsp_root.display()))?;
         on_event(&Event::RunStarted {
             dir: run_dir.display().to_string(),
             games: total,
         });
         let builder = self.builder();
-        thread::scope(|scope| -> Result<(), String> {
+        let result = thread::scope(|scope| -> Result<(), String> {
             let mut next = None;
             for (index, game) in planned.iter().enumerate() {
                 if self.stop.is_cancelled() {
@@ -421,14 +571,15 @@ impl Engine<'_> {
                 let prebuilt = next
                     .take()
                     .and_then(|building: thread::ScopedJoinHandle<Prebuilt>| building.join().ok())
-                    .unwrap_or_else(|| builder.build(game, &nsp_dir));
+                    .unwrap_or_else(|| builder.build(game, &scratch));
                 if !self.build_only
                     && let Some(following) = planned.get(index + 1)
                 {
-                    let (builder, nsp_dir) = (&builder, &nsp_dir);
-                    next = Some(scope.spawn(move || builder.build(following, nsp_dir)));
+                    let builder = &builder;
+                    let scratch = &scratch;
+                    next = Some(scope.spawn(move || builder.build(following, scratch)));
                 }
-                let entry = self.one_game(game, prebuilt, &run_dir, clock, &mut on_event);
+                let entry = self.one_game(game, prebuilt, &run_dir, &scratch, clock, &mut on_event);
                 on_event(&Event::GameFinished {
                     name: entry.name.clone(),
                     outcome: entry.outcome(),
@@ -448,8 +599,9 @@ impl Engine<'_> {
                         index: index + 1,
                         name: again.name.clone(),
                     });
-                    let prebuilt = builder.build(&again, &nsp_dir);
-                    let entry = self.one_game(&again, prebuilt, &run_dir, clock, &mut on_event);
+                    let prebuilt = builder.build(&again, &scratch);
+                    let entry =
+                        self.one_game(&again, prebuilt, &run_dir, &scratch, clock, &mut on_event);
                     on_event(&Event::GameFinished {
                         name: entry.name.clone(),
                         outcome: entry.outcome(),
@@ -461,10 +613,24 @@ impl Engine<'_> {
                 }
             }
             Ok(())
-        })?;
+        });
         if !self.build_only {
             self.emulator.finish();
         }
+        if self.build_only || self.emulator.nsp_mount_released() {
+            if let Err(error) = Scratch::remove(&scratch.dir) {
+                on_event(&Event::BuildStage {
+                    stage: format!("temporary NSP cleanup: {error}"),
+                    at: None,
+                });
+            }
+            if !self.build_only
+                && let Ok(inputs) = &inputs
+            {
+                Scratch::collect(&self.nsp_root, inputs);
+            }
+        }
+        result?;
         write_report(&run_dir, &report, self.lang)?;
         write_summary(&run_dir, &report, &names, true)?;
         let [passed, warned, console, failed] = report.counts();
@@ -483,6 +649,7 @@ impl Engine<'_> {
         game: &Planned,
         prebuilt: Prebuilt,
         run_dir: &Path,
+        scratch: &Scratch,
         clock: &dyn Clock,
         on_event: &mut dyn FnMut(&Event),
     ) -> GameReport {
@@ -545,11 +712,11 @@ impl Engine<'_> {
         };
         if self.build_only {
             let kept = game_dir.join(format!("{}.nsp", record.title_id));
-            if fs::hard_link(&nsp, &kept).is_err() {
-                on_event(&Event::BuildStage {
-                    stage: format!("the NSP stays only in {}", nsp.display()),
-                    at: None,
-                });
+            if let Err(error) = keep_console_nsp(&nsp, &kept) {
+                entry.build = BuildOutcome::Failed {
+                    error: format!("{}: {error}", kept.display()),
+                };
+                entry.failure = entry.failure_reason();
             }
             return entry;
         }
@@ -569,6 +736,7 @@ impl Engine<'_> {
         self.emulator
             .console_changes(game.console_changes.as_deref());
         let runner = Runner::new(&mut *self.emulator, clock, record.title_id, nsp, &game_dir)
+            .with_launch_marker(scratch.dir.join(LAUNCH_MARKER))
             .with_baseline(baseline, game.threshold)
             .with_input(record.settings.input.clone())
             .with_stop(self.stop.clone())
@@ -600,10 +768,22 @@ impl<'a> Engine<'a> {
 }
 
 impl Builder<'_> {
-    fn build(&self, game: &Planned, nsp_dir: &Path) -> Prebuilt {
+    fn build(&self, game: &Planned, scratch: &Scratch) -> Prebuilt {
         let mut events = Vec::new();
         let mut log = String::new();
-        let built = self.pack(game, nsp_dir, &mut events, &mut log);
+        let built = match start_build_marker(&scratch.dir) {
+            Ok(marker) => {
+                let built = self.pack(
+                    game,
+                    &scratch.dir.join(SCRATCH_PAYLOAD),
+                    &mut events,
+                    &mut log,
+                );
+                let _ = fs::remove_file(marker);
+                built
+            }
+            Err(error) => Err(format!("{}: {error}", scratch.dir.display())),
+        };
         Prebuilt { built, events, log }
     }
 
@@ -921,6 +1101,56 @@ mod tests {
     #[test]
     fn folder_names_keep_only_safe_characters() {
         assert_eq!(safe_name("Need for Speed: U2"), "Need_for_Speed__U2");
+    }
+
+    #[test]
+    fn recovery_only_collects_managed_folders_without_active_consumers() {
+        let root = std::env::temp_dir().join(format!("lab-nsp-recovery-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let active = Scratch::start(&root, "2026-11-25_11-00-00").unwrap();
+        let orphan = Scratch::start(&root, "2026-11-25_11-00-00").unwrap();
+        let building = Scratch::start(&root, "2026-11-25_11-00-00").unwrap();
+        let orphan_path = orphan.dir.clone();
+        let building_path = building.dir.clone();
+        let build_marker = start_build_marker(&building_path).unwrap();
+        let original = root.join("original.nsp");
+        fs::write(&original, "user input").unwrap();
+        let staged = orphan_path.join(SCRATCH_PAYLOAD).join("staged.nsp");
+        fs::write(&staged, "temporary data").unwrap();
+        drop(orphan);
+        drop(building);
+
+        Scratch::collect(&root, &[staged.canonicalize().unwrap()]);
+        assert!(staged.exists());
+        Scratch::collect(&root, &[]);
+        assert!(active.dir.is_dir());
+        assert!(building_path.is_dir());
+        assert!(!orphan_path.exists());
+        assert_eq!(fs::read_to_string(original).unwrap(), "user input");
+
+        fs::remove_file(build_marker).unwrap();
+        drop(active);
+        Scratch::collect(&root, &[]);
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn console_output_preserves_existing_files() {
+        let root = std::env::temp_dir().join(format!("lab-console-nsp-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let input = root.join("temporary.nsp");
+        let output = root.join("console.nsp");
+        fs::write(&input, "new").unwrap();
+        fs::write(&output, "old").unwrap();
+        assert!(keep_console_nsp(&input, &output).is_err());
+        assert_eq!(fs::read_to_string(&input).unwrap(), "new");
+        assert_eq!(fs::read_to_string(&output).unwrap(), "old");
+        fs::remove_file(&output).unwrap();
+        keep_console_nsp(&input, &output).unwrap();
+        fs::remove_file(input).unwrap();
+        assert_eq!(fs::read_to_string(output).unwrap(), "new");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
