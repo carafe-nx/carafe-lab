@@ -1,0 +1,17 @@
+Carafe Lab: process page traversal uses the page type to determine whether a page is mapped.
+The address field contains physical minus virtual address, so zero is valid for an identity
+mapping. Treating zero as unmapped made MapProcessCodeMemory reject valid heap backing with
+InvalidCurrentMemory, preventing Carbon's ASI modules from loading.
+GPL-3.0-or-later, as the file it changes.
+
+--- a/src/common/page_table.cpp
++++ b/src/common/page_table.cpp
+@@ -26,7 +26,7 @@
+     // Validate that we can read the actual entry.
+     if (auto const page = context->next_page; page < entries.size()) {
+         // Validate that the entry is mapped.
+-        if (auto const paddr = entries[page].addr; paddr != 0) {
++        if (auto const paddr = entries[page].addr; entries[page].ptr.Type() != PageType::Unmapped) {
+             // Populate the results.
+             out_entry->phys_addr = paddr + context->next_offset;
+             context->next_page += 1;

@@ -40,7 +40,15 @@ up is [docs/lab.md](lab.md).
   Windows must not fetch Carafe's own submodules: it rewrites line endings.
 - Build containers default to 2 CPUs, 2 jobs and 4 GB (`LAB_BUILD_*`); runs to 4 CPUs and 6 GB.
 
-The host-file-tests target checks the live-container single-file lookup using Python's standard library. The lookup reads
+The host page-table regression test links Eden's patched `src/common/page_table.cpp` with a small allocation
+backend. It checks identity mappings for ordinary, debug and GPU-cached pages, traversal across page boundaries,
+unmapped pages and addresses outside the table. After building Eden, run it without downloading dependencies:
+
+```sh
+docker compose --profile build run --rm --no-deps --pull never eden-build make -C /lab/tools/probes host-tests CXX=g++-14 OUT=/tmp/page-table-test
+```
+
+The target also checks the live-container single-file lookup using Python's standard library. The lookup reads
 only the current title's user save, device save and SD logs, in that order. File checks avoid pulling the entire
 NAND snapshot on each poll. Images without Python retain the snapshot lookup as a compatibility fallback.
 

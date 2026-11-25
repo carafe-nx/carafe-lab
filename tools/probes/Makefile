@@ -17,29 +17,40 @@ LIBS_threads := -ld3d9
 LIBS_registry := -ladvapi32
 LIBS_files :=
 LIBS_sockets := -lws2_32
+EDEN_SRC ?= /src/eden
+FMT_INCLUDE ?= $(firstword $(wildcard $(EDEN_SRC)/.cache/cpm/fmt/*/include))
 
 EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe)) \
 	$(OUT)/i686/probe-missing.exe $(OUT)/i686/probe-ddraw.exe
 
-.PHONY: all clean host-file-tests
+.PHONY: all clean host-tests host-file-tests host-texture-tests host-regression-tests
 
 all: $(EXES)
 
 host-file-tests:
 	python3 -B host/test_file_lookup.py
 
-$(OUT)/i686/probe-missing.exe: missing.c missing.def
-	mkdir -p $(dir $@)
-	i686-w64-mingw32-dlltool -d missing.def -l $(OUT)/i686/libcarafe-missing.a
-	i686-w64-mingw32-clang -O2 -Wall -Wextra -std=gnu11 -mwindows -o $@ missing.c $(OUT)/i686/libcarafe-missing.a
+host-tests: host-file-tests host-texture-tests host-regression-tests
+	mkdir -p $(OUT)/host
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(EDEN_SRC)/src $(if $(FMT_INCLUDE),-I$(FMT_INCLUDE)) -o $(OUT)/host/page-table-test host/page-table.cpp $(EDEN_SRC)/src/common/page_table.cpp
+	$(OUT)/host/page-table-test
 
-$(OUT)/i686/probe-%.exe: %.c probe.h
-	mkdir -p $(dir $@)
-	i686-w64-mingw32-clang -O2 -Wall -Wextra -std=gnu11 -mwindows -o $@ $< $(LIBS_$*) -lgdi32 -luser32
+host-texture-tests:
+	mkdir -p $(OUT)/host
+	python3 -B host/extract_texture_cache.py $(EDEN_SRC) $(OUT)/host/texture-cache-methods.inc
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(OUT)/host -o $(OUT)/host/texture-cache-test host/texture-cache.cpp
+	$(OUT)/host/texture-cache-test
 
-$(OUT)/x86_64/probe-%.exe: %.c probe.h
-	mkdir -p $(dir $@)
-	x86_64-w64-mingw32-clang -O2 -Wall -Wextra -std=gnu11 -mwindows -o $@ $< $(LIBS_$*) -lgdi32 -luser32
+host-regression-tests:
+	mkdir -p $(OUT)/host
+	python3 -B host/extract_regressions.py $(EDEN_SRC) $(OUT)/host
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(OUT)/host -I$(EDEN_SRC)/src -o $(OUT)/host/storage-binding-test host/storage-binding.cpp
+	$(OUT)/host/storage-binding-test
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(OUT)/host -I$(EDEN_SRC)/src -o $(OUT)/host/nvmap-lifetime-test host/nvmap-lifetime.cpp
+	$(OUT)/host/nvmap-lifetime-test
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(OUT)/host -I$(EDEN_SRC)/src -o $(OUT)/host/indirect-storage-test host/indirect-storage.cpp
+	$(OUT)/host/indirect-storage-test
+
 
 clean:
 	rm -rf $(OUT)

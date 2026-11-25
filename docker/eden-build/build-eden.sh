@@ -67,6 +67,7 @@ if [ ! -f "$build/build.ninja" ]; then
         -DENABLE_UPDATE_CHECKER=OFF -DYUZU_ROOM=OFF >"$out/configure.log" 2>&1
 fi
 jobs="${CARAFE_JOBS:-$(nproc)}"
+make -C /lab/tools/probes host-tests EDEN_SRC="$src" OUT="$build/host-tests" >"$out/host-tests.log" 2>&1
 ninja -C "$build" -j"$jobs" "$target" >"$out/build.log" 2>&1
 if [ "$frontend" = qt ]; then
     cp "$build/bin/eden" "$out/eden"
