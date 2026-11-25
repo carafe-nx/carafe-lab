@@ -1,5 +1,6 @@
 /build/
 /app/target/
+/app/crates/*/bindings/
 node_modules/
 /app/ui/dist/
 /app/crates/lab-desktop/gen/

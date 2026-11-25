@@ -33,6 +33,9 @@ up is [docs/lab.md](lab.md).
 
 - From `app/`: `npm run dev` opens the window (it builds `carafe-lab` first); `npm run check` runs formatting, clippy,
   Rust tests and the TypeScript check; `npm run cdp -- screenshot <file>` captures the window in development.
+- Run Cargo tests from `app/` so Cargo loads `app/.cargo/config.toml` and exports TypeScript types to
+  `ui/src/shared/api/bindings/`. Running Cargo from the parent directory with `--manifest-path` can instead leave
+  duplicate generated files under individual crates. Only the UI bindings are versioned.
 - Eden and its images build only in containers: `docker compose --profile build …` (see `docs/lab.md`). Git for
   Windows must not fetch Carafe's own submodules: it rewrites line endings.
 - Build containers default to 2 CPUs, 2 jobs and 4 GB (`LAB_BUILD_*`); runs to 4 CPUs and 6 GB.
