@@ -21,9 +21,12 @@ LIBS_sockets := -lws2_32
 EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe)) \
 	$(OUT)/i686/probe-missing.exe $(OUT)/i686/probe-ddraw.exe
 
-.PHONY: all clean
+.PHONY: all clean host-file-tests
 
 all: $(EXES)
+
+host-file-tests:
+	python3 -B host/test_file_lookup.py
 
 $(OUT)/i686/probe-missing.exe: missing.c missing.def
 	mkdir -p $(dir $@)

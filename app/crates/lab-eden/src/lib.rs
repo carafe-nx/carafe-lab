@@ -1704,6 +1704,28 @@ impl Emulator for Eden {
     }
 
     fn find_file(&self, title: TitleId, name: &str) -> Option<String> {
+        if self.container_running() {
+            let upper = title.to_string().to_ascii_uppercase();
+            let user_save =
+                format!("/work/user/nand/user/save/0000000000000000/{ZERO_USER}/{upper}");
+            let device_save = format!("/work/user/nand/user/save/device/{upper}/0");
+            let logs = format!("/work/user/sdmc/switch/carafe/{title}");
+            let script = include_str!("../../../../docker/eden/find_file.py");
+            if let Ok(output) = docker(&[
+                "exec",
+                CONTAINER,
+                "python3",
+                "-c",
+                script,
+                name,
+                &user_save,
+                &device_save,
+                &logs,
+            ]) && let Ok(found) = serde_json::from_slice::<Option<String>>(&output.stdout)
+            {
+                return found;
+            }
+        }
         self.pull_nand();
         let [user_save, device_save] = self.save_dirs(title);
         [user_save, device_save, self.logs_dir(title)]

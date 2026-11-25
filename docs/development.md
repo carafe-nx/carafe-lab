@@ -40,6 +40,11 @@ up is [docs/lab.md](lab.md).
   Windows must not fetch Carafe's own submodules: it rewrites line endings.
 - Build containers default to 2 CPUs, 2 jobs and 4 GB (`LAB_BUILD_*`); runs to 4 CPUs and 6 GB.
 
+The host-file-tests target checks the live-container single-file lookup using Python's standard library. The lookup reads
+only the current title's user save, device save and SD logs, in that order. File checks avoid pulling the entire
+NAND snapshot on each poll. Images without Python retain the snapshot lookup as a compatibility fallback.
+
+
 ## Rules
 
 - Firmware, keys, games and NSPs never go into the repository; the keys file is mounted read-only and its path is cut
