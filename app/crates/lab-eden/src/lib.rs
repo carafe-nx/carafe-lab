@@ -36,6 +36,9 @@ use sha2::{Digest, Sha256};
 
 use lab_run::run::{Closed, Emulator, EmulatorError, GameLogs, SaveFile};
 
+mod log_archive;
+use log_archive::{Capture, managed_log};
+
 /// Name of the lab's Eden image: Eden v0.2.1 with `patches/eden`, built by `docker compose build eden-patched`.
 pub const IMAGE: &str = "carafe-lab-eden";
 const CONTAINER: &str = "carafe-lab-eden";
@@ -114,12 +117,14 @@ pub struct Eden {
     default_cpu: EdenCpu,
     image: String,
     settings: BTreeMap<String, String>,
+    log_archive: Option<(PathBuf, u64)>,
     title: Option<TitleId>,
     console_changes: Option<String>,
     ended: Option<String>,
     one_eden: bool,
     fresh: bool,
     session: Option<Session>,
+    owned_container: Option<String>,
     perf_from: Option<u64>,
     firmware: Option<PathBuf>,
     video: Video,
@@ -182,6 +187,13 @@ fn stopped_beyond_restarts(replies: &[Reply], loader_log: &str) -> bool {
     by_itself > restarts
 }
 
+fn nsp_container_missing(list: &str, owned: Option<&str>) -> bool {
+    list.lines().all(|line| {
+        line.split_once(' ')
+            .is_some_and(|(id, name)| name != CONTAINER && owned != Some(id))
+    })
+}
+
 fn paused_in(replies: &[Reply]) -> bool {
     replies
         .iter()
@@ -221,6 +233,8 @@ impl Eden {
             one_eden: false,
             fresh: false,
             session: None,
+            log_archive: None,
+            owned_container: None,
             perf_from: None,
             firmware: None,
             video: Video::Full,
@@ -299,6 +313,13 @@ impl Eden {
     #[must_use]
     pub fn with_settings(mut self, settings: BTreeMap<String, String>) -> Self {
         self.settings = settings;
+        self
+    }
+
+    /// Bounds the total retained raw log captures under the run history.
+    #[must_use]
+    pub fn with_log_archive(mut self, runs: PathBuf, limit_mb: u32) -> Self {
+        self.log_archive = Some((runs, u64::from(limit_mb) * 1024 * 1024));
         self
     }
 
@@ -752,7 +773,7 @@ impl Eden {
         self.ended = None;
         let mut args = self.container_args(dir);
         args.push(format!("/nsp/{name}"));
-        docker_owned(&args)?;
+        self.start_owned_container(&args)?;
         self.perf_from = Some(unix_millis());
         self.wait_for_window()?;
         self.attach_debugger()
@@ -931,7 +952,7 @@ impl Eden {
             image,
             "session".to_owned(),
         ]);
-        docker_owned(&args)?;
+        self.start_owned_container(&args)?;
         self.wait_for_window()?;
         let replies = self.wait_for_reply(0, READY_TIMEOUT, |text| text == "ready")?;
         self.session = Some(Session {
@@ -1129,17 +1150,42 @@ impl Eden {
         })
     }
 
+    fn start_owned_container(&mut self, args: &[String]) -> Result<(), EmulatorError> {
+        self.owned_container = None;
+        let output = docker_owned(args)?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let id = text.trim();
+        if id.len() != 64 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(EmulatorError::Control(
+                "Docker did not return the container ID".to_owned(),
+            ));
+        }
+        self.owned_container = Some(id.to_owned());
+        Ok(())
+    }
+
     fn end_session(&mut self) {
-        if self.session.take().is_some() && self.container_running() {
+        let Some(id) = self.owned_container.clone() else {
+            return;
+        };
+        let running = || {
+            docker(&["inspect", "-f", "{{.State.Running}}", &id])
+                .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() == "true")
+        };
+        if self.session.take().is_some() && running() {
             let _ = self.send("quit");
             let deadline = Instant::now() + Duration::from_secs(15);
-            while Instant::now() < deadline && self.container_running() {
+            while Instant::now() < deadline && running() {
                 thread::sleep(Duration::from_millis(300));
             }
-            self.pull_nand();
+            if docker(&["inspect", "-f", "{{.Id}}", CONTAINER])
+                .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).trim() == id)
+            {
+                self.pull_nand();
+            }
         }
-        let _ = docker(&["stop", "-t", "5", CONTAINER]);
-        self.remove_container();
+        let _ = docker(&["stop", "-t", "5", &id]);
+        let _ = docker(&["rm", "-f", &id]);
     }
 
     fn container_args(&self, dir: &Path) -> Vec<String> {
@@ -1148,6 +1194,12 @@ impl Eden {
             "-d".to_owned(),
             "--name".to_owned(),
             CONTAINER.to_owned(),
+            "--log-driver".to_owned(),
+            "local".to_owned(),
+            "--log-opt".to_owned(),
+            "max-size=10m".to_owned(),
+            "--log-opt".to_owned(),
+            "max-file=2".to_owned(),
             "-p".to_owned(),
             "127.0.0.1:6080:6080".to_owned(),
             "--ulimit".to_owned(),
@@ -1199,7 +1251,7 @@ impl Eden {
         let deadline = Instant::now() + Duration::from_secs(30);
         while Instant::now() < deadline {
             if !self.container_running() {
-                let logs = docker(&["logs", CONTAINER]).ok();
+                let logs = docker(&["logs", "--tail", "200", CONTAINER]).ok();
                 let text = logs
                     .map(|output| {
                         format!(
@@ -1430,17 +1482,27 @@ impl Emulator for Eden {
         dest: &Path,
         keep_caches: bool,
     ) -> Result<(), EmulatorError> {
+        let mut capture = self
+            .log_archive
+            .as_ref()
+            .map(|(runs, limit)| Capture::open(runs, dest, *limit))
+            .transpose()
+            .map_err(io)?;
         let emulator_log = self.user_dir.join("log").join("eden_log.txt");
         if emulator_log.is_file() {
             fs::create_dir_all(dest).map_err(io)?;
-            fs::write(dest.join("eden_log.txt"), self.emulator_log()).map_err(io)?;
+            if let Some(capture) = capture.as_mut() {
+                let offset = self.session.as_ref().map_or(0, |session| session.log_from);
+                capture
+                    .copy(&emulator_log, &dest.join("eden_log.txt"), offset as u64)
+                    .map_err(io)?;
+            } else {
+                fs::write(dest.join("eden_log.txt"), self.emulator_log()).map_err(io)?;
+            }
         }
         if let Some(recorded) = self.frame_times_file(title) {
             fs::create_dir_all(dest).map_err(io)?;
-            if fs::rename(&recorded, dest.join(frames::FILE)).is_err() {
-                fs::copy(&recorded, dest.join(frames::FILE)).map_err(io)?;
-                let _ = fs::remove_file(&recorded);
-            }
+            move_log_file(&recorded, &dest.join(frames::FILE), capture.as_mut()).map_err(io)?;
         }
         let readings = self.launch_resources();
         if !readings.is_empty() {
@@ -1449,28 +1511,36 @@ impl Emulator for Eden {
                 .iter()
                 .map(|sample| format!("{} {} {}\n", sample.at, sample.memory, sample.cpu_usec))
                 .collect();
-            fs::write(dest.join(RESOURCES_FILE), lines).map_err(io)?;
+            write_log_file(
+                &dest.join(RESOURCES_FILE),
+                lines.as_bytes(),
+                capture.as_mut(),
+            )
+            .map_err(io)?;
         }
         let container_end = self.user_dir.join("log").join(CONTAINER_END_FILE);
         if container_end.is_file() {
             fs::create_dir_all(dest).map_err(io)?;
-            fs::copy(&container_end, dest.join(CONTAINER_END_FILE)).map_err(io)?;
-            let _ = fs::remove_file(&container_end);
+            move_log_file(
+                &container_end,
+                &dest.join(CONTAINER_END_FILE),
+                capture.as_mut(),
+            )
+            .map_err(io)?;
         }
         let session = self.user_dir.join("log").join(SESSION_FILE);
         if session.is_file() {
             fs::create_dir_all(dest).map_err(io)?;
-            fs::copy(&session, dest.join(SESSION_FILE)).map_err(io)?;
-            let _ = fs::remove_file(&session);
+            move_log_file(&session, &dest.join(SESSION_FILE), capture.as_mut()).map_err(io)?;
         }
         let source = self.logs_dir(title);
         if !source.exists() {
             return Ok(());
         }
         if !keep_caches {
-            return move_tree(&source, dest).map_err(io);
+            return move_tree(&source, dest, &mut capture).map_err(io);
         }
-        move_logs_keep_caches(&source, dest).map_err(io)
+        move_logs_keep_caches(&source, dest, &mut capture).map_err(io)
     }
 
     fn clear_save(&mut self, title: TitleId) -> Result<(), EmulatorError> {
@@ -1559,9 +1629,26 @@ impl Emulator for Eden {
     }
 
     fn finish(&mut self) {
-        if self.one_eden {
+        if self.owned_container.is_some() {
             self.end_session();
         }
+    }
+
+    fn nsp_mount_released(&self) -> bool {
+        docker(&[
+            "container",
+            "ls",
+            "--all",
+            "--no-trunc",
+            "--format",
+            "{{.ID}} {{.Names}}",
+        ])
+        .is_ok_and(|output| {
+            nsp_container_missing(
+                &String::from_utf8_lossy(&output.stdout),
+                self.owned_container.as_deref(),
+            )
+        })
     }
 
     fn find_file(&self, title: TitleId, name: &str) -> Option<String> {
@@ -1732,26 +1819,47 @@ pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> St
     out
 }
 
-fn move_tree(source: &Path, dest: &Path) -> std::io::Result<()> {
+fn move_log_file(source: &Path, dest: &Path, capture: Option<&mut Capture>) -> std::io::Result<()> {
+    if let Some(capture) = capture.filter(|_| managed_log(dest)) {
+        capture.copy(source, dest, 0)?;
+        fs::remove_file(source)?;
+    } else if fs::rename(source, dest).is_err() {
+        fs::copy(source, dest)?;
+        fs::remove_file(source)?;
+    }
+    Ok(())
+}
+
+fn write_log_file(dest: &Path, data: &[u8], capture: Option<&mut Capture>) -> std::io::Result<()> {
+    match capture {
+        Some(capture) => capture.write(dest, data),
+        None => fs::write(dest, data),
+    }
+}
+
+fn move_tree(source: &Path, dest: &Path, capture: &mut Option<Capture>) -> std::io::Result<()> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let path = entry.path();
         let target = dest.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            move_tree(&path, &target)?;
+            move_tree(&path, &target, capture)?;
             let _ = fs::remove_dir(&path);
         } else if path.extension().is_some_and(|ext| ext == "shm") {
             let _ = fs::remove_file(&path);
-        } else if fs::rename(&path, &target).is_err() {
-            fs::copy(&path, &target)?;
-            fs::remove_file(&path)?;
+        } else {
+            move_log_file(&path, &target, capture.as_mut())?;
         }
     }
     Ok(())
 }
 
-fn move_logs_keep_caches(source: &Path, dest: &Path) -> std::io::Result<()> {
+fn move_logs_keep_caches(
+    source: &Path,
+    dest: &Path,
+    capture: &mut Option<Capture>,
+) -> std::io::Result<()> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
@@ -1765,15 +1873,14 @@ fn move_logs_keep_caches(source: &Path, dest: &Path) -> std::io::Result<()> {
                 .iter()
                 .map(|(name, size)| format!("{size} {name}\n"))
                 .collect();
-            fs::write(dest.join(CACHES_FILE), lines)?;
+            write_log_file(&dest.join(CACHES_FILE), lines.as_bytes(), capture.as_mut())?;
         } else if entry.file_type()?.is_dir() {
-            move_tree(&path, &target)?;
+            move_tree(&path, &target, capture)?;
             let _ = fs::remove_dir(&path);
         } else if path.extension().is_some_and(|ext| ext == "shm") {
             let _ = fs::remove_file(&path);
-        } else if fs::rename(&path, &target).is_err() {
-            fs::copy(&path, &target)?;
-            fs::remove_file(&path)?;
+        } else {
+            move_log_file(&path, &target, capture.as_mut())?;
         }
     }
     Ok(())
@@ -1883,6 +1990,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nsp_recovery_waits_for_named_or_owned_container() {
+        assert!(nsp_container_missing("abc unrelated\n", None));
+        assert!(!nsp_container_missing("abc carafe-lab-eden\n", None));
+        assert!(!nsp_container_missing("def renamed\n", Some("def")));
+        assert!(!nsp_container_missing("unknown-format", None));
+        assert!(nsp_container_missing("", Some("def")));
+    }
+
+    #[test]
+    fn log_captures_share_the_budget_without_removing_other_evidence() {
+        let root = std::env::temp_dir().join(format!("lab-log-archive-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let user = root.join("user");
+        let runs = root.join("runs");
+        let live = user.join("log");
+        fs::create_dir_all(&live).unwrap();
+        let title = TitleId::parse("0563ab630a362000").unwrap();
+        let mut eden =
+            Eden::new(&user, "keys", Gpu::Wsl, EdenCpu::Nce).with_log_archive(runs.clone(), 1);
+        fs::write(live.join("eden_log.txt"), vec![b'z'; 2 * 1024 * 1024]).unwrap();
+        let before = runs.join("first").join("Game").join("before-launch-1");
+        eden.take_logs(title, &before, false).unwrap();
+        fs::write(before.join("report.txt"), "user evidence").unwrap();
+        for index in 1..=4 {
+            let launch = runs
+                .join(format!("later-{index}"))
+                .join("Game")
+                .join("launch-1");
+            eden.take_logs(title, &launch, true).unwrap();
+            assert_eq!(
+                fs::metadata(launch.join("eden_log.txt")).unwrap().len(),
+                256 * 1024
+            );
+        }
+        assert!(!before.join("eden_log.txt").exists());
+        assert_eq!(
+            fs::read_to_string(before.join("report.txt")).unwrap(),
+            "user evidence"
+        );
+        assert_eq!(
+            fs::metadata(live.join("eden_log.txt")).unwrap().len(),
+            2 * 1024 * 1024
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn every_button_has_its_own_key() {
         let mut keys: Vec<&str> = SwitchButton::ALL
             .iter()
@@ -1891,6 +2045,20 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), SwitchButton::ALL.len());
+    }
+
+    #[test]
+    fn the_container_keeps_its_logs_bounded() {
+        let eden = Eden::new("work", "keys", Gpu::Software, EdenCpu::Dynarmic);
+        let args = eden.container_args(Path::new("nsp"));
+        let values_after = |flag: &str| -> Vec<&str> {
+            args.windows(2)
+                .filter(|pair| pair[0] == flag)
+                .map(|pair| pair[1].as_str())
+                .collect()
+        };
+        assert_eq!(values_after("--log-driver"), ["local"]);
+        assert_eq!(values_after("--log-opt"), ["max-size=10m", "max-file=2"]);
     }
 
     #[test]
@@ -1997,7 +2165,7 @@ mod tests {
         fs::write(source.join("carafe-overlay.log"), "a").unwrap();
         fs::write(source.join("logs").join("autorun_runtime.log"), "b").unwrap();
         fs::write(source.join("wine-nx-session-1.shm"), "c").unwrap();
-        move_tree(&source, &root.join("dest")).unwrap();
+        move_tree(&source, &root.join("dest"), &mut None).unwrap();
         assert_eq!(
             fs::read_to_string(root.join("dest").join("carafe-overlay.log")).unwrap(),
             "a"
@@ -2028,7 +2196,7 @@ mod tests {
         fs::write(source.join("logs").join("autorun_runtime.log"), "b").unwrap();
         fs::write(cache.join("RWCacheDB.foz"), "12345").unwrap();
         let dest = root.join("dest");
-        move_logs_keep_caches(&source, &dest).unwrap();
+        move_logs_keep_caches(&source, &dest, &mut None).unwrap();
         assert!(dest.join("logs").join("autorun_runtime.log").is_file());
         assert!(!source.join("logs").join("autorun_runtime.log").exists());
         assert!(cache.join("RWCacheDB.foz").is_file());

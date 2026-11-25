@@ -311,16 +311,24 @@ Each run gets `<work>/runs/<date>/`:
   `summary.json` keeps the peak memory, the processor use and the counts for the History screen, which lists a
   game's problems and highlights those its run before did not have.
 
-A run builds its NSPs into a folder of its own in `nspDir` (`<work>/nsp` by default), named by the run's day and
-time, such as `31011410`, and removes that folder when it ends: a game is packed again on every run, and a repeat
-inside one run uses the NSP built for it. While one game runs, the next game of the run is packed beside it, so it
-boots as soon as the first one closes; its build stages and `build.log` appear when its turn comes.
+A run builds its NSPs into its own temporary folder in `nspDir` (`<work>/nsp` by default). Lab removes the
+folder after packing has finished and Eden has released its mount. At the start of an emulated run, Lab can
+also recover its temporary folders left by an interrupted run when it can confirm that Eden and the builder
+have released them. A repeat inside one run uses the NSP built for it. While one game runs, the next game of
+the run is packed beside it, so it boots as soon as the first one closes.
 
-Every run ends by tidying, and `carafe-lab tidy` shows what tidying would do and changes nothing; `tidy --apply` does
-it. The 10 newest runs stay whole. Older failed or unfinished runs get their logs compressed into `.gz` next to them,
+New raw log captures under `runs` share the `logArchiveMb` budget in `lab.json` (512 MiB by default). The collector
+keeps tails of oversized files and drops the oldest captured logs for newer ones. This includes
+`before-launch-1` and ordinary launch captures. Reports and other evidence keep their existing retention.
+Live emulator and guest logs stay at their original paths until collected.
+Eden containers keep two 10 MiB segments of Docker output.
+
+Run completion releases the run's own temporary files. Use `carafe-lab tidy` to preview historical cleanup
+and `tidy --apply` to apply it. The 10 newest runs keep their reports.
+Older failed or unfinished runs get their logs compressed into `.gz` next to them,
 their pictures kept. Older runs where nothing failed lose their raw logs and timeline pictures and keep their
-summaries, reports, events, screenshots and `problems.json`, which History reads. Anything in `work/nsp` but the
-folders of runs still going goes, and so do the runtimes in `work/runtimes` and the `carafe-lab-eden-kept` images
+summaries, reports, events, screenshots and `problems.json`, which History reads. Tidying removes old console
+packages, runtimes in `work/runtimes` and the `carafe-lab-eden-kept` images
 none of the 10 newest runs ran with, Eden's crash dumps in `%TEMP%\wsl-crashes` (WSL writes 10–13 GB per crash) and
 stopped `carafe-lab` containers. The runtimes of releases and of bisect commits stay. The title bar warns when the
 work drive or the temporary drive has less than 15 GB free.

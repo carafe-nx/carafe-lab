@@ -197,6 +197,11 @@ pub trait Emulator {
     /// Ends whatever the emulator keeps running between games, once the run has no more games for it.
     fn finish(&mut self) {}
 
+    /// Whether the emulator has confirmed that it holds no staged NSP directory.
+    fn nsp_mount_released(&self) -> bool {
+        false
+    }
+
     /// Returns the emulator's performance readings since the current or last launch started; empty when it does
     /// not tell them.
     fn launch_perf(&self) -> Vec<PerfSample> {
@@ -352,6 +357,7 @@ pub struct Runner<'a> {
     clock: &'a dyn Clock,
     title: TitleId,
     nsp: PathBuf,
+    launch_marker: Option<PathBuf>,
     dir: PathBuf,
     started: Duration,
     running: bool,
@@ -392,6 +398,7 @@ impl<'a> Runner<'a> {
             clock,
             title,
             nsp: nsp.into(),
+            launch_marker: None,
             dir: dir.into(),
             started,
             running: false,
@@ -416,6 +423,11 @@ impl<'a> Runner<'a> {
             threshold: versions::DEFAULT_THRESHOLD,
             save: None,
         }
+    }
+
+    pub(crate) fn with_launch_marker(mut self, path: PathBuf) -> Self {
+        self.launch_marker = Some(path);
+        self
     }
 
     /// Returns the runner checking [`Step::ExpectPerformance`] against `baseline`, the game at the newest other
@@ -961,7 +973,16 @@ impl<'a> Runner<'a> {
             .and_then(|since| u64::try_from(since.as_millis()).ok());
         self.last_glimpse = self.launch_started;
         self.pressed.clear();
-        match self.emulator.launch(&self.nsp) {
+        if let Some(marker) = &self.launch_marker
+            && let Err(error) = std::fs::File::create_new(marker)
+        {
+            return self.result(step, Outcome::Fail, error.to_string(), None);
+        }
+        let launched = self.emulator.launch(&self.nsp);
+        if let Some(marker) = &self.launch_marker {
+            let _ = std::fs::remove_file(marker);
+        }
+        match launched {
             Ok(()) => {
                 self.running = true;
                 self.result(
