@@ -1315,11 +1315,21 @@ impl<'a> Runner<'a> {
         match self.emulator.screenshot(&self.dir.join(&file)) {
             Ok(()) => {
                 self.screenshots.push((name.to_owned(), file.clone()));
-                let blank = std::fs::read(self.dir.join(&file))
-                    .ok()
-                    .and_then(|png| Thumbnail::from_png(&png).ok())
-                    .is_some_and(|thumb| thumb.is_blank());
-                if blank {
+                let picture = std::fs::read(self.dir.join(&file))
+                    .map_err(|error| error.to_string())
+                    .and_then(|png| Thumbnail::from_png(&png).map_err(|error| error.to_string()));
+                let thumb = match picture {
+                    Ok(thumb) => thumb,
+                    Err(error) => {
+                        return self.result(
+                            step,
+                            Outcome::Fail,
+                            format!("cannot read screenshot {file}: {error}"),
+                            Some(file),
+                        );
+                    }
+                };
+                if thumb.is_blank() {
                     self.result(
                         step,
                         Outcome::Warn,
@@ -1969,6 +1979,7 @@ mod tests {
         close_result: Option<Closed>,
         emulator_log: String,
         shots: Vec<Vec<u8>>,
+        screenshot_error: Option<EmulatorError>,
         probe_log: Option<String>,
         perf: Vec<PerfSample>,
     }
@@ -1997,8 +2008,16 @@ mod tests {
             Ok(())
         }
         fn screenshot(&mut self, dest: &Path) -> Result<(), EmulatorError> {
+            if let Some(error) = self.screenshot_error.clone() {
+                return Err(error);
+            }
             let png = if self.shots.is_empty() {
-                Vec::new()
+                vec![
+                    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0,
+                    0, 1, 8, 2, 0, 0, 0, 123, 64, 232, 221, 0, 0, 0, 15, 73, 68, 65, 84, 120, 156,
+                    99, 96, 96, 96, 248, 255, 255, 63, 0, 6, 1, 2, 254, 2, 178, 57, 174, 0, 0, 0,
+                    0, 73, 69, 78, 68, 174, 66, 96, 130,
+                ]
             } else {
                 self.shots.remove(0)
             };
@@ -2201,6 +2220,45 @@ mod tests {
         assert_eq!(seeded.steps[0].outcome, Outcome::Pass);
         let empty = run_with(None);
         assert_eq!(empty.steps[0].outcome, Outcome::Warn);
+    }
+
+    #[test]
+    fn a_corrupt_screenshot_fails_the_scenario() {
+        let emulator = FakeEmulator {
+            shots: vec![b"incomplete PNG".to_vec()],
+            ..FakeEmulator::default()
+        };
+        let scenario = Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::Screenshot {
+                    name: "corrupt-frame".to_owned(),
+                },
+            ],
+        };
+        let (result, _) = run(emulator, &scenario);
+        assert_eq!(result.outcome(), Outcome::Fail);
+        assert!(result.steps[1].detail.contains("no PNG signature"));
+    }
+
+    #[test]
+    fn a_screenshot_keeps_the_emulator_crash_reason() {
+        let reason = "the emulator crashed: SIGSEGV (exit code 139)";
+        let emulator = FakeEmulator {
+            screenshot_error: Some(EmulatorError::Control(reason.to_owned())),
+            ..FakeEmulator::default()
+        };
+        let scenario = Scenario {
+            steps: vec![
+                Step::Launch,
+                Step::Screenshot {
+                    name: "crashed-frame".to_owned(),
+                },
+            ],
+        };
+        let (result, _) = run(emulator, &scenario);
+        assert_eq!(result.outcome(), Outcome::Fail);
+        assert!(result.steps[1].detail.contains(reason));
     }
 
     #[test]

@@ -306,7 +306,8 @@ impl RunSummary {
         let mut counts = [0; 4];
         for game in &self.games {
             let slot = match game.outcome {
-                Outcome::Pass | Outcome::Skip => 0,
+                Outcome::Pass => 0,
+                Outcome::Skip => continue,
                 Outcome::Warn => 1,
                 Outcome::Console => 2,
                 Outcome::Fail => 3,
@@ -661,9 +662,9 @@ mod tests {
     }
 
     #[test]
-    fn a_skipped_game_counts_as_passed() {
+    fn a_skipped_game_does_not_count_as_passed() {
         let counts = summary(&[Outcome::Skip, Outcome::Fail, Outcome::Warn]).counts();
-        assert_eq!(counts, [1, 1, 0, 1]);
+        assert_eq!(counts, [0, 1, 0, 1]);
     }
 
     #[test]

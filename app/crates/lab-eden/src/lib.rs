@@ -29,6 +29,7 @@ use lab_core::emulator::{EdenCpu, Gpu, Video};
 use lab_core::firmware;
 use lab_core::frames;
 use lab_core::perf::{self, PerfSample};
+use lab_core::picture::Thumbnail;
 pub use lab_core::redact::redact;
 use lab_core::resources::{self, ResourceSample};
 use lab_core::stacks;
@@ -1031,17 +1032,22 @@ impl Eden {
             )));
         }
         let deadline = Instant::now() + FRAME_WAIT;
-        let mut last_size = 0;
         while Instant::now() < deadline {
-            let size = fs::metadata(&outside).map_or(0, |metadata| metadata.len());
-            if size > 0 && size == last_size {
+            if fs::read(&outside).is_ok_and(|png| Thumbnail::from_png(&png).is_ok()) {
                 return Ok(outside);
             }
-            last_size = size;
+            if !self.container_running() {
+                self.session = None;
+                self.ended = self.container_end();
+                return Err(EmulatorError::Control(format!(
+                    "the emulator ended: {}",
+                    self.ended.as_deref().unwrap_or("no reason known")
+                )));
+            }
             thread::sleep(Duration::from_millis(200));
         }
         Err(EmulatorError::Control(format!(
-            "Eden wrote no picture in {} s",
+            "Eden wrote no complete PNG picture in {} s",
             FRAME_WAIT.as_secs()
         )))
     }
@@ -1444,18 +1450,12 @@ impl Emulator for Eden {
     }
 
     fn screenshot(&mut self, dest: &Path) -> Result<(), EmulatorError> {
-        let frame = if self.session.is_some() && !self.paused() {
-            self.frame_shot().ok()
+        let outside = if self.session.is_some() && !self.paused() {
+            self.frame_shot()?
         } else {
-            None
-        };
-        let outside = match frame {
-            Some(file) => file,
-            None => {
-                let inside = format!("/work/user/screenshots/{SCREEN_FILE}");
-                self.exec(&format!("import -window root -display :1 png24:{inside}"))?;
-                self.user_dir.join("screenshots").join(SCREEN_FILE)
-            }
+            let inside = format!("/work/user/screenshots/{SCREEN_FILE}");
+            self.exec(&format!("import -window root -display :1 png24:{inside}"))?;
+            self.user_dir.join("screenshots").join(SCREEN_FILE)
         };
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(io)?;

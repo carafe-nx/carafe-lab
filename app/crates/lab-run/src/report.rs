@@ -143,7 +143,8 @@ impl RunReport {
         let mut counts = [0; 4];
         for game in &self.games {
             let slot = match game.outcome() {
-                Outcome::Pass | Outcome::Skip => 0,
+                Outcome::Pass => 0,
+                Outcome::Skip => continue,
                 Outcome::Warn => 1,
                 Outcome::Console => 2,
                 Outcome::Fail => 3,
@@ -751,6 +752,25 @@ mod tests {
             games,
             build_only: false,
         }
+    }
+
+    #[test]
+    fn a_stopped_scenario_does_not_count_as_passed() {
+        let mut stopped = passed("stopped");
+        let scenario = stopped.scenario.as_mut().unwrap();
+        scenario.steps.push(StepResult {
+            step: Step::Wait { seconds: 60.0 },
+            outcome: Outcome::Skip,
+            detail: "the run was stopped".to_owned(),
+            at: 62.0,
+            screenshot: None,
+            presses: Vec::new(),
+        });
+        assert_eq!(stopped.outcome(), Outcome::Skip);
+        assert_eq!(
+            run(vec![stopped, passed("finished")]).counts(),
+            [1, 0, 0, 0]
+        );
     }
 
     #[test]

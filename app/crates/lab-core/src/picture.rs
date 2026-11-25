@@ -274,6 +274,7 @@ fn decode(png: &[u8]) -> Result<Image, PictureError> {
     let mut header = None;
     let mut data = Vec::new();
     let mut at = 0;
+    let mut ended = false;
     while at + 8 <= rest.len() {
         let length =
             u32::from_be_bytes([rest[at], rest[at + 1], rest[at + 2], rest[at + 3]]) as usize;
@@ -286,10 +287,16 @@ fn decode(png: &[u8]) -> Result<Image, PictureError> {
         match kind {
             b"IHDR" => header = Some(read_header(body)?),
             b"IDAT" => data.extend_from_slice(body),
-            b"IEND" => break,
+            b"IEND" => {
+                ended = true;
+                break;
+            }
             _ => {}
         }
         at = body_end + 4;
+    }
+    if !ended {
+        return Err(PictureError::Format("no IEND chunk".to_owned()));
     }
     let (width, height, channels) =
         header.ok_or_else(|| PictureError::Format("no IHDR chunk".to_owned()))?;
@@ -513,6 +520,16 @@ mod tests {
         }))
         .unwrap();
         assert!(!before.difference(&after).changed());
+    }
+
+    #[test]
+    fn rejects_a_picture_without_its_end_chunk() {
+        let mut file = png(8, 8, 0, |_, _| [1, 2, 3]);
+        file.truncate(file.len() - 12);
+        assert!(matches!(
+            Thumbnail::from_png(&file),
+            Err(PictureError::Format(_))
+        ));
     }
 
     #[test]
