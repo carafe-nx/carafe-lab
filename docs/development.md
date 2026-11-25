@@ -40,6 +40,8 @@ up is [docs/lab.md](lab.md).
   Windows must not fetch Carafe's own submodules: it rewrites line endings.
 - Build containers default to 2 CPUs, 2 jobs and 4 GB (`LAB_BUILD_*`); runs to 4 CPUs and 6 GB.
 
+## Rules
+
 The host page-table regression test links Eden's patched `src/common/page_table.cpp` with a small allocation
 backend. It checks identity mappings for ordinary, debug and GPU-cached pages, traversal across page boundaries,
 unmapped pages and addresses outside the table. After building Eden, run it without downloading dependencies:
@@ -48,12 +50,30 @@ unmapped pages and addresses outside the table. After building Eden, run it with
 docker compose --profile build run --rm --no-deps --pull never eden-build make -C /lab/tools/probes host-tests CXX=g++-14 OUT=/tmp/page-table-test
 ```
 
+The same target checks OpenGL memory budget parsing, pressure arithmetic and retired-object lifetimes against
+the patched Eden headers. The `memory` Windows probe in `tools/probes` separates address reservation from touched
+physical pages. Renderer pressure policy and the meaning of each reported memory layer are defined in
+[decision 13](decisions/0013-console-memory-and-host-renderer-pressure.md).
+
 The target also checks the live-container single-file lookup using Python's standard library. The lookup reads
 only the current title's user save, device save and SD logs, in that order. File checks avoid pulling the entire
 NAND snapshot on each poll. Images without Python retain the snapshot lookup as a compatibility fallback.
 
+The native OpenGL staging test compiles the patched `gl_staging_buffer_pool.cpp` and `gl_resource_manager.cpp`,
+with stdout logging and fatal assertions, then exercises their real GL buffers, mappings and fences on the WSL
+GPU. It checks borrowed mapping copies, final upload fences, deferred downloads, pressure reclamation, and data
+integrity across queued copies. Run it after Eden's source has been patched by the normal build:
 
-## Rules
+```sh
+docker compose --profile build run --rm --no-deps --pull never opengl-staging-tests
+```
+
+`LAB_EDEN_IMAGE` selects the image containing Mesa for this test. It needs `/dev/dxg`; it mounts no game or console
+files, runs without a network and uses the build limits. The test does not establish real-game stability.
+
+It also checks repeated buffer expansion without presentation ticks, byte-budget reclamation, preservation of
+copied data and rejection of a missing completion fence. Buffer retirement follows
+[decision 14](decisions/0014-buffer-retirement-during-loading.md).
 
 - Firmware, keys, games and NSPs never go into the repository; the keys file is mounted read-only and its path is cut
   out of every log and report.

@@ -187,6 +187,7 @@ fn start(args: Args) -> Result<ExitCode, String> {
         config.emulator_cpu,
     )
     .with_settings(config.eden_settings.clone())
+    .with_gpu_cache_mb(config.gpu_cache_mb)
     .with_log_archive(config.work.join("runs"), config.log_archive_mb)
     .with_one_eden(config.one_eden)
     .with_fresh_eden(args.clean)
@@ -1463,6 +1464,7 @@ impl Lab {
         let mut runs = probes::input_runs(self.timeout);
         runs.extend(probes::graphics_runs(&combinations, self.timeout));
         runs.extend(probes::screen_runs(self.timeout));
+        runs.extend(probes::memory_runs(self.timeout));
         if !self.args.json {
             println!(
                 "probes: {} runs, {} of them pairwise over {} combinations",

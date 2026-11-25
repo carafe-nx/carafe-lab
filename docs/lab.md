@@ -80,6 +80,17 @@ Eden is set up like the console: 4 cores, the 4 GB memory layout, handheld at 12
 files chosen in the same screen and kept in `lab.local.json`; Lab copies it into Eden's NAND once and again only when
 the folder changes ([decision 5](decisions/0005-firmware-chosen-in-lab.md)). Without it, Eden runs without firmware.
 
+`gpuCacheMb` sets the host OpenGL renderer's cache pressure target: 4096 MiB by default, from 512 to 8192 MiB.
+For example, `"gpuCacheMb": 2048` uses a 2 GiB target. This does not change the emulated console's RAM or impose
+a hard driver allocation cap. Extended guest memory layouts are rejected. Memory details in history and HTML
+reports separate guest reservations, container usage and host graphics memory; these overlapping measurements
+must not be added. Missing readings show as `—`. See [decision 13](decisions/0013-console-memory-and-host-renderer-pressure.md).
+
+After building the probes, `carafe-lab probes --only probe-memory-x64` runs the bounded memory probe and keeps its
+NSP for the same check on a console. `probe-memory-x86` checks the 32-bit address space separately. These runs
+touch at most 256 MiB and distinguish a virtual reservation from physical allocation; `probe-memory.log` records
+the Windows API observations. Compare them with the guest physical reservations in the launch's memory details.
+
 Eden places a 32-bit game's heap region at random but in practice always high, so the game keeps a large free range
 below it; the console puts it anywhere from 1 GB up, and a game that runs short of address space there does not in
 Lab. `--heap-start <address>`, such as `0x44000000`, puts it where a console log shows it (the `[VA] view … 2097152 KB`

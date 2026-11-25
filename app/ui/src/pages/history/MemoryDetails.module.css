@@ -1,0 +1,8 @@
+.values {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 8px;
+}
+
+.values dd {
+  white-space: nowrap;
+}

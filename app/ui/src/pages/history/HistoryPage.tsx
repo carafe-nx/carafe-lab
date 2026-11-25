@@ -15,6 +15,7 @@ import styles from "@/shared/ui/lab.module.css";
 import { ConsoleBlock, waitsForConsole } from "./ConsoleBlock";
 import history from "./HistoryPage.module.css";
 import { ProblemsBlock } from "./ProblemsBlock";
+import { MemoryDetails } from "./MemoryDetails";
 import { ShotsBlock } from "./ShotsBlock";
 import { VerdictBlock } from "./VerdictBlock";
 
@@ -269,6 +270,7 @@ function RunCard({ run }: { run: RunSummary }) {
               </span>
               <Chip tone={outcomeTone(game.outcome)}>{t(`outcome.${game.outcome}`)}</Chip>
             </div>
+            {game.resources ? <MemoryDetails resources={game.resources} /> : null}
             {game.problems && game.dir ? <ProblemsBlock dir={run.dir} game={game.dir} /> : null}
             <ConsoleBlock run={run} game={game} onOpen={open} onSaved={runs.refresh} />
             {game.dir ? <ShotsBlock dir={run.dir} game={game.dir} /> : null}

@@ -1,0 +1,32 @@
+Carafe Lab: enforce console physical memory and pool arrangement independently of per-title settings.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/core/hle/kernel/board/nintendo/nx/k_system_control.cpp
++++ b/src/core/hle/kernel/board/nintendo/nx/k_system_control.cpp
+@@ -5,6 +5,8 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include <random>
++#include <cstdlib>
++#include <string_view>
+ 
+ #include "common/literals.h"
+ #include "common/random.h"
+@@ -45,6 +47,8 @@
+ using namespace Common::Literals;
+ 
+ u32 GetMemorySizeForInit() {
++    const auto* profile = std::getenv("CARAFE_LAB_CONSOLE_MEMORY");
++    if (profile && std::string_view{profile} == "1") return Smc::MemorySize_4GB;
+     switch (Settings::values.memory_layout_mode.GetValue()) {
+     case Settings::MemoryLayout::Memory_4Gb:
+         return Smc::MemorySize_4GB;
+@@ -61,6 +65,8 @@
+ }
+ 
+ Smc::MemoryArrangement GetMemoryArrangeForInit() {
++    const auto* profile = std::getenv("CARAFE_LAB_CONSOLE_MEMORY");
++    if (profile && std::string_view{profile} == "1") return Smc::MemoryArrangement_4GB;
+     switch (Settings::values.memory_layout_mode.GetValue()) {
+     case Settings::MemoryLayout::Memory_4Gb:
+         return Smc::MemoryArrangement_4GB;

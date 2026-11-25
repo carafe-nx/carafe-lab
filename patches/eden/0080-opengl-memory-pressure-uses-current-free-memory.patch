@@ -1,0 +1,437 @@
+Carafe Lab: current OpenGL memory pressure, bounded cache targets and fence-safe retirement.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/renderer_opengl/gl_device.h
++++ b/src/video_core/renderer_opengl/gl_device.h
+@@ -7,6 +7,8 @@
+ #pragma once
+ 
+ #include <cstddef>
++#include <chrono>
++#include "video_core/renderer_opengl/gl_memory_budget.h"
+ #include <string>
+ 
+ #include "common/common_types.h"
+@@ -23,6 +25,8 @@
+ 
+     u64 GetCurrentDedicatedVideoMemory() const;
+ 
++    u64 GetCacheMemoryBudget() const { return cache_memory_budget; }
++
+     u32 GetMaxUniformBuffers(Shader::Stage stage) const noexcept {
+         return max_uniform_buffers[static_cast<size_t>(stage)];
+     }
+@@ -238,6 +242,8 @@
+     bool has_lmem_perf_bug{};
+ 
+     std::string vendor_name;
++    u64 cache_memory_budget = MemoryAccounting::DefaultBudget;
++    mutable std::chrono::steady_clock::time_point last_memory_report{};
+ };
+ 
+ } // namespace OpenGL
+--- a/src/video_core/renderer_opengl/gl_device.cpp
++++ b/src/video_core/renderer_opengl/gl_device.cpp
+@@ -160,6 +160,7 @@
+ } // Anonymous namespace
+ 
+ Device::Device(Core::Frontend::EmuWindow& emu_window) {
++    cache_memory_budget = MemoryAccounting::ReadBudget(std::getenv("CARAFE_GPU_CACHE_MIB"));
+     if (!GLAD_GL_VERSION_4_6) {
+         LOG_ERROR(Render_OpenGL, "OpenGL 4.6 is not available");
+         throw std::runtime_error{"Insufficient version"};
+@@ -344,8 +345,19 @@
+ 
+ u64 Device::GetCurrentDedicatedVideoMemory() const {
+     GLint cur_avail_mem_kb = 0;
++    glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &cur_avail_mem_kb);
++    const auto now = std::chrono::steady_clock::now();
++    if (now - last_memory_report >= std::chrono::seconds{1}) {
++        GLint total_kib = 0;
++        glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &total_kib);
++        const auto unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
++            std::chrono::system_clock::now().time_since_epoch()).count();
++        LOG_INFO(Render_OpenGL, "[LAB_GPU_MEMORY] unix_ms={} capacity={} available={} cache_budget={}",
++                 unix_ms, static_cast<u64>(std::max(total_kib, 0)) * 1_KiB,
++                 static_cast<u64>(std::max(cur_avail_mem_kb, 0)) * 1_KiB, cache_memory_budget);
++        last_memory_report = now;
++    }
++    return static_cast<u64>(std::max(cur_avail_mem_kb, 0)) * 1_KiB;
+-    glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &cur_avail_mem_kb);
+-    return static_cast<u64>(cur_avail_mem_kb) * 1_KiB;
+ }
+ 
+ } // namespace OpenGL
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.h
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.h
+@@ -128,6 +128,10 @@
+ 
+     u64 GetDeviceMemoryUsage() const;
+ 
++    bool ShouldReleaseRetiredResources() const {
++        return device.CanReportMemoryUsage() && GetDeviceMemoryUsage() >= device.GetCacheMemoryBudget();
++    }
++
+     void BindFastUniformBuffer(size_t stage, u32 binding_index, u32 size) {
+         const GLuint handle = fast_uniforms[stage][binding_index].handle;
+         const GLsizeiptr gl_size = static_cast<GLsizeiptr>(size);
+@@ -191,7 +195,7 @@
+     }
+ 
+     u64 GetDeviceLocalMemory() const {
++        return (std::min)(device_access_memory, device.GetCacheMemoryBudget());
+-        return device_access_memory;
+     }
+ 
+     bool CanReportMemoryUsage() const {
+--- a/src/video_core/renderer_opengl/gl_texture_cache.h
++++ b/src/video_core/renderer_opengl/gl_texture_cache.h
+@@ -82,11 +82,15 @@
+     void FreeDeferredStagingBuffer(StagingBufferMap& buffer);
+ 
+     u64 GetDeviceLocalMemory() const {
++        return (std::min)(device_access_memory, device.GetCacheMemoryBudget());
+-        return device_access_memory;
+     }
+ 
+     u64 GetDeviceMemoryUsage() const;
+ 
++    bool ShouldReleaseRetiredResources() const {
++        return device.CanReportMemoryUsage() && GetDeviceMemoryUsage() >= device.GetCacheMemoryBudget();
++    }
++
+     bool CanReportMemoryUsage() const {
+         return device.CanReportMemoryUsage();
+     }
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.cpp
+@@ -161,7 +161,7 @@
+ 
+ u64 BufferCacheRuntime::GetDeviceMemoryUsage() const {
+     if (device.CanReportMemoryUsage()) {
++        return MemoryAccounting::UsageSince(device_access_memory, device.GetCurrentDedicatedVideoMemory());
+-        return device_access_memory - device.GetCurrentDedicatedVideoMemory();
+     }
+     return 2_GiB;
+ }
+--- a/src/video_core/renderer_opengl/gl_texture_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_texture_cache.cpp
+@@ -570,7 +570,7 @@
+ 
+ u64 TextureCacheRuntime::GetDeviceMemoryUsage() const {
+     if (device.CanReportMemoryUsage()) {
++        return MemoryAccounting::UsageSince(device_access_memory, device.GetCurrentDedicatedVideoMemory());
+-        return device_access_memory - device.GetCurrentDedicatedVideoMemory();
+     }
+     return 2_GiB;
+ }
+--- a/src/video_core/delayed_destruction_ring.h
++++ b/src/video_core/delayed_destruction_ring.h
+@@ -22,6 +22,16 @@
+         elements[index].clear();
+     }
+ 
++    void Clear() {
++        for (auto& bucket : elements) bucket.clear();
++    }
++
++    size_t Size() const {
++        size_t count = 0;
++        for (const auto& bucket : elements) count += bucket.size();
++        return count;
++    }
++
+     void Push(T&& object) {
+         elements[index].push_back(std::move(object));
+     }
+--- a/src/video_core/buffer_cache/buffer_cache.h
++++ b/src/video_core/buffer_cache/buffer_cache.h
+@@ -696,7 +696,11 @@
+             gpu_modified_ranges.Subtract(start, end - start);
+         });
+     }
++    if constexpr (IS_OPENGL) {
++        runtime.FreeDeferredStagingBuffer(*async_buffer);
++    } else {
++        async_buffers_death_ring.emplace_back(*async_buffer);
++    }
+-    async_buffers_death_ring.emplace_back(*async_buffer);
+     async_buffers.pop_front();
+     pending_downloads.pop_front();
+ }
+@@ -1556,6 +1560,13 @@
+ 
+ template <class P>
+ BufferId BufferCache<P>::CreateBuffer(DAddr device_addr, u32 wanted_size) {
++    if constexpr (requires { runtime.ShouldReleaseRetiredResources(); }) {
++        if (delayed_destruction_ring.Size() > 0 && runtime.ShouldReleaseRetiredResources()) {
++            runtime.Finish();
++            LOG_INFO(Render_OpenGL, "[LAB_RETIRED_MEMORY] kind=buffer objects={}", delayed_destruction_ring.Size());
++            delayed_destruction_ring.Clear();
++        }
++    }
+     DAddr device_addr_end = Common::AlignUp(device_addr + wanted_size, CACHING_PAGESIZE);
+     device_addr = Common::AlignDown(device_addr, CACHING_PAGESIZE);
+     wanted_size = static_cast<u32>(device_addr_end - device_addr);
+--- a/src/video_core/texture_cache/texture_cache.h
++++ b/src/video_core/texture_cache/texture_cache.h
+@@ -960,7 +960,11 @@
+             }
+         }
+         for (auto& download_buffer : download_map) {
++            if constexpr (requires { runtime.ShouldReleaseRetiredResources(); }) {
++                runtime.FreeDeferredStagingBuffer(download_buffer);
++            } else {
++                async_buffers_death_ring.emplace_back(download_buffer);
++            }
+-            async_buffers_death_ring.emplace_back(download_buffer);
+         }
+         committed_downloads.pop_front();
+         async_buffers.pop_front();
+@@ -1547,6 +1551,16 @@
+ template <class P>
+ ImageId TextureCache<P>::InsertImage(const ImageInfo& info, GPUVAddr gpu_addr,
+                                      RelaxedOptions options) {
++    if constexpr (requires { runtime.ShouldReleaseRetiredResources(); }) {
++        const auto retired = sentenced_framebuffers.Size() + sentenced_image_view.Size() + sentenced_images.Size();
++        if (retired > 0 && runtime.ShouldReleaseRetiredResources()) {
++            runtime.Finish();
++            LOG_INFO(Render_OpenGL, "[LAB_RETIRED_MEMORY] kind=texture objects={}", retired);
++            sentenced_framebuffers.Clear();
++            sentenced_image_view.Clear();
++            sentenced_images.Clear();
++        }
++    }
+     std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
+     if (!cpu_addr) {
+         const auto size = CalculateGuestSizeInBytes(info);
+--- a/src/video_core/renderer_opengl/gl_staging_buffer_pool.h
++++ b/src/video_core/renderer_opengl/gl_staging_buffer_pool.h
+@@ -4,10 +4,12 @@
+ #pragma once
+ 
+ #include <array>
++#include "video_core/renderer_opengl/gl_staging_lease.h"
++#include <chrono>
+ #include <optional>
+ #include <span>
+ #include <utility>
++#include <deque>
+-#include <vector>
+ 
+ #include <glad/glad.h>
+ 
+@@ -27,6 +29,7 @@
+     OGLSync* sync;
+     GLuint buffer;
+     size_t index;
++    MemoryAccounting::StagingLease lease;
+ };
+ 
+ struct StagingBuffers {
+@@ -48,11 +51,13 @@
+         size_t size;
+         size_t sync_index;
+         bool deferred;
++        size_t borrowers = 0;
+     };
++    std::deque<StagingBufferAlloc> allocs;
+-    std::vector<StagingBufferAlloc> allocs;
+     GLenum storage_flags;
+     GLenum map_flags;
+     size_t current_sync_index = 0;
++    std::chrono::steady_clock::time_point last_memory_report{};
+ };
+ 
+ class StreamBuffer {
+--- a/src/video_core/renderer_opengl/gl_staging_buffer_pool.cpp
++++ b/src/video_core/renderer_opengl/gl_staging_buffer_pool.cpp
+@@ -5,6 +5,11 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include <array>
++#include <algorithm>
++#include <cstdlib>
++#include <stdexcept>
++#include "common/logging.h"
++#include "video_core/renderer_opengl/gl_memory_budget.h"
+ #include <memory>
+ #include <span>
+ 
+@@ -19,7 +24,7 @@
+ namespace OpenGL {
+ 
+ StagingBufferMap::~StagingBufferMap() {
++    if (sync && lease.IsLast()) {
+-    if (sync) {
+         sync->Create();
+     }
+ }
+@@ -36,11 +41,28 @@
+     OGLSync* const sync = insert_fence ? &allocs[index].sync : nullptr;
+     allocs[index].sync_index = insert_fence ? ++current_sync_index : 0;
+     allocs[index].deferred = deferred;
++    auto lease = MemoryAccounting::StagingLease{allocs[index].borrowers};
++    const auto now = std::chrono::steady_clock::now();
++    if (now - last_memory_report >= std::chrono::seconds{1}) {
++        size_t reserved = 0, held = 0, fenced = 0, borrowed = 0;
++        for (const auto& entry : allocs) {
++            reserved += entry.size;
++            if (entry.deferred) held += entry.size;
++            if (entry.sync.handle) fenced += entry.size;
++            if (entry.borrowers != 0) borrowed += entry.size;
++        }
++        const auto unix_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
++            std::chrono::system_clock::now().time_since_epoch()).count();
++        LOG_INFO(Render_OpenGL, "[LAB_STAGING_MEMORY] unix_ms={} kind={} reserved={} deferred={} fenced={} borrowed={}",
++                 unix_ms, storage_flags & GL_MAP_WRITE_BIT ? "upload" : "download", reserved, held, fenced, borrowed);
++        last_memory_report = now;
++    }
+     return StagingBufferMap{
+         .mapped_span = std::span(allocs[index].map, requested_size),
+         .sync = sync,
+         .buffer = allocs[index].buffer.handle,
+         .index = index,
++        .lease = std::move(lease),
+     };
+ }
+ 
+@@ -53,15 +75,62 @@
+     if (const std::optional<size_t> index = FindBuffer(requested_size); index) {
+         return *index;
+     }
++    const auto next_pow2_size = Common::NextPow2(requested_size);
++    const auto target = MemoryAccounting::ReadBudget(std::getenv("CARAFE_GPU_CACHE_MIB")) / 4;
++    size_t reserved = 0;
++    for (const auto& entry : allocs) reserved += entry.size;
++    if (reserved + next_pow2_size > target) {
++        size_t waited = 0;
++        for (auto& entry : allocs) {
++            if (entry.size == 0 || entry.deferred || entry.borrowers != 0) continue;
++            if (entry.sync.handle && !entry.sync.IsSignaled()) {
++                const auto result = glClientWaitSync(entry.sync.handle, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
++                if (result == GL_WAIT_FAILED) {
++                    LOG_CRITICAL(Render_OpenGL, "[LAB_HOST_MEMORY] staging_wait_failed gl_error=0x{:x}", glGetError());
++                    throw std::runtime_error{"Host OpenGL staging wait failed"};
++                }
++                if (result != GL_ALREADY_SIGNALED && result != GL_CONDITION_SATISFIED) continue;
++                ++waited;
++                entry.sync.Release();
++            }
++        }
++        const auto reusable = FindBuffer(requested_size);
++        size_t released = 0;
++        for (size_t index = 0; index < allocs.size(); ++index) {
++            if (reusable && index == *reusable) continue;
++            auto& entry = allocs[index];
++            if (entry.size == 0 || entry.deferred || entry.borrowers != 0) continue;
++            if (entry.sync.handle && !entry.sync.IsSignaled()) continue;
++            released += entry.size;
++            if (entry.map) glUnmapNamedBuffer(entry.buffer.handle);
++            entry.sync.Release();
++            entry.buffer.Release();
++            entry.map = nullptr;
++            entry.size = 0;
++        }
++        LOG_INFO(Render_OpenGL, "[LAB_STAGING_PRESSURE] kind={} reserved={} target={} requested={} waited={} released={} reused={}",
++                 storage_flags & GL_MAP_WRITE_BIT ? "upload" : "download", reserved, target,
++                 requested_size, waited, released, reusable.has_value());
++        if (reusable) return *reusable;
++    }
++    StagingBufferAlloc alloc{};
+-    StagingBufferAlloc alloc;
+     alloc.buffer.Create();
+-    const auto next_pow2_size = Common::NextPow2(requested_size);
+     glNamedBufferStorage(alloc.buffer.handle, next_pow2_size, nullptr,
+                          storage_flags | GL_MAP_PERSISTENT_BIT);
+     alloc.map = static_cast<u8*>(glMapNamedBufferRange(alloc.buffer.handle, 0, next_pow2_size,
+                                                        map_flags | GL_MAP_PERSISTENT_BIT));
++    if (!alloc.map) {
++        LOG_CRITICAL(Render_OpenGL, "[LAB_HOST_MEMORY] staging_mapping_failed requested={} allocated={} gl_error=0x{:x}",
++                     requested_size, next_pow2_size, glGetError());
++        throw std::runtime_error{"Host OpenGL staging mapping failed"};
++    }
+-    DEBUG_ASSERT(alloc.map != nullptr);
+     alloc.size = next_pow2_size;
++    const auto empty = std::find_if(allocs.begin(), allocs.end(), [](const auto& entry) { return entry.size == 0; });
++    if (empty != allocs.end()) {
++        const size_t index = static_cast<size_t>(empty - allocs.begin());
++        *empty = std::move(alloc);
++        return index;
++    }
+     allocs.emplace_back(std::move(alloc));
+     return allocs.size() - 1;
+ }
+@@ -77,7 +146,7 @@
+         if (buffer_size < requested_size || buffer_size >= smallest_buffer) {
+             continue;
+         }
++        if (alloc.deferred || alloc.borrowers != 0) {
+-        if (alloc.deferred) {
+             continue;
+         }
+         if (alloc.sync.handle != 0) {
+--- /dev/null
++++ b/src/video_core/renderer_opengl/gl_memory_budget.h
+@@ -0,0 +1,20 @@
++#pragma once
++#include <charconv>
++#include <cstdint>
++#include <string_view>
++
++namespace OpenGL::MemoryAccounting {
++constexpr std::uint64_t DefaultBudget = 4096ull * 1024 * 1024;
++inline std::uint64_t ReadBudget(const char* text) {
++    if (!text) return DefaultBudget;
++    const std::string_view value{text};
++    std::uint64_t mib = 0;
++    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), mib);
++    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || mib < 512 || mib > 8192)
++        return DefaultBudget;
++    return mib * 1024 * 1024;
++}
++constexpr std::uint64_t UsageSince(std::uint64_t baseline, std::uint64_t available) {
++    return baseline > available ? baseline - available : 0;
++}
++}
+--- /dev/null
++++ b/src/video_core/renderer_opengl/gl_staging_lease.h
+@@ -0,0 +1,38 @@
++#pragma once
++#include <cstddef>
++#include <utility>
++
++namespace OpenGL::MemoryAccounting {
++class StagingLease {
++public:
++    StagingLease() = default;
++    explicit StagingLease(std::size_t& count) : borrowers{&count} { ++*borrowers; }
++    StagingLease(const StagingLease& other) : borrowers{other.borrowers} {
++        if (borrowers) ++*borrowers;
++    }
++    StagingLease(StagingLease&& other) noexcept : borrowers{std::exchange(other.borrowers, nullptr)} {}
++    StagingLease& operator=(const StagingLease& other) {
++        if (this != &other) {
++            Release();
++            borrowers = other.borrowers;
++            if (borrowers) ++*borrowers;
++        }
++        return *this;
++    }
++    StagingLease& operator=(StagingLease&& other) noexcept {
++        if (this != &other) {
++            Release();
++            borrowers = std::exchange(other.borrowers, nullptr);
++        }
++        return *this;
++    }
++    ~StagingLease() { Release(); }
++    bool IsLast() const { return borrowers && *borrowers == 1; }
++private:
++    void Release() {
++        if (borrowers) --*borrowers;
++        borrowers = nullptr;
++    }
++    std::size_t* borrowers = nullptr;
++};
++}

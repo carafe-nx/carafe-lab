@@ -212,11 +212,13 @@ R00=0000003FFF8DCD00
                 at: 1_000_000,
                 memory: 100 * 1024 * 1024,
                 cpu_usec: 0,
+                ..ResourceSample::default()
             },
             ResourceSample {
                 at: 1_005_000,
                 memory: 2048 * 1024 * 1024,
                 cpu_usec: 10_000_000,
+                ..ResourceSample::default()
             },
         ];
         let sources = Sources {

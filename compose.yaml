@@ -51,6 +51,21 @@ services:
     image: carafe-lab-eden
     profiles: ["build"]
 
+  opengl-staging-tests:
+    image: ${LAB_EDEN_IMAGE:-carafe-lab-eden}
+    profiles: ["build"]
+    cpus: ${LAB_BUILD_CPUS:-2}
+    mem_limit: ${LAB_BUILD_MEMORY:-4g}
+    memswap_limit: ${LAB_BUILD_MEMORY:-4g}
+    network_mode: none
+    devices:
+      - /dev/dxg:/dev/dxg
+    volumes:
+      - eden-src:/src:ro
+      - .:/lab:ro
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+    entrypoint: ["sh", "/lab/tools/probes/host/run-opengl-staging.sh"]
+
   probes:
     image: mstorsjo/llvm-mingw:20260505@sha256:974eec0b217e2a97cca35d7418741be32a55880010620937497a2a78e73cd482
     profiles: ["build"]

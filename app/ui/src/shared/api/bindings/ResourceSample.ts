@@ -16,4 +16,52 @@ memory: number,
 /**
  * Processor time used since the container started, in microseconds.
  */
-cpuUsec: number, };
+cpuUsec: number, 
+/**
+ *The cgroup's total charged memory in bytes, including file pages.
+ */
+containerMemory: number | null, 
+/**
+ *File-backed cache in bytes, excluding shared memory.
+ */
+fileCache: number | null, 
+/**
+ *The cgroup's hard memory limit in bytes; absent when unlimited or unavailable.
+ */
+memoryLimit: number | null, 
+/**
+ *The cgroup's cumulative OOM-kill count.
+ */
+oomKills: number | null, 
+/**
+ *Guest physical bytes reserved against the application process's resource limit.
+ */
+guestMemory: number | null, 
+/**
+ *The guest application process's physical memory limit in bytes.
+ */
+guestLimit: number | null, 
+/**
+ *The emulated console's total physical memory in bytes.
+ */
+guestTotal: number | null, 
+/**
+ *The host graphics driver's reported available video memory in bytes.
+ */
+gpuAvailable: number | null, 
+/**
+ *The host graphics driver's reported total video memory in bytes.
+ */
+gpuCapacity: number | null, 
+/**
+ *The renderer's configured cache pressure target in bytes.
+ */
+gpuCacheBudget: number | null, 
+/**
+ *Bytes allocated in the host upload staging pool.
+ */
+uploadReserved: number | null, 
+/**
+ *Bytes allocated in the host download staging pool.
+ */
+downloadReserved: number | null, };

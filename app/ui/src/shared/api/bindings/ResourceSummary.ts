@@ -11,4 +11,52 @@ peakMemoryMb: number,
 /**
  * Processor time over the launch, in percent of one processor: 400 is four processors busy.
  */
-cpuPercent: number, };
+cpuPercent: number, 
+/**
+ *Peak total cgroup charge in MiB, including file pages.
+ */
+peakContainerMemoryMb: number | null, 
+/**
+ *Peak file cache excluding shared memory, in MiB.
+ */
+peakFileCacheMb: number | null, 
+/**
+ *The sampled cgroup hard memory limit in MiB.
+ */
+memoryLimitMb: number | null, 
+/**
+ *Peak guest application physical reservations in MiB.
+ */
+peakGuestMemoryMb: number | null, 
+/**
+ *The guest application's physical memory limit in MiB.
+ */
+guestLimitMb: number | null, 
+/**
+ *The emulated console's physical memory in MiB.
+ */
+guestTotalMb: number | null, 
+/**
+ *Minimum sampled available host video memory in MiB.
+ */
+minGpuAvailableMb: number | null, 
+/**
+ *Maximum reported host video memory capacity in MiB.
+ */
+gpuCapacityMb: number | null, 
+/**
+ *The renderer's cache pressure target in MiB.
+ */
+gpuCacheBudgetMb: number | null, 
+/**
+ *Peak bytes allocated in the upload staging pool, in MiB.
+ */
+peakUploadReservedMb: number | null, 
+/**
+ *Peak bytes allocated in the download staging pool, in MiB.
+ */
+peakDownloadReservedMb: number | null, 
+/**
+ *OOM kills observed between the first and last cgroup samples.
+ */
+oomKills: number | null, };

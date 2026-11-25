@@ -1,0 +1,99 @@
+Carafe Lab: report guest physical memory reservations and resource limits independently of host memory.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/yuzu/main_window.cpp
++++ b/src/yuzu/main_window.cpp
+@@ -129,6 +129,8 @@
+ #include "core/frontend/applets/software_keyboard.h"
+ 
+ #include "core/hle/kernel/k_process.h"
++#include "core/hle/kernel/k_resource_limit.h"
++#include "core/hle/kernel/board/nintendo/nx/k_system_control.h"
+ #include "core/hle/service/acc/profile_manager.h"
+ #include "core/hle/service/am/applet_manager.h"
+ #include "core/hle/service/am/frontend/applet_web_browser_types.h"
+@@ -4320,6 +4322,19 @@
+ 
+     auto results = QtCommon::system->GetAndResetPerfStats();
+     auto& shader_notify = QtCommon::system->GPU().ShaderNotify();
++#ifdef __unix__
++    if (!control_dir.isEmpty()) {
++        const auto* process = QtCommon::system->ApplicationProcess();
++        const auto* limit = process ? process->GetResourceLimit() : nullptr;
++        if (limit) {
++            const auto memory = limit->GetPhysicalMemorySnapshot();
++            LOG_INFO(Frontend,
++                     "[LAB_GUEST_MEMORY] unix_ms={} committed={} limit={} physical={}",
++                     QDateTime::currentMSecsSinceEpoch(), memory[0], memory[1],
++                     Kernel::KSystemControl::Init::GetIntendedMemorySize());
++        }
++    }
++#endif
+     const int shaders_building = shader_notify.ShadersBuilding();
+ 
+     emit statsUpdated(results, shader_notify);
+--- a/src/core/hle/kernel/k_resource_limit.h
++++ b/src/core/hle/kernel/k_resource_limit.h
+@@ -4,6 +4,7 @@
+ #pragma once
+ 
+ #include <array>
++#include <atomic>
+ #include "common/common_types.h"
+ #include "core/hle/kernel/k_light_condition_variable.h"
+ #include "core/hle/kernel/k_light_lock.h"
+@@ -36,6 +37,11 @@
+ 
+     s64 GetLimitValue(LimitableResource which) const;
+     s64 GetCurrentValue(LimitableResource which) const;
++
++    std::array<s64, 2> GetPhysicalMemorySnapshot() const {
++        return {m_physical_current.load(std::memory_order_relaxed),
++                m_physical_limit.load(std::memory_order_relaxed)};
++    }
+     s64 GetPeakValue(LimitableResource which) const;
+     s64 GetFreeValue(LimitableResource which) const;
+ 
+@@ -49,6 +55,16 @@
+     static void PostDestroy(uintptr_t arg) {}
+ 
+ private:
++    void UpdatePhysicalMemorySnapshot(LimitableResource which) {
++        if (which == LimitableResource::PhysicalMemoryMax) {
++            const auto index = static_cast<std::size_t>(which);
++            m_physical_current.store(m_current_values[index], std::memory_order_relaxed);
++            m_physical_limit.store(m_limit_values[index], std::memory_order_relaxed);
++        }
++    }
++
++    std::atomic<s64> m_physical_current{};
++    std::atomic<s64> m_physical_limit{};
+     using ResourceArray = std::array<s64, static_cast<std::size_t>(LimitableResource::Count)>;
+     ResourceArray m_limit_values{};
+     ResourceArray m_current_values{};
+--- a/src/core/hle/kernel/k_resource_limit.cpp
++++ b/src/core/hle/kernel/k_resource_limit.cpp
+@@ -83,6 +83,7 @@
+ 
+     m_limit_values[index] = value;
+     m_peak_values[index] = m_current_values[index];
++    UpdatePhysicalMemorySnapshot(which);
+ 
+     R_SUCCEED();
+ }
+@@ -115,6 +116,7 @@
+             m_current_values[index] += value;
+             m_current_hints[index] += value;
+             m_peak_values[index] = (std::max)(m_peak_values[index], m_current_values[index]);
++            UpdatePhysicalMemorySnapshot(which);
+             return true;
+         }
+ 
+@@ -148,6 +150,7 @@
+ 
+     m_current_values[index] -= value;
+     m_current_hints[index] -= hint;
++    UpdatePhysicalMemorySnapshot(which);
+ 
+     if (m_waiter_count != 0) {
+         m_cond_var.Broadcast();

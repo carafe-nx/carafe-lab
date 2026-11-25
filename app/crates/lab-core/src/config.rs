@@ -77,6 +77,7 @@ struct RawConfig {
     carafe: Option<PathBuf>,
     #[serde(rename = "edenImage")]
     _legacy_eden_image: Option<String>,
+    gpu_cache_mb: Option<u32>,
     log_archive_mb: Option<u32>,
     one_eden: Option<bool>,
     #[serde(default)]
@@ -152,6 +153,8 @@ pub struct Config {
     pub emulator_cpu: EdenCpu,
     /// The Carafe checkout the lab packs with; `None` means the `external/carafe` submodule.
     pub carafe: Option<PathBuf>,
+    #[doc = "The host renderer cache pressure target in MiB, between 512 and 8192."]
+    pub gpu_cache_mb: u32,
     /// Aggregate budget for retained Lab log captures, in MiB.
     pub log_archive_mb: u32,
     /// One emulator serves the whole run instead of one for every launch; `true` unless `lab.json` says otherwise.
@@ -279,6 +282,12 @@ impl Config {
             }
         };
         for (path, value) in &raw.eden_settings {
+            if path == "Core/memory_layout_mode" && value != "0" {
+                return Err(ConfigError::Value(
+                    "edenSettings.Core/memory_layout_mode",
+                    "0 (the console's 4 GiB memory layout)",
+                ));
+            }
             let valid_path = path
                 .split_once('/')
                 .is_some_and(|(section, key)| !section.is_empty() && !key.is_empty());
@@ -289,9 +298,13 @@ impl Config {
                 ));
             }
         }
+        let gpu_cache_mb = raw.gpu_cache_mb.unwrap_or(4096);
         let log_archive_mb = raw.log_archive_mb.unwrap_or(DEFAULT_LOG_ARCHIVE_MB);
         if log_archive_mb == 0 {
             return Err(ConfigError::Value("logArchiveMb", "positive"));
+        }
+        if !(512..=8192).contains(&gpu_cache_mb) {
+            return Err(ConfigError::Value("gpuCacheMb", "512 through 8192 MiB"));
         }
         let lang = match raw.lang.as_deref() {
             None => Lang::Ru,
@@ -381,6 +394,7 @@ impl Config {
             gpu,
             emulator_cpu,
             carafe: raw.carafe,
+            gpu_cache_mb,
             log_archive_mb,
             one_eden: raw.one_eden.unwrap_or(true),
             eden_settings: raw.eden_settings,
@@ -1098,6 +1112,27 @@ mod tests {
                     "\"Section/key\": \"value\" on one line"
                 ))
             );
+        }
+    }
+
+    #[test]
+    fn the_console_memory_profile_cannot_be_extended() {
+        for mode in ["1", "2", "3", "4", "Memory_8Gb"] {
+            let text =
+                format!(r#"{{"work":"x","edenSettings":{{"Core/memory_layout_mode":"{mode}"}}}}"#);
+            assert!(Config::parse(&text).is_err());
+        }
+        assert!(
+            Config::parse(r#"{"work":"x","edenSettings":{"Core/memory_layout_mode":"0"}}"#).is_ok()
+        );
+    }
+
+    #[test]
+    fn renderer_cache_budgets_are_bounded_without_changing_guest_memory() {
+        let config = Config::parse(r#"{"work":"x","gpuCacheMb":2048}"#).unwrap();
+        assert_eq!(config.gpu_cache_mb, 2048);
+        for budget in [0, 511, 8193] {
+            assert!(Config::parse(&format!(r#"{{"work":"x","gpuCacheMb":{budget}}}"#)).is_err());
         }
     }
 

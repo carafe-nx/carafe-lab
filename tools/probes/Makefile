@@ -1,5 +1,5 @@
 OUT ?= $(CURDIR)/build
-PROBES := input gamepad sockets gdi d3d9 d3d11 d3d12 gl screen threads registry files textures shaders
+PROBES := input gamepad sockets gdi d3d9 d3d11 d3d12 gl screen threads registry files textures shaders memory
 ARCHES := i686 x86_64
 
 LIBS_input := -ldinput -ldxguid
@@ -23,7 +23,7 @@ FMT_INCLUDE ?= $(firstword $(wildcard $(EDEN_SRC)/.cache/cpm/fmt/*/include))
 EXES := $(foreach arch,$(ARCHES),$(foreach probe,$(PROBES),$(OUT)/$(arch)/probe-$(probe).exe)) \
 	$(OUT)/i686/probe-missing.exe $(OUT)/i686/probe-ddraw.exe
 
-.PHONY: all clean host-tests host-file-tests host-texture-tests host-regression-tests
+.PHONY: all clean host-tests host-file-tests host-texture-tests host-regression-tests host-gl-build host-gl-tests
 
 all: $(EXES)
 
@@ -34,6 +34,8 @@ host-tests: host-file-tests host-texture-tests host-regression-tests
 	mkdir -p $(OUT)/host
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(EDEN_SRC)/src $(if $(FMT_INCLUDE),-I$(FMT_INCLUDE)) -o $(OUT)/host/page-table-test host/page-table.cpp $(EDEN_SRC)/src/common/page_table.cpp
 	$(OUT)/host/page-table-test
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(EDEN_SRC)/src -o $(OUT)/host/memory-budget-test host/memory-budget.cpp
+	$(OUT)/host/memory-budget-test
 
 host-texture-tests:
 	mkdir -p $(OUT)/host
@@ -51,6 +53,32 @@ host-regression-tests:
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -I$(OUT)/host -I$(EDEN_SRC)/src -o $(OUT)/host/indirect-storage-test host/indirect-storage.cpp
 	$(OUT)/host/indirect-storage-test
 
+host-gl-build:
+	mkdir -p $(OUT)/host
+	$(CC) -O2 -I$(EDEN_SRC)/externals/glad/include \
+		-c $(EDEN_SRC)/externals/glad/src/glad.c -o $(OUT)/host/glad.o
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -ffunction-sections -fdata-sections -DFMT_HEADER_ONLY \
+		-I$(EDEN_SRC)/src -I$(FMT_INCLUDE) -I$(EDEN_SRC)/externals/glad/include \
+		-Wl,--gc-sections -o $(OUT)/host/opengl-staging-test host/opengl-staging.cpp \
+		$(EDEN_SRC)/src/video_core/renderer_opengl/gl_staging_buffer_pool.cpp \
+		$(EDEN_SRC)/src/video_core/renderer_opengl/gl_resource_manager.cpp \
+		$(OUT)/host/glad.o -lGL -lX11
+
+host-gl-tests: host-gl-build
+	$(OUT)/host/opengl-staging-test
+
+$(OUT)/i686/probe-missing.exe: missing.c missing.def
+	mkdir -p $(dir $@)
+	i686-w64-mingw32-dlltool -d missing.def -l $(OUT)/i686/libcarafe-missing.a
+	i686-w64-mingw32-clang -O2 -Wall -Wextra -std=gnu11 -mwindows -o $@ missing.c $(OUT)/i686/libcarafe-missing.a
+
+$(OUT)/i686/probe-%.exe: %.c probe.h
+	mkdir -p $(dir $@)
+	i686-w64-mingw32-clang -O2 -Wall -Wextra -std=gnu11 -mwindows -o $@ $< $(LIBS_$*) -lgdi32 -luser32
+
+$(OUT)/x86_64/probe-%.exe: %.c probe.h
+	mkdir -p $(dir $@)
+	x86_64-w64-mingw32-clang -O2 -Wall -Wextra -std=gnu11 -mwindows -o $@ $< $(LIBS_$*) -lgdi32 -luser32
 
 clean:
 	rm -rf $(OUT)

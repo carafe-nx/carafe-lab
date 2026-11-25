@@ -89,9 +89,13 @@ fi
 mkdir -p /work/user/log
 (
     while :; do
-        printf '%s %s %s\n' "$(date +%s%3N)" \
+        printf '%s %s %s %s %s %s %s\n' "$(date +%s%3N)" \
             "$(awk '$1 == "anon" || $1 == "shmem" { sum += $2 } END { print sum }' /sys/fs/cgroup/memory.stat)" \
-            "$(sed -n 's/^usage_usec //p' /sys/fs/cgroup/cpu.stat)"
+            "$(sed -n 's/^usage_usec //p' /sys/fs/cgroup/cpu.stat)" \
+            "$(cat /sys/fs/cgroup/memory.current)" \
+            "$(awk '$1 == "file" { file = $2 } $1 == "shmem" { shared = $2 } END { print file - shared }' /sys/fs/cgroup/memory.stat)" \
+            "$(cat /sys/fs/cgroup/memory.max)" \
+            "$(sed -n 's/^oom_kill //p' /sys/fs/cgroup/memory.events)"
         sleep 1
     done >>/work/user/log/resources.log 2>/dev/null
 ) &

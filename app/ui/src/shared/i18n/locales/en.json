@@ -409,7 +409,18 @@
     "summary": "a frame takes {{mean}} ms on average, 99% under {{p99}} ms, stutters over 50 ms: {{stutters}}"
   },
   "resources": {
-    "summary": "memory up to {{memory}} GB · processor {{cpu}}% of one core",
+    "summary": "working memory up to {{memory}} GiB · processor {{cpu}}% of one core",
+    "layers": "Memory by layer",
+    "guest": "Guest physical reservations, peak / application limit",
+    "physical": "Emulated console RAM",
+    "container": "Container total, peak / limit",
+    "fileCache": "File cache, peak",
+    "gpu": "Host GPU memory, minimum free / capacity",
+    "cacheTarget": "Host renderer cache target",
+    "upload": "Upload pool, peak allocated",
+    "download": "Download pool, peak allocated",
+    "oom": "Container OOM kills",
+    "separate": "These layers overlap and must not be added. — means unavailable. Peaks may occur at different times.",
     "problems": "in the logs: {{errors}} errors, {{warnings}} warnings"
   },
   "fps": {

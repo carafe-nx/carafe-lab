@@ -1,0 +1,146 @@
+Carafe Lab: reclaim retired OpenGL buffer storage under allocation pressure.
+GPL-3.0-or-later, as the files it changes.
+
+--- a/src/video_core/buffer_cache/buffer_cache.h
++++ b/src/video_core/buffer_cache/buffer_cache.h
+@@ -1568,18 +1568,27 @@
+ 
+ template <class P>
+ BufferId BufferCache<P>::CreateBuffer(DAddr device_addr, u32 wanted_size) {
+-    if constexpr (requires { runtime.ShouldReleaseRetiredResources(); }) {
+-        if (delayed_destruction_ring.Size() > 0 && runtime.ShouldReleaseRetiredResources()) {
+-            runtime.Finish();
+-            LOG_INFO(Render_OpenGL, "[LAB_RETIRED_MEMORY] kind=buffer objects={}", delayed_destruction_ring.Size());
+-            delayed_destruction_ring.Clear();
+-        }
+-    }
+     DAddr device_addr_end = Common::AlignUp(device_addr + wanted_size, CACHING_PAGESIZE);
+     device_addr = Common::AlignDown(device_addr, CACHING_PAGESIZE);
+     wanted_size = static_cast<u32>(device_addr_end - device_addr);
+     const OverlapResult overlap = ResolveOverlaps(device_addr, wanted_size);
+     const u32 size = static_cast<u32>(overlap.end - overlap.begin);
++    if constexpr (IS_OPENGL) {
++        if (delayed_destruction_ring.Size() > 0) {
++            u64 active_bytes = 0;
++            for (const auto& [id, buffer] : slot_buffers) {
++                active_bytes += buffer->SizeBytes();
++            }
++            const u64 retired_bytes = delayed_destruction_ring.SizeBytes();
++            if (runtime.ShouldReleaseRetiredBuffers(active_bytes + retired_bytes, size)) {
++                runtime.WaitForIdle();
++                LOG_INFO(Render_OpenGL,
++                         "[LAB_RETIRED_MEMORY] kind=buffer objects={} bytes={} active={} incoming={}",
++                         delayed_destruction_ring.Size(), retired_bytes, active_bytes, size);
++                delayed_destruction_ring.Clear();
++            }
++        }
++    }
+     const BufferId new_buffer_id = slot_buffers.insert(runtime, overlap.begin, size);
+     auto& new_buffer = slot_buffers[new_buffer_id];
+     const size_t size_bytes = new_buffer.SizeBytes();
+--- a/src/video_core/delayed_destruction_ring.h
++++ b/src/video_core/delayed_destruction_ring.h
+@@ -32,6 +32,16 @@
+         return count;
+     }
+ 
++    size_t SizeBytes() const {
++        size_t bytes = 0;
++        for (const auto& bucket : elements) {
++            for (const auto& object : bucket) {
++                bytes += object.SizeBytes();
++            }
++        }
++        return bytes;
++    }
++
+     void Push(T&& object) {
+         elements[index].push_back(std::move(object));
+     }
+--- a/src/video_core/renderer_opengl/gl_memory_budget.h
++++ b/src/video_core/renderer_opengl/gl_memory_budget.h
+@@ -14,6 +14,9 @@
+         return DefaultBudget;
+     return mib * 1024 * 1024;
+ }
++constexpr bool ExceedsBudget(std::uint64_t allocated, std::uint64_t incoming, std::uint64_t budget) {
++    return allocated > budget || incoming > budget - allocated;
++}
+ constexpr std::uint64_t UsageSince(std::uint64_t baseline, std::uint64_t available) {
+     return baseline > available ? baseline - available : 0;
+ }
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.h
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.h
+@@ -93,6 +93,8 @@
+     void PostCopyBarrier();
+     void Finish();
+ 
++    void WaitForIdle();
++
+     void TickFrame(Common::SlotVector<Buffer>&) noexcept {}
+ 
+     void ClearBuffer(Buffer& dest_buffer, u32 offset, size_t size, u32 value);
+@@ -130,8 +132,8 @@
+ 
+     u64 GetDeviceMemoryUsage() const;
+ 
++    bool ShouldReleaseRetiredBuffers(u64 allocated, u64 incoming) const {
++        return MemoryAccounting::ExceedsBudget(allocated, incoming, device.GetCacheMemoryBudget());
+-    bool ShouldReleaseRetiredResources() const {
+-        return device.CanReportMemoryUsage() && GetDeviceMemoryUsage() >= device.GetCacheMemoryBudget();
+     }
+ 
+     void BindFastUniformBuffer(size_t stage, u32 binding_index, u32 size) {
+--- a/src/video_core/renderer_opengl/gl_buffer_cache.cpp
++++ b/src/video_core/renderer_opengl/gl_buffer_cache.cpp
+@@ -215,6 +215,12 @@
+     glFinish();
+ }
+ 
++void BufferCacheRuntime::WaitForIdle() {
++    OGLSync sync;
++    sync.Create();
++    sync.Wait();
++}
++
+ void BufferCacheRuntime::ClearBuffer(Buffer& dest_buffer, u32 offset, size_t size, u32 value) {
+     glClearNamedBufferSubData(dest_buffer.Handle(), GL_R32UI, static_cast<GLintptr>(offset),
+                               static_cast<GLsizeiptr>(size), GL_RED_INTEGER, GL_UNSIGNED_INT, &value);
+--- a/src/video_core/renderer_opengl/gl_resource_manager.h
++++ b/src/video_core/renderer_opengl/gl_resource_manager.h
+@@ -266,6 +266,8 @@
+     /// Checks if the sync has been signaled
+     bool IsSignaled() const noexcept;
+ 
++    void Wait() const;
++
+     GLsync handle = 0;
+ };
+ 
+--- a/src/video_core/renderer_opengl/gl_resource_manager.cpp
++++ b/src/video_core/renderer_opengl/gl_resource_manager.cpp
+@@ -5,6 +5,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include <string_view>
++#include <stdexcept>
+ #include <glad/glad.h>
+ #include "common/assert.h"
+ #include "video_core/renderer_opengl/gl_resource_manager.h"
+@@ -152,6 +153,16 @@
+     return sync_status != GL_TIMEOUT_EXPIRED;
+ }
+ 
++void OGLSync::Wait() const {
++    if (!handle) {
++        throw std::runtime_error{"OpenGL completion fence was not created"};
++    }
++    const auto result = glClientWaitSync(handle, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
++    if (result != GL_ALREADY_SIGNALED && result != GL_CONDITION_SATISFIED) {
++        throw std::runtime_error{"OpenGL completion fence wait failed"};
++    }
++}
++
+ void OGLFramebuffer::Create() {
+     if (handle != 0)
+         return;

@@ -257,6 +257,13 @@ fn game_detail(out: &mut String, game: &GameReport, lang: Lang) {
         escape(&game.title_id),
         escape(&game.settings),
     );
+    if let Some(scenario) = &game.scenario {
+        for launch in &scenario.launches {
+            if let Some(resources) = &launch.resources {
+                memory_detail(out, launch.number, resources, lang);
+            }
+        }
+    }
     out.push_str("<ol class=\"steps\">\n");
     match &game.build {
         BuildOutcome::Built {
@@ -577,6 +584,97 @@ fn outcome_chip(outcome: Outcome, lang: Lang) -> (&'static str, &'static str) {
     }
 }
 
+fn memory_detail(
+    out: &mut String,
+    launch: usize,
+    memory: &lab_core::resources::ResourceSummary,
+    lang: Lang,
+) {
+    let size =
+        |value: Option<u32>| value.map_or_else(|| "—".to_owned(), |value| format!("{value} MiB"));
+    let rows = [
+        (
+            lang.pick(
+                "Физические резервы приложения, пик / лимит",
+                "Guest physical reservations, peak / limit",
+            ),
+            format!(
+                "{} / {}",
+                size(memory.peak_guest_memory_mb),
+                size(memory.guest_limit_mb)
+            ),
+        ),
+        (
+            lang.pick("ОЗУ эмулируемой консоли", "Emulated console RAM"),
+            size(memory.guest_total_mb),
+        ),
+        (
+            lang.pick("Контейнер, пик / лимит", "Container total, peak / limit"),
+            format!(
+                "{} / {}",
+                size(memory.peak_container_memory_mb),
+                size(memory.memory_limit_mb)
+            ),
+        ),
+        (
+            lang.pick(
+                "Рабочая память контейнера, пик",
+                "Container working memory, peak",
+            ),
+            size(Some(memory.peak_memory_mb)),
+        ),
+        (
+            lang.pick("Файловый кеш, пик", "File cache, peak"),
+            size(memory.peak_file_cache_mb),
+        ),
+        (
+            lang.pick(
+                "GPU хоста, минимум свободной / ёмкость",
+                "Host GPU, minimum free / capacity",
+            ),
+            format!(
+                "{} / {}",
+                size(memory.min_gpu_available_mb),
+                size(memory.gpu_capacity_mb)
+            ),
+        ),
+        (
+            lang.pick(
+                "Целевой размер кеша рендерера",
+                "Host renderer cache target",
+            ),
+            size(memory.gpu_cache_budget_mb),
+        ),
+        (
+            lang.pick("Пул загрузки на GPU, пик", "Upload pool, peak allocated"),
+            size(memory.peak_upload_reserved_mb),
+        ),
+        (
+            lang.pick("Пул чтения с GPU, пик", "Download pool, peak allocated"),
+            size(memory.peak_download_reserved_mb),
+        ),
+        (
+            lang.pick("Завершения контейнера по OOM", "Container OOM kills"),
+            memory
+                .oom_kills
+                .map_or_else(|| "—".to_owned(), |count| count.to_string()),
+        ),
+    ];
+    let _ = write!(
+        out,
+        "<details><summary>{} {launch}: {}</summary><dl>",
+        lang.pick("Запуск", "Launch"),
+        lang.pick("память по слоям", "memory by layer")
+    );
+    for (label, value) in rows {
+        let _ = write!(out, "<dt>{}</dt><dd>{}</dd>", escape(label), escape(&value));
+    }
+    let _ = write!(out, "</dl><p>{}</p></details>", lang.pick(
+        "Показатели пересекаются, их нельзя складывать. — означает отсутствие данных. Пики могут приходиться на разное время.",
+        "These layers overlap and must not be added. — means unavailable. Peaks may occur at different times.",
+    ));
+}
+
 fn chip(class: &str, label: &str) -> String {
     format!("<span class=\"pill {class}\">{}</span>", escape(label))
 }
@@ -752,6 +850,18 @@ mod tests {
             games,
             build_only: false,
         }
+    }
+
+    #[test]
+    fn memory_layers_keep_missing_measurements_distinct_from_zero() {
+        let memory: lab_core::resources::ResourceSummary =
+            serde_json::from_str(r#"{"peakMemoryMb":42,"cpuPercent":100,"oomKills":0}"#).unwrap();
+        let mut html = String::new();
+        memory_detail(&mut html, 1, &memory, Lang::En);
+        assert!(html.contains("42 MiB"));
+        assert!(html.contains("Container OOM kills</dt><dd>0</dd>"));
+        assert!(html.contains("Guest physical reservations, peak / limit</dt><dd>— / —</dd>"));
+        assert!(html.contains("must not be added"));
     }
 
     #[test]

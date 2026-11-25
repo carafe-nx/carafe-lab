@@ -118,6 +118,7 @@ pub struct Eden {
     default_cpu: EdenCpu,
     image: String,
     settings: BTreeMap<String, String>,
+    gpu_cache_mb: u32,
     log_archive: Option<(PathBuf, u64)>,
     title: Option<TitleId>,
     console_changes: Option<String>,
@@ -251,6 +252,7 @@ impl Eden {
             default_cpu: cpu,
             image: IMAGE.to_owned(),
             settings: BTreeMap::new(),
+            gpu_cache_mb: 4096,
             title: None,
             console_changes: None,
             ended: None,
@@ -347,6 +349,13 @@ impl Eden {
     #[must_use]
     pub fn with_settings(mut self, settings: BTreeMap<String, String>) -> Self {
         self.settings = settings;
+        self
+    }
+
+    #[must_use]
+    #[doc = "Sets the host renderer cache target in MiB, clamped to 512 through 8192."]
+    pub fn with_gpu_cache_mb(mut self, budget: u32) -> Self {
+        self.gpu_cache_mb = budget.clamp(512, 8192);
         self
     }
 
@@ -714,7 +723,10 @@ impl Eden {
         if status != "exited" {
             return None;
         }
-        let reason = describe_end(code, oom);
+        let mut reason = describe_end(code, oom);
+        if !oom && self.emulator_log().contains("[LAB_HOST_MEMORY]") {
+            reason.push_str("; host graphics staging operation failed");
+        }
         if let Ok(logs) = docker(&["logs", "--tail", "200", CONTAINER]) {
             let text = format!(
                 "{reason}\n\n{}{}",
@@ -931,6 +943,17 @@ impl Eden {
         } else {
             String::new()
         };
+        let cache_profile_matches = alive
+            && docker(&[
+                "inspect",
+                "-f",
+                "{{index .Config.Labels \"carafe.gpu-cache-mib\"}} {{index .Config.Labels \"carafe.memory-profile\"}}",
+                CONTAINER,
+            ])
+            .is_ok_and(|output| {
+                String::from_utf8_lossy(&output.stdout).trim()
+                    == format!("{} console-4g", self.gpu_cache_mb)
+            });
         let inspected_image = if alive {
             docker(&["inspect", "--format", "{{.Image}}", CONTAINER])
                 .ok()
@@ -939,7 +962,8 @@ impl Eden {
             None
         };
         let same_image = image_matches(&self.image, inspected_image.as_deref());
-        let roomy = same_image && !self.fresh && room_left(&readings, GAME_MEMORY);
+        let roomy =
+            same_image && cache_profile_matches && !self.fresh && room_left(&readings, GAME_MEMORY);
         let choice = match (roomy, self.fresh) {
             (true, _) => "same Eden",
             (false, true) => "new Eden: clean start",
@@ -1268,10 +1292,18 @@ impl Eden {
             MEMORY_LIMIT.to_owned(),
             "--cpus".to_owned(),
             CPU_LIMIT.to_owned(),
+            "--label".to_owned(),
+            format!("carafe.gpu-cache-mib={}", self.gpu_cache_mb),
+            "--label".to_owned(),
+            "carafe.memory-profile=console-4g".to_owned(),
             "-e".to_owned(),
             "SDL_AUDIODRIVER=dummy".to_owned(),
             "-e".to_owned(),
             format!("CARAFE_VIDEO={}", self.video.name()),
+            "-e".to_owned(),
+            format!("CARAFE_GPU_CACHE_MIB={}", self.gpu_cache_mb),
+            "-e".to_owned(),
+            "CARAFE_LAB_CONSOLE_MEMORY=1".to_owned(),
             "--cap-add".to_owned(),
             "SYS_PTRACE".to_owned(),
         ];
@@ -1534,9 +1566,7 @@ impl Emulator for Eden {
         dest: &Path,
         keep_caches: bool,
     ) -> Result<(), EmulatorError> {
-        let mut capture = self
-            .log_archive
-            .as_ref()
+        let mut capture = self.log_archive.as_ref()
             .map(|(runs, limit)| Capture::open(runs, dest, *limit))
             .transpose()
             .map_err(io)?;
@@ -1545,9 +1575,7 @@ impl Emulator for Eden {
             fs::create_dir_all(dest).map_err(io)?;
             if let Some(capture) = capture.as_mut() {
                 let offset = self.session.as_ref().map_or(0, |session| session.log_from);
-                capture
-                    .copy(&emulator_log, &dest.join("eden_log.txt"), offset as u64)
-                    .map_err(io)?;
+                capture.copy(&emulator_log, &dest.join("eden_log.txt"), offset as u64).map_err(io)?;
             } else {
                 fs::write(dest.join("eden_log.txt"), self.emulator_log()).map_err(io)?;
             }
@@ -1561,24 +1589,28 @@ impl Emulator for Eden {
             fs::create_dir_all(dest).map_err(io)?;
             let lines: String = readings
                 .iter()
-                .map(|sample| format!("{} {} {}\n", sample.at, sample.memory, sample.cpu_usec))
+                .map(|sample| {
+                    let optional = |value: Option<u64>| {
+                        value.map_or_else(|| "-".to_owned(), |value| value.to_string())
+                    };
+                    format!(
+                        "{} {} {} {} {} {} {}\n",
+                        sample.at,
+                        sample.memory,
+                        sample.cpu_usec,
+                        optional(sample.container_memory),
+                        optional(sample.file_cache),
+                        optional(sample.memory_limit),
+                        optional(sample.oom_kills)
+                    )
+                })
                 .collect();
-            write_log_file(
-                &dest.join(RESOURCES_FILE),
-                lines.as_bytes(),
-                capture.as_mut(),
-            )
-            .map_err(io)?;
+            write_log_file(&dest.join(RESOURCES_FILE), lines.as_bytes(), capture.as_mut()).map_err(io)?;
         }
         let container_end = self.user_dir.join("log").join(CONTAINER_END_FILE);
         if container_end.is_file() {
             fs::create_dir_all(dest).map_err(io)?;
-            move_log_file(
-                &container_end,
-                &dest.join(CONTAINER_END_FILE),
-                capture.as_mut(),
-            )
-            .map_err(io)?;
+            move_log_file(&container_end, &dest.join(CONTAINER_END_FILE), capture.as_mut()).map_err(io)?;
         }
         let session = self.user_dir.join("log").join(SESSION_FILE);
         if session.is_file() {
@@ -1667,7 +1699,9 @@ impl Emulator for Eden {
             return Vec::new();
         };
         let text = read_text(&self.user_dir.join("log").join(RESOURCES_FILE));
-        resources::since(&resources::parse(&text), from)
+        let mut samples = resources::since(&resources::parse(&text), from);
+        resources::attach_emulator_memory(&mut samples, &self.emulator_log());
+        samples
     }
 
     fn launch_perf(&self) -> Vec<PerfSample> {
@@ -1866,6 +1900,9 @@ pub fn qt_config(gpu: Gpu, cpu: EdenCpu, extra: &BTreeMap<String, String>) -> St
         })
         .collect();
     for (path, value) in extra {
+        if path == "Core/memory_layout_mode" {
+            continue;
+        }
         let Some((section, key)) = path.split_once('/') else {
             continue;
         };
@@ -1929,11 +1966,7 @@ fn move_tree(source: &Path, dest: &Path, capture: &mut Option<Capture>) -> std::
     Ok(())
 }
 
-fn move_logs_keep_caches(
-    source: &Path,
-    dest: &Path,
-    capture: &mut Option<Capture>,
-) -> std::io::Result<()> {
+fn move_logs_keep_caches(source: &Path, dest: &Path, capture: &mut Option<Capture>) -> std::io::Result<()> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
@@ -2195,8 +2228,26 @@ mod tests {
     }
 
     #[test]
+    fn renderer_budgets_do_not_resize_the_guest_or_its_container() {
+        let eden = Eden::new("user", "test.keys", Gpu::Wsl, EdenCpu::Nce).with_gpu_cache_mb(2048);
+        let args = eden.container_args(Path::new("library"));
+        let has = |option: &str, value: &str| {
+            args.windows(2)
+                .any(|pair| pair[0] == option && pair[1] == value)
+        };
+        assert!(has("-e", "CARAFE_GPU_CACHE_MIB=2048"));
+        assert!(has("--label", "carafe.gpu-cache-mib=2048"));
+        assert!(has("-e", "CARAFE_LAB_CONSOLE_MEMORY=1"));
+        assert!(has("--label", "carafe.memory-profile=console-4g"));
+        assert!(has("--memory", "6g"));
+        assert!(has("--memory-swap", "6g"));
+        assert!(has("--cpus", "4"));
+    }
+
+    #[test]
     fn eden_is_set_up_like_the_console() {
-        let config = qt_config(Gpu::Wsl, EdenCpu::Dynarmic, &BTreeMap::new());
+        let extra = BTreeMap::from([("Core/memory_layout_mode".to_owned(), "2".to_owned())]);
+        let config = qt_config(Gpu::Wsl, EdenCpu::Dynarmic, &extra);
         assert!(config.contains("[Core]\nuse_multi_core\\default=false\nuse_multi_core=true\n"));
         assert!(config.contains("\nmemory_layout_mode=0\n"));
         assert!(config.contains("[System]\nuse_docked_mode\\default=false\nuse_docked_mode=0\n"));

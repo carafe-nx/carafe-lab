@@ -23,6 +23,8 @@ pub enum Probe {
     Gl,
     /// Switches DirectDraw to 1024×768 full screen and logs the mouse moves in its window.
     Screen,
+    #[doc = "Reports memory limits and exercises bounded touched allocations."]
+    Memory,
 }
 
 impl Probe {
@@ -37,6 +39,7 @@ impl Probe {
             Self::D3d12 => "d3d12",
             Self::Gl => "gl",
             Self::Screen => "screen",
+            Self::Memory => "memory",
         }
     }
 }
@@ -177,6 +180,44 @@ fn arch_name(arch: Arch) -> &'static str {
     }
 }
 
+#[doc = "Returns bounded memory allocation probes for both Windows address widths."]
+#[must_use]
+pub fn memory_runs(first_frame_timeout: u32) -> Vec<ProbeRun> {
+    [Arch::X86, Arch::X64]
+        .into_iter()
+        .map(|arch| ProbeRun {
+            name: format!("probe-memory-{}", arch_name(arch)),
+            probe: Probe::Memory,
+            arch,
+            settings: AutorunSettings::default(),
+            label: format!("memory limits and 256 MiB touched · {}", arch_name(arch)),
+            scenario: Scenario {
+                steps: vec![
+                    crate::scenario::Step::Launch,
+                    crate::scenario::Step::WaitFor {
+                        milestone: crate::scenario::Milestone::FirstFrame,
+                        timeout: first_frame_timeout,
+                    },
+                    crate::scenario::Step::ExpectFile {
+                        name: "probe-memory.log".to_owned(),
+                        contains: vec!["completed valid=1 chunks=16 bytes=268435456".to_owned()],
+                        absent: vec![
+                            "data mismatch".to_owned(),
+                            "release failed".to_owned(),
+                            "memory status failed".to_owned(),
+                        ],
+                        timeout: None,
+                    },
+                    crate::scenario::Step::Screenshot {
+                        name: "memory".to_owned(),
+                    },
+                    crate::scenario::Step::Close { timeout: 30 },
+                ],
+            },
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +249,7 @@ mod tests {
             .into_iter()
             .chain(input_runs(600))
             .chain(screen_runs(600))
+            .chain(memory_runs(600))
             .map(|run| run.name)
             .collect();
         let count = names.len();
