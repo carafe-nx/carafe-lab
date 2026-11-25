@@ -148,7 +148,8 @@ save data is still there, close it.
   probe finished.
 - `expectFile` — `name`, `contains`, `absent`: a file the game wrote, found by name in its save data or logs, such as a
   probe's log or the registry's `user.reg`, holds every text of `contains` and none of `absent`. It is read again for up
-  to 30 s until it fits; the launch's logs keep it as `file-<name>`.
+  to 30 s until it fits; an optional positive `timeout` sets another deadline in seconds. The launch's logs keep it
+  as `file-<name>`.
 - `expectSave` — the game has written save data; remembered for `expectSaveKept`.
 - `expectSaveKept` — every remembered save file is still there; files the game rewrote count as kept.
 - `expectPerformance` — the first launch's time to the first frame and median FPS against the game at the newest

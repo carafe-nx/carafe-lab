@@ -116,6 +116,10 @@ pub enum Step {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         #[ts(as = "Option<Vec<String>>", optional)]
         absent: Vec<String>,
+        #[doc = "Maximum wait in seconds; omitted values use thirty seconds."]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        timeout: Option<u32>,
     },
     /// Checks that the game has written its save data and remembers it for [`Step::ExpectSaveKept`].
     ExpectSave,
@@ -412,7 +416,13 @@ fn check_steps<'a>(
                     name,
                     contains,
                     absent,
+                    timeout,
                 } => {
+                    if *timeout == Some(0) {
+                        return Err(ScenarioError::Format(format!(
+                            "step {number} checks a file with a zero timeout"
+                        )));
+                    }
                     if name.trim().is_empty() || (contains.is_empty() && absent.is_empty()) {
                         return Err(ScenarioError::Format(format!(
                             "step {number} checks a file without a name or without texts"
@@ -792,6 +802,7 @@ mod tests {
                 name: "probe-registry.log".to_owned(),
                 contains: vec!["dword 1280".to_owned()],
                 absent: vec!["value HKCU\\Old".to_owned()],
+                timeout: None,
             }
         );
         let nameless = r#"{"steps": [{"step": "expectFile", "name": " ", "contains": ["x"]}]}"#;
@@ -802,6 +813,24 @@ mod tests {
         let empty = r#"{"steps": [{"step": "expectFile", "name": "a.log"}]}"#;
         assert!(matches!(
             Scenario::parse(empty),
+            Err(ScenarioError::Format(_))
+        ));
+    }
+
+    #[test]
+    fn file_checks_accept_an_explicit_positive_timeout() {
+        let json = r#"{"steps":[{"step":"expectFile","name":"probe.log","contains":["completed"],"timeout":120}]}"#;
+        let scenario = Scenario::parse(json).unwrap();
+        assert!(matches!(
+            scenario.steps[0],
+            Step::ExpectFile {
+                timeout: Some(120),
+                ..
+            }
+        ));
+        let invalid = json.replace("120", "0");
+        assert!(matches!(
+            Scenario::parse(&invalid),
             Err(ScenarioError::Format(_))
         ));
     }

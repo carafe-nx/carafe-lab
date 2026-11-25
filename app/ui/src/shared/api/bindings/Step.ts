@@ -78,7 +78,11 @@ contains: Array<string>,
 /**
  * Texts the file must not have.
  */
-absent?: Array<string>, } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
+absent?: Array<string>, 
+/**
+ *Maximum wait in seconds; omitted values use thirty seconds.
+ */
+timeout?: number, } | { "step": "expectSave" } | { "step": "expectSaveKept" } | { "step": "expectPerformance", 
 /**
  * The percentage the game may get worse by; `None` takes the game's threshold from `lab.json`.
  */

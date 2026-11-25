@@ -738,7 +738,8 @@ impl<'a> Runner<'a> {
                 name,
                 contains,
                 absent,
-            } => self.expect_file(step, name, contains, absent),
+                timeout,
+            } => self.expect_file(step, name, contains, absent, *timeout),
             Step::RandomPresses { seconds, seed } => self.random_presses(step, *seconds, *seed),
             Step::Close { timeout } => self.close(step, *timeout),
             Step::Repeat { .. } | Step::IfScreen { .. } => self.result(
@@ -848,7 +849,11 @@ impl<'a> Runner<'a> {
         name: &str,
         contains: &[String],
         absent: &[String],
+        timeout: Option<u32>,
     ) -> StepResult {
+        let timeout = timeout.map_or(FILE_SETTLE, |seconds| {
+            Duration::from_secs(u64::from(seconds))
+        });
         let started = self.clock.now();
         let mut text = self.emulator.find_file(self.title, name);
         let verdict = |text: &Option<String>| {
@@ -871,7 +876,7 @@ impl<'a> Runner<'a> {
                 .as_ref()
                 .is_some_and(|(missing, present)| missing.is_empty() && present.is_empty())
         };
-        while !fits(&verdict(&text)) && self.clock.now() - started < FILE_SETTLE {
+        while !fits(&verdict(&text)) && self.clock.now() - started < timeout {
             self.clock.sleep(POLL);
             text = self.emulator.find_file(self.title, name);
         }
@@ -2172,6 +2177,23 @@ mod tests {
 
     fn run(emulator: FakeEmulator, scenario: &Scenario) -> (ScenarioResult, FakeEmulator) {
         run_against(emulator, scenario, None)
+    }
+
+    #[test]
+    fn missing_file_checks_observe_the_default_and_explicit_deadlines() {
+        for (timeout, expected) in [(None, 30.0), (Some(60), 60.0)] {
+            let scenario = Scenario {
+                steps: vec![Step::ExpectFile {
+                    name: "missing.log".to_owned(),
+                    contains: vec!["completed".to_owned()],
+                    absent: Vec::new(),
+                    timeout,
+                }],
+            };
+            let (result, _) = run(FakeEmulator::default(), &scenario);
+            assert_eq!(result.steps[0].outcome, Outcome::Fail);
+            assert!((result.steps[0].at - expected).abs() < 0.01);
+        }
     }
 
     fn run_against(

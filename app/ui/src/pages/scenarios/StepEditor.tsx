@@ -453,6 +453,9 @@ function Params({ step, id, shots, onChange }: { step: Step; id: string; shots: 
     case "expectFile":
       return (
         <>
+          <label htmlFor={`${id}-timeout`}>{t("scenarios.upTo")}</label>
+          <NumberInput id={`${id}-timeout`} value={step.timeout ?? 30} onChange={(timeout) => onChange({ ...step, timeout })} />
+          <span>{t("scenarios.sec")}</span>
           <input
             id={`${id}-name`}
             aria-label={t("steps.fileName")}
